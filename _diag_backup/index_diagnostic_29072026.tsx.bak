@@ -1,0 +1,9 @@
+// DIAGNOSTYKA TYMCZASOWA (29.07.2026) — tymczasowy app/index.tsx,
+// przekierowuje "/" na "/mecz", idiomatyczny wzorzec Expo Router (Redirect
+// jako zawartość LEAF route, nie jako cała treść _layout.tsx). Usunąć po
+// zakończeniu bisekcji.
+import { Redirect } from 'expo-router';
+
+export default function DiagnosticIndex() {
+  return <Redirect href="/mecz" />;
+}

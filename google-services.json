@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "804871635177",
+    "project_id": "gamechange-asystent",
+    "storage_bucket": "gamechange-asystent.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:804871635177:android:d568b17353f4bbb2d6f078",
+        "android_client_info": {
+          "package_name": "com.gamechange.asystent"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAmOZODBDi_E_A9xbzjMZBmM1jlyK7ZUmk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

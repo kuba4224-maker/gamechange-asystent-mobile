@@ -1,0 +1,462 @@
+// Ekran KALENDARZ — Krok 8 checklisty. Implementacja wg
+// docs/KONTRAKT_KALENDARZ.md (spisanego z panel-kalendarz w asystent_app.html).
+//
+// ⚠️ Sekcja "Sugerowane na ten tydzień" (computeCalendarSuggestion niżej) jest
+// opisana w Project Knowledge, ale NIE była potwierdzona jako obecna na
+// produkcji/GitHub main w chwili audytu wcześniej w tej sesji (patrz
+// claude/BACKUP_asystent_app_html_2026-07-27_przed_migracja_mobilna.md).
+// Wdrożona tu 1:1 zgodnie z Project Knowledge — jeśli produkcja jej nie ma,
+// to znana, już zgłoszona rozbieżność, nie błąd tej migracji.
+// AUDYT 27.07.2026: `useEffect` -> `useFocusEffect` + `RefreshControl` — patrz
+// uzasadnienie w app/(tabs)/dziennik.tsx (ten sam powód: ekran nie
+// odmontowuje się przy przełączaniu zakładek, np. po zalogowaniu wpisu w
+// Dzienniku i powrocie tu, badge "Wykonano/Nie wykonano" musi się odświeżyć).
+//
+// DOMKNIĘCIE LUKI 28.07.2026 (znalezionej w Domenie 09 SQL i opisanej w
+// docs/KROK_4_PUSH_POWIADOMIENIA.md, założenie 3): `calendar_events`
+// dopuszcza `event_type='match'` w bazie od Domeny 09 (dodane właśnie pod
+// rytm powiadomień pre_match), ale ŻADEN frontend — ani web, ani ten ekran
+// — nie dawał zawodnikowi sposobu na faktyczne zaplanowanie nadchodzącego
+// meczu. Bez tego rytm pre_match (kod gotowy w cron-send-notifications.js)
+// nigdy nie miał żadnych wierszy do obsłużenia. Naprawa: 'match' dodany do
+// EVENT_TYPE_LABELS niżej — to WYŁĄCZNIE zaplanowanie nadchodzącego meczu
+// (tytuł/data/notatka, jak każde inne wydarzenie), coś innego niż zakładka
+// Mecz (tam zawodnik loguje WYNIK już rozegranego meczu, osobna tabela
+// match_contexts) — nie miesza się z tamtą logiką.
+import { useState, useCallback } from 'react';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { Picker } from '@react-native-picker/picker';
+import Checkbox from 'expo-checkbox';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../lib/auth-context';
+import { toLocalDateStr, DAYS_OF_WEEK, DAY_LABELS_PL, getCurrentWeekDayList } from '../../lib/date-utils';
+import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  club_training: 'Trening klubowy', own_training: 'Trening własny',
+  micro_session: 'Mikro-sesja', task: 'Zadanie', match: 'Mecz',
+};
+
+const SEG_LABELS: Record<string, string> = Object.fromEntries([
+  ['moc', 'Moc'], ['wytrzymalosc', 'Wytrzymałość'], ['fizycznosc', 'Fizyczność'],
+  ['techFund', 'Technika Fundamentalna'], ['techSpec', 'Technika Specjalistyczna'],
+  ['tolerancja', 'Tolerancja (Obciążeń)'], ['regeneracja', 'Regeneracja'], ['odpornosc', 'Odporność'], ['odzywianie', 'Odżywienie'],
+  ['koncentracja', 'Koncentracja'], ['mental', 'Stan Mentalny'],
+  ['percepcja', 'Percepcja'], ['decyzja', 'Szybkość Decyzji'],
+]);
+
+// Treść 1:1 z asystent_app.html — patrz KONTRAKT_KALENDARZ.md sekcja 5.
+const SUGGESTED_ACTIVITY_BY_SEGMENT: Record<string, string> = {
+  percepcja: 'małe gry i sytuacje meczowe (3v3, przewaga/niedobór) — 15 minut',
+  decyzja: 'ćwiczenia z presją czasu i decyzją pod obciążeniem — 15 minut',
+  koncentracja: 'krótka sesja uważności albo ćwiczenie na powrót po błędzie — 10 minut',
+  mental: 'wizualizacja trudnych sytuacji meczowych i planowanie reakcji — 10 minut',
+  moc: 'krótki blok skoków/sprintów eksplozywnych — 15 minut',
+  wytrzymalosc: 'interwały tlenowe średniej intensywności — 20 minut',
+  fizycznosc: 'ćwiczenia zwinności i zmiany kierunku — 15 minut',
+  techFund: 'żonglerka i prowadzenie piłki w ograniczonej przestrzeni — 15 minut',
+  techSpec: 'dryblingi 1v1 na sucho lub z pasywnym obrońcą — 15 minut',
+  regeneracja: 'rozciąganie i wcześniejsze położenie się spać — 15 minut',
+  odpornosc: 'lekki trening uzupełniający + dbałość o sen — 10 minut',
+  odzywianie: 'przygotowanie posiłku przedtreningowego na następny dzień — 15 minut',
+  tolerancja: 'praca nad mobilnością i stabilizacją stawów — 15 minut',
+};
+
+type Goal = { id: number; segment_id: string; status: string; is_priority: boolean; refinement_note: string | null };
+type CalEvent = {
+  id: number; title: string; notes: string | null; event_type: string; status: string;
+  scheduled_date: string | null; recurrence_rule: string | null; goal_id: number | null;
+};
+
+function formatRecurrence(rule: string) {
+  const m = /^weekly:(.+)$/.exec(rule);
+  if (!m) return rule;
+  return 'Co tydzień: ' + m[1].split(',').map((d) => DAY_LABELS_PL[d] || d).join(', ');
+}
+
+export default function KalendarzScreen() {
+  const { currentUser } = useAuth();
+
+  const [eventType, setEventType] = useState('club_training');
+  const [title, setTitle] = useState('');
+  const [notes, setNotes] = useState('');
+  const [frequency, setFrequency] = useState<'once' | 'recurring'>('once');
+  const [date, setDate] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
+  const [goalId, setGoalId] = useState('');
+
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [events, setEvents] = useState<CalEvent[]>([]);
+  const [loggedEventIds, setLoggedEventIds] = useState<Set<number>>(new Set());
+  const [showCancelled, setShowCancelled] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadGoals = useCallback(async () => {
+    if (!currentUser) return [] as Goal[];
+    const { data } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('is_priority', { ascending: false })
+      .order('created_at', { ascending: false });
+    const rows = (data ?? []) as Goal[];
+    setGoals(rows);
+    return rows;
+  }, [currentUser]);
+
+  const loadEvents = useCallback(async () => {
+    if (!currentUser) return;
+    await loadGoals();
+
+    const { data: eventRows, error: err } = await supabase
+      .from('calendar_events')
+      .select('*')
+      .eq('user_id', currentUser.id);
+    if (err) return; // load* nie pokazuje banera błędu — konwencja z web
+    setEvents((eventRows ?? []) as CalEvent[]);
+
+    const { data: logRows } = await supabase
+      .from('daily_logs')
+      .select('calendar_event_id')
+      .eq('user_id', currentUser.id)
+      .not('calendar_event_id', 'is', null);
+    setLoggedEventIds(new Set((logRows ?? []).map((l: any) => l.calendar_event_id)));
+  }, [currentUser, loadGoals]);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  useFocusEffect(useCallback(() => { loadEvents(); }, [loadEvents]));
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadEvents();
+    setRefreshing(false);
+  }, [loadEvents]);
+
+  const activeGoals = goals.filter((g) => g.status === 'active');
+
+  const todayStr = toLocalDateStr(new Date());
+  const recurring = events.filter((e) => e.status === 'scheduled' && e.recurrence_rule);
+  const upcoming = events
+    .filter((e) => e.status === 'scheduled' && e.scheduled_date)
+    .sort((a, b) => (a.scheduled_date! < b.scheduled_date! ? -1 : a.scheduled_date! > b.scheduled_date! ? 1 : 0));
+  const cancelled = events.filter((e) => e.status === 'cancelled');
+
+  // Sugestia Kalendarza — patrz KONTRAKT_KALENDARZ.md sekcja 5.
+  function computeCalendarSuggestion() {
+    const activeGoal = goals.find((g) => g.is_priority && g.status === 'active');
+    if (!activeGoal) return null;
+    const activity = SUGGESTED_ACTIVITY_BY_SEGMENT[activeGoal.segment_id];
+    if (!activity) return null;
+
+    const weekDays = getCurrentWeekDayList().filter((d) => d.dateStr >= todayStr);
+    if (weekDays.length === 0) return null;
+
+    const busyDates = new Set(events.filter((e) => e.status === 'scheduled' && e.scheduled_date).map((e) => e.scheduled_date as string));
+    const busyDayCodes = new Set<string>();
+    events
+      .filter((e) => e.status === 'scheduled' && e.recurrence_rule)
+      .forEach((e) => e.recurrence_rule!.replace('weekly:', '').split(',').forEach((code) => busyDayCodes.add(code)));
+
+    const freeDay = weekDays.find((d) => !busyDates.has(d.dateStr) && !busyDayCodes.has(d.dayCode));
+    if (!freeDay) return null;
+
+    const alreadyPlanned = events.some((e) =>
+      e.status === 'scheduled' && e.goal_id === activeGoal.id && e.event_type === 'micro_session' &&
+      ((e.scheduled_date && busyDates.has(e.scheduled_date)) || e.recurrence_rule)
+    );
+    if (alreadyPlanned) return null;
+
+    return { goal: activeGoal, segmentName: SEG_LABELS[activeGoal.segment_id] || activeGoal.segment_id, activity, day: freeDay };
+  }
+
+  const suggestion = computeCalendarSuggestion();
+
+  async function acceptCalendarSuggestion() {
+    if (!currentUser || !suggestion) return;
+    const { error: insErr } = await supabase.from('calendar_events').insert({
+      user_id: currentUser.id,
+      event_type: 'micro_session',
+      source: 'system',
+      title: `Sugerowane: ${suggestion.segmentName}`,
+      notes: suggestion.activity,
+      status: 'scheduled',
+      scheduled_date: suggestion.day.dateStr,
+      goal_id: suggestion.goal.id,
+    });
+    if (insErr) {
+      setError('Nie udało się dodać sugerowanej aktywności: ' + insErr.message);
+      return;
+    }
+    await loadEvents();
+  }
+
+  const resetForm = () => {
+    setTitle(''); setNotes(''); setDate(null); setSelectedDays(new Set()); setGoalId('');
+  };
+
+  const toggleDay = (code: string) => {
+    setSelectedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code); else next.add(code);
+      return next;
+    });
+  };
+
+  async function createCalendarEvent() {
+    if (!currentUser) return;
+    setError(null); setOk(null);
+
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) { setError('Podaj tytuł wydarzenia.'); return; }
+
+    const body: Record<string, any> = {
+      user_id: currentUser.id,
+      event_type: eventType,
+      source: 'player',
+      title: trimmedTitle,
+      status: 'scheduled',
+    };
+    if (notes.trim()) body.notes = notes.trim();
+    if (goalId) body.goal_id = Number(goalId);
+
+    // chk_recurrence_xor_date: dokładnie jedno z dwóch, nigdy oba naraz.
+    if (frequency === 'once') {
+      if (!date) { setError('Podaj datę.'); return; }
+      body.scheduled_date = toLocalDateStr(date);
+    } else {
+      if (selectedDays.size === 0) { setError('Zaznacz przynajmniej jeden dzień tygodnia.'); return; }
+      body.recurrence_rule = 'weekly:' + Array.from(selectedDays).join(',');
+    }
+
+    setSaving(true);
+    try {
+      const { error: insErr } = await supabase.from('calendar_events').insert(body);
+      if (insErr) throw insErr;
+      setOk('Dodano do kalendarza.');
+      resetForm();
+      await loadEvents();
+    } catch (e: any) {
+      setError('Nie udało się dodać wydarzenia: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function cancelEvent(id: number) {
+    setError(null);
+    const { error: err } = await supabase.from('calendar_events').update({ status: 'cancelled' }).eq('id', id);
+    if (err) { setError('Nie udało się anulować wydarzenia: ' + err.message); return; }
+    await loadEvents();
+  }
+
+  function renderEventCard(e: CalEvent) {
+    const typeLabel = EVENT_TYPE_LABELS[e.event_type] || e.event_type;
+    const goal = e.goal_id ? goals.find((g) => g.id === e.goal_id) : null;
+
+    const badges: string[] = [];
+    if (e.status === 'cancelled') badges.push('Anulowane');
+    if (e.status === 'scheduled' && e.scheduled_date && e.scheduled_date <= todayStr) {
+      badges.push(loggedEventIds.has(e.id) ? 'Wykonano' : 'Nie wykonano');
+    }
+
+    const meta: string[] = [];
+    if (e.scheduled_date) {
+      meta.push(new Date(e.scheduled_date + 'T00:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short', weekday: 'short' }));
+    }
+    if (e.recurrence_rule) meta.push(formatRecurrence(e.recurrence_rule));
+    if (goal) meta.push('cel: ' + (SEG_LABELS[goal.segment_id] || goal.segment_id));
+
+    return (
+      <View key={e.id} style={styles.card}>
+        <View style={styles.cardTop}>
+          <Text style={styles.cardTitle}>{e.title}</Text>
+          {badges.map((b, i) => (
+            <Text key={i} style={[styles.badge, b === 'Nie wykonano' ? styles.badgePriority : b === 'Wykonano' ? styles.badgeCompleted : styles.badgeMuted]}>{b}</Text>
+          ))}
+        </View>
+        <Text style={styles.cardSubtitle}>{typeLabel}</Text>
+        {e.notes ? <Text style={styles.cardNote}>{e.notes}</Text> : null}
+        <Text style={styles.cardMeta}>{meta.join(' · ')}</Text>
+        {e.status === 'scheduled' && (
+          <View style={styles.actionsRow}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => cancelEvent(e.id)}>
+              <Text style={styles.secondaryBtnText}>Anuluj</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView
+      contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
+    >
+      <Text style={styles.title}>Kalendarz treningowy</Text>
+
+      {error && <Text style={styles.error}>{error}</Text>}
+      {ok && <Text style={styles.ok}>{ok}</Text>}
+
+      {suggestion && (
+        <View style={[styles.block, styles.suggestionBlock]}>
+          <Text style={styles.sectionLabel}>Sugerowane na ten tydzień</Text>
+          <Text style={styles.suggestionText}><Text style={{ fontWeight: '700' }}>{suggestion.segmentName}</Text> — {suggestion.activity}</Text>
+          <Text style={styles.suggestionHint}>Masz wolny {suggestion.day.label} — dodać tam mikro-sesję powiązaną z Twoim aktywnym celem?</Text>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={acceptCalendarSuggestion}>
+            <Text style={styles.secondaryBtnText}>Dodaj</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={styles.block}>
+        <Text style={styles.label}>Rodzaj</Text>
+        <View style={styles.pickerWrap}>
+          <Picker selectedValue={eventType} onValueChange={setEventType}>
+            {Object.entries(EVENT_TYPE_LABELS).map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
+          </Picker>
+        </View>
+
+        <Text style={styles.label}>Tytuł</Text>
+        <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} value={title} onChangeText={setTitle} placeholder="np. Trening siłowy" />
+
+        <Text style={styles.label}>Notatka (opcjonalnie)</Text>
+        <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={notes} onChangeText={setNotes} multiline placeholder="Dodatkowe informacje" />
+
+        <View style={styles.toggle}>
+          <TouchableOpacity style={[styles.toggleBtn, frequency === 'once' && styles.toggleBtnActive]} onPress={() => setFrequency('once')}>
+            <Text style={[styles.toggleTxt, frequency === 'once' && styles.toggleTxtActive]}>Jednorazowe</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.toggleBtn, frequency === 'recurring' && styles.toggleBtnActive]} onPress={() => setFrequency('recurring')}>
+            <Text style={[styles.toggleTxt, frequency === 'recurring' && styles.toggleTxtActive]}>Cykliczne</Text>
+          </TouchableOpacity>
+        </View>
+
+        {frequency === 'once' ? (
+          <>
+            <Text style={styles.label}>Data</Text>
+            <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
+              <Text style={{ color: date ? colors.textPrimary : colors.textSecondary }}>
+                {date ? date.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Wybierz datę'}
+              </Text>
+            </TouchableOpacity>
+            {showDatePicker && (
+              <DateTimePicker
+                value={date ?? new Date()}
+                mode="date"
+                onChange={(_event, selected) => {
+                  setShowDatePicker(false);
+                  if (selected) setDate(selected);
+                }}
+              />
+            )}
+          </>
+        ) : (
+          <>
+            <Text style={styles.label}>Dni tygodnia</Text>
+            <View style={styles.daysRow}>
+              {DAYS_OF_WEEK.map(([code, label]) => (
+                <TouchableOpacity key={code} style={styles.dayCheck} onPress={() => toggleDay(code)}>
+                  <Checkbox value={selectedDays.has(code)} onValueChange={() => toggleDay(code)} />
+                  <Text style={styles.dayCheckLabel}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+
+        <Text style={styles.label}>Powiąż z celem (opcjonalnie)</Text>
+        <View style={styles.pickerWrap}>
+          <Picker selectedValue={goalId} onValueChange={setGoalId}>
+            <Picker.Item label="— nie dotyczy —" value="" />
+            {activeGoals.map((g) => (
+              <Picker.Item
+                key={g.id}
+                label={(SEG_LABELS[g.segment_id] || g.segment_id) + (g.refinement_note ? ' — ' + g.refinement_note : '')}
+                value={String(g.id)}
+              />
+            ))}
+          </Picker>
+        </View>
+
+        <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={createCalendarEvent}>
+          <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Dodaj do kalendarza'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={{ marginTop: 24 }}>
+        <Text style={styles.sectionLabel}>Cykliczne</Text>
+        {recurring.length === 0 && <Text style={styles.empty}>Brak cyklicznych wpisów.</Text>}
+        {recurring.map(renderEventCard)}
+      </View>
+
+      <View style={{ marginTop: 20 }}>
+        <Text style={styles.sectionLabel}>Nadchodzące</Text>
+        {upcoming.length === 0 && <Text style={styles.empty}>Brak zaplanowanych wydarzeń.</Text>}
+        {upcoming.map(renderEventCard)}
+      </View>
+
+      <View style={{ marginTop: 20 }}>
+        <TouchableOpacity onPress={() => setShowCancelled((v) => !v)}>
+          <Text style={styles.sectionLabel}>{showCancelled ? '▾' : '▸'} Anulowane</Text>
+        </TouchableOpacity>
+        {showCancelled && (
+          cancelled.length === 0
+            ? <Text style={styles.empty}>Brak anulowanych wpisów.</Text>
+            : cancelled.map(renderEventCard)
+        )}
+      </View>
+    </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 4 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 12 },
+  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary, minHeight: minTouchHeight, justifyContent: 'center' },
+  textarea: { minHeight: 72, textAlignVertical: 'top' },
+  pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: 8 },
+  block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 16, marginBottom: 20 },
+  suggestionBlock: { borderLeftWidth: 3, borderLeftColor: colors.brand },
+  suggestionText: { fontSize: 15, marginBottom: 6, color: colors.textPrimary },
+  suggestionHint: { fontSize: 13, color: colors.textSecondary, marginBottom: 14 },
+  toggle: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  toggleBtn: { flex: 1, minHeight: minTouchHeight, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, alignItems: 'center' },
+  toggleBtnActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  toggleTxt: { ...typography.bodyMedium, fontSize: 14, color: colors.textPrimary },
+  toggleTxtActive: { color: colors.white },
+  daysRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 12 },
+  dayCheck: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  dayCheckLabel: { fontSize: 13, color: colors.textPrimary },
+  btn: { minHeight: minTouchHeight, justifyContent: 'center', borderRadius: radii.md, backgroundColor: colors.brand, alignItems: 'center', marginTop: 8 },
+  btnDisabled: { opacity: 0.4 },
+  btnText: { ...typography.bodySemiBold, color: colors.white, fontSize: 15, letterSpacing: 0.5 },
+  error: { color: colors.error, fontSize: 13, marginBottom: 12 },
+  ok: { color: colors.success, fontSize: 13, marginBottom: 12 },
+  empty: { textAlign: 'center', padding: 24, color: colors.textSecondary, fontSize: 14 },
+  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 14, marginBottom: 10 },
+  cardTop: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 2 },
+  cardTitle: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
+  cardSubtitle: { fontSize: 11, color: colors.textSecondary, marginBottom: 8 },
+  cardNote: { ...typography.body, fontSize: 13, color: colors.textPrimary, marginBottom: 8 },
+  cardMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 10 },
+  badge: { fontSize: 11, letterSpacing: 0.5, marginLeft: 8, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
+  badgePriority: { backgroundColor: 'rgba(240,149,75,0.15)', color: colors.warning },
+  badgeCompleted: { backgroundColor: 'rgba(76,175,107,0.15)', color: colors.success },
+  badgeMuted: { backgroundColor: colors.surfaceElevated, color: colors.textSecondary },
+  actionsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  secondaryBtn: { paddingVertical: 10, paddingHorizontal: 18, minHeight: minTouchHeight, justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, alignSelf: 'flex-start' },
+  secondaryBtnText: { ...typography.bodyMedium, fontSize: 13, color: colors.textPrimary, letterSpacing: 0.5 },
+});

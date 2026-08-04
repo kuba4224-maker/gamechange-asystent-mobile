@@ -1,0 +1,23 @@
+// ROOT INDEX (29.07.2026) — Expo Router wymaga jawnej trasy dla "/", inaczej
+// nie wie, gdzie skierować po starcie (grupa "(tabs)" sama w sobie nie jest
+// trasą dla "/"). Przy braku tego pliku appka wisi na natywnym splash
+// screenie (biały ekran + ikona appki na środku, appka nigdy nie rusza
+// dalej) przy pełnym _layout.tsx z zarządzaniem splash screenem/fontami —
+// znaleziono i potwierdzono przez bisekcję 29.07.2026 (patrz
+// claude/SESJA_29_07_2026_MECZ_WDROZENIE_STATUS.md).
+//
+// AUDYT 27.07.2026 usunął wcześniejszy plik index.tsx jako "zapomniany" i
+// powiązany z obsługą starego deep linku po magic linku — słusznie usunął
+// TĘ starą logikę, ale nie zostawił w zamian prostego przekierowania do
+// domyślnej zakładki, co przez jakiś czas nie ujawniało się (deep link
+// przy starcie czasem trafiał gdzie indziej), aż ujawniło się dziś jako
+// realny problem z ładowaniem appki.
+//
+// Domyślna zakładka po zalogowaniu to Dziennik — pierwsza w kolejności wg
+// app/(tabs)/_layout.tsx (Dziennik, Cele, Centrum Decyzji, Kalendarz,
+// Profil, Diagnoza, Mecz), zgodnie z nawigacją w asystent_app.html.
+import { Redirect } from 'expo-router';
+
+export default function Index() {
+  return <Redirect href="/dziennik" />;
+}
