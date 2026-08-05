@@ -51,6 +51,21 @@
 // (ten sam wzorzec co reszta tokenów w projekcie, np. session_bridge_codes)
 // — do potwierdzenia przy pierwszym realnym teście, patrz DO_ZROBIENIA_
 // PRZEZ_KUBE.md, Pakiet 9.
+//
+// KOD DRUŻYNY W APPCE MOBILNEJ (05.08.2026 — na wyraźną prośbę Kuby:
+// "pracujmy tylko na appce mobilnej", w kontekście pilotażu Parasol
+// Wrocław U12). Wcześniej pole "kod drużyny" (K3) istniało WYŁĄCZNIE w
+// wersji webowej (asystent_app.html, ekran logowania) — appka mobilna nie
+// miała żadnego odpowiednika, co odkryła sesja przygotowująca wdrożenie
+// (patrz claude/PLAN_WDROZENIA_PARASOL_WROCLAW_U12.md). Blok niżej woła
+// DOKŁADNIE tę samą, już istniejącą i przetestowaną funkcję SQL
+// (join_team_with_code, patrz claude/INTEGRACJA_K3_ZAWODNIK_SQL.md) —
+// zero nowego SQL, wyłącznie nowe wywołanie RPC z appki mobilnej. Ten sam
+// wzorzec formularza co Raport dla rodzica wyżej: NIEZALEŻNY od zapisu
+// etapu, własny stan, własny handler. Funkcja SQL ma wbudowany bezpieczny
+// no-op, jeśli zawodnik już jest w aktywnej drużynie — więc ponowne
+// kliknięcie nie szkodzi (w przeciwieństwie do Raportu dla rodzica, gdzie
+// każdy zapis tworzy nowy wiersz, tu backend sam pilnuje duplikatów).
 import { useEffect, useState, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -156,6 +171,12 @@ export default function ProfilScreen() {
   // sam wzorzec co Wzrost tuż wyżej — patrz komentarz na górze pliku.
   const [parentEmailInput, setParentEmailInput] = useState('');
   const [savingParentEmail, setSavingParentEmail] = useState(false);
+
+  // Sekcja 2d — Kod drużyny (05.08.2026). RPC join_team_with_code, formularz
+  // NIEZALEŻNY od zapisu etapu, ten sam wzorzec co Raport dla rodzica wyżej
+  // — patrz komentarz na górze pliku.
+  const [teamCodeInput, setTeamCodeInput] = useState('');
+  const [savingTeamCode, setSavingTeamCode] = useState(false);
 
   // Sekcja 3
   const [goalDirection, setGoalDirection] = useState('');
@@ -416,6 +437,35 @@ export default function ProfilScreen() {
     }
   };
 
+  // 05.08.2026 — woła istniejącą, już przetestowaną funkcję SQL
+  // join_team_with_code(p_team_code). Walidacja "niepuste" — reszta reguł
+  // (kod nieprawidłowy, już w drużynie, itd.) obsłużona po stronie funkcji,
+  // która zwraca jsonb {ok: boolean, error?: string, club_name?: string}.
+  const joinTeamWithCode = async () => {
+    if (!currentUser) return;
+    setProfileError(null);
+    setProfileOk(null);
+    const code = teamCodeInput.trim();
+    if (!code) {
+      setProfileError('Podaj kod drużyny.');
+      return;
+    }
+    setSavingTeamCode(true);
+    try {
+      const { data, error } = await supabase.rpc('join_team_with_code', { p_team_code: code });
+      if (error) throw error;
+      if (!data?.ok) {
+        throw new Error(data?.error ?? 'Sprawdź, czy kod drużyny jest poprawny.');
+      }
+      setTeamCodeInput('');
+      setProfileOk(data.club_name ? `Dołączono do drużyny „${data.club_name}”.` : 'Dołączono do drużyny.');
+    } catch (e: any) {
+      setProfileError('Nie udało się dołączyć do drużyny: ' + e.message);
+    } finally {
+      setSavingTeamCode(false);
+    }
+  };
+
   const addInjuryHistory = async () => {
     if (!currentUser) return;
     setProfileError(null);
@@ -534,6 +584,28 @@ export default function ProfilScreen() {
               onPress={addParentReportSubscription}
             >
               <Text style={styles.btnSecondaryText}>{savingParentEmail ? 'Zapisuję...' : 'Zapisz e-mail rodzica'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Kod drużyny — 05.08.2026, patrz komentarz na górze pliku. Ten sam
+              wzorzec formularza co Raport dla rodzica wyżej. */}
+          <View style={styles.block}>
+            <Text style={styles.blockLabel}>Kod drużyny</Text>
+            <Text style={styles.hint}>
+              Masz kod drużyny od trenera? Wpisz go tutaj, żeby dołączyć — odblokowuje
+              dłuższy okres próbny dopasowany do całej drużyny.
+            </Text>
+            <Text style={styles.label}>Kod drużyny</Text>
+            <TextInput
+              style={styles.input} placeholderTextColor={colors.textSecondary} value={teamCodeInput} onChangeText={setTeamCodeInput}
+              autoCapitalize="characters" placeholder="np. PARASOLW3283"
+            />
+            <TouchableOpacity
+              style={[styles.btnSecondary, savingTeamCode && styles.btnDisabled]}
+              disabled={savingTeamCode}
+              onPress={joinTeamWithCode}
+            >
+              <Text style={styles.btnSecondaryText}>{savingTeamCode ? 'Dołączam...' : 'Dołącz do drużyny'}</Text>
             </TouchableOpacity>
           </View>
         </>
