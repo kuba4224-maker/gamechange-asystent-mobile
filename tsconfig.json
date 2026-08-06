@@ -11,5 +11,11 @@
   "include": [
     "**/*.ts",
     "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "_diag_backup",
+    "_MOZESZ_USUNAC_folder_diagnostyczny",
+    "_to_delete"
   ]
 }

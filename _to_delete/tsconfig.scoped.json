@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "include": [
-    "components/FocusBlockActiveView.tsx",
-    "components/FocusBlockPlanner.tsx",
-    "app/(tabs)/cele.tsx"
-  ]
-}
