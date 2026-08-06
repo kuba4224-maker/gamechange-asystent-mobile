@@ -75,8 +75,18 @@ const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreCl
 
 if (!isExpoGo) {
   Notifications.setNotificationHandler({
+    // NAPRAWA 06.08.2026: `expo-notifications` (dziś ~0.32.17) podzielił
+    // dawne `shouldShowAlert` na dwa osobne pola — `shouldShowBanner`
+    // (powiadomienie "na górze ekranu" gdy appka jest otwarta) i
+    // `shouldShowList` (obecność w centrum powiadomień systemu). Typ
+    // `NotificationBehavior` w tej wersji biblioteki WYMAGA obu — ich brak
+    // to błąd typów (znaleziony `npx tsc --noEmit`), nie zmiana logiki:
+    // oba ustawione na `true`, żeby zachować dokładnie to samo zachowanie,
+    // co dawne `shouldShowAlert: true` (widoczne w obu miejscach).
     handleNotification: async () => ({
       shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
       shouldPlaySound: false,
       shouldSetBadge: false,
     }),
