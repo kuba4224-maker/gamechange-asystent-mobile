@@ -20,6 +20,11 @@ export const colors = {
   brand: '#E8432D', // akcent marki — bez zmian, kolor marki
   success: '#4CAF6B', // rozjaśniony istniejący #2a7a3a
   warning: '#F0954B', // rozjaśniony istniejący #e08020
+  caution: '#E8C547', // NOWY 06.08.2026 — krok pośredni gradientu suwaków Dziennika
+  // (czerwony→pomarańczowy→żółty→zielony), patrz lib/scale-colors.ts. Ciepły
+  // żółty świadomie różny od `special` (#D4FF00, limonkowy) — `special` zostaje
+  // zarezerwowany dla "momentu specjalnego" (cel osiągnięty/streak), nie miesza
+  // się znaczeniowo z tym gradientem.
   error: '#D7263D', // celowo INNY ton niż akcent marki (rozróżnialność)
   special: '#D4FF00', // moment specjalny (cel osiągnięty, streak) — już w palecie
   border: 'rgba(154,148,136,0.15)', // obwódka kart zamiast cienia

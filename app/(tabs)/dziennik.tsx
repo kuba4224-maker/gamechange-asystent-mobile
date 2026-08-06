@@ -17,6 +17,9 @@ import { useAuth } from '../../lib/auth-context';
 import ScalePicker from '../../components/ScalePicker';
 import { toLocalDateStr } from '../../lib/date-utils';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+// DODANE 06.08.2026 — kolorowanie suwaków + wariant "bateria" dla energii,
+// patrz lib/scale-colors.ts dla pełnego uzasadnienia per funkcja.
+import { higherIsBetterColor, higherIsWorseColor, sleepHoursColor, neutralIntensityColor } from '../../lib/scale-colors';
 
 const BODY_LOCATIONS: [string, string][] = [
   ['kostka', 'Kostka'], ['kolano', 'Kolano'], ['udo_przednie', 'Udo przednie'],
@@ -34,6 +37,33 @@ const SESSION_TYPE_LABELS: Record<string, string> = {
   micro_session: 'Mikro-sesja', match: 'Mecz', other: 'Inne',
 };
 
+// NAPRAWA 05.08.2026: klawiatura decimal-pad na polskim locale (iOS/Android)
+// pokazuje przecinek jako separator dziesiętny, nie kropkę — Number("6,25")
+// to NaN. NaN wysłany do Supabase (JSON.stringify) zamienia się w jawny JSON
+// null zamiast brakującego klucza, co narusza CHECK chk_daily_logs_payload_ranges
+// w bazie (jsonb null to nie to samo co SQL NULL, więc "payload->'x' IS NULL"
+// nie łapie tego przypadku). Ta funkcja akceptuje oba separatory — dziś już
+// tylko dla "Czas trwania" (post-training); "Ile godzin spałeś?" od tej samej
+// daty niżej to suwak (ScalePicker), więc tam ten problem w ogóle nie może
+// wystąpić — wartość zawsze pochodzi z kontrolowanego zakresu (0-12h co 0.5,
+// zawężone z 0-24h na prośbę Kuby 06.08.2026, patrz niżej).
+function parseLocaleNumber(raw: string): number {
+  return Number(raw.trim().replace(',', '.'));
+}
+
+// DODANE 06.08.2026 — krótki opis słowny pod suwakiem "poranny poziom energii"
+// (wariant "bateria" w ScalePicker), dodatkowa warstwa intuicyjności obok
+// koloru. Progi zgrubnie odpowiadają propozycji Kuby z 05.08.2026 ("0-2
+// czerwony, 3-4 pomarańczowy, 5-6 żółty, 7+ zielony"), rozszerzonej o piąty,
+// najwyższy stopień.
+function describeEnergyLevel(energy: number): string {
+  if (energy <= 2) return 'Bardzo niski poziom energii';
+  if (energy <= 4) return 'Niski poziom energii';
+  if (energy <= 6) return 'Średni poziom energii';
+  if (energy <= 8) return 'Dobry poziom energii';
+  return 'Bardzo wysoki poziom energii';
+}
+
 type CalendarLinkOption = { id: number; label: string };
 type HistoryRow = {
   id: number; created_at: string; entry_type: 'morning' | 'post_training';
@@ -45,9 +75,21 @@ export default function DziennikScreen() {
   const [entryType, setEntryType] = useState<'morning' | 'post_training'>('morning');
 
   // Morning
-  const [sleepHours, setSleepHours] = useState('');
+  // ZMIANA 05.08.2026: było pole tekstowe (string) — zamienione na suwak
+  // (ScalePicker), więc stan trzyma teraz liczbę wprost, tak jak reszta pól
+  // 0-10 tego formularza (sleepQuality/morningEnergy/moodMotivation niżej).
+  const [sleepHours, setSleepHours] = useState<number>();
   const [sleepQuality, setSleepQuality] = useState<number>();
-  const [morningFatigue, setMorningFatigue] = useState<number>();
+  // ZMIANA 06.08.2026, na prośbę Kuby: było "poranne zmęczenie" (im wyżej tym
+  // GORZEJ — jedyny suwak w tym formularzu działający odwrotnie niż reszta,
+  // mylący przy wypełnianiu). Appka dziś zbiera i pokazuje ENERGIĘ (im wyżej
+  // tym LEPIEJ, spójnie z resztą suwaków) — konwersja z powrotem na
+  // `morning_fatigue` dzieje się TUŻ PRZED zapisem (patrz submitDailyLog
+  // niżej), żeby nie ruszać `payload.morning_fatigue`, które
+  // `api/generate-recommendation.js` już dziś na żywo czyta z założeniem
+  // "wyżej = bardziej zmęczony" (drugie repo, gamechange-app) — zero zmian
+  // backendu, zero ryzyka dla już zebranych danych testerów.
+  const [morningEnergy, setMorningEnergy] = useState<number>();
   const [moodMotivation, setMoodMotivation] = useState<number>();
   const [freeNote, setFreeNote] = useState('');
 
@@ -116,9 +158,9 @@ export default function DziennikScreen() {
     // wymaga, żeby przełącznik wracał do "Wpis poranny" po KAŻDYM udanym
     // zapisie (także po zapisie potreningowym), nie tylko czyścić pola.
     setEntryType('morning');
-    setSleepHours(''); setFreeNote(''); setDuration(''); setCalendarLinkId('');
+    setSleepHours(undefined); setFreeNote(''); setDuration(''); setCalendarLinkId('');
     setHasPain(false); setPainExcludes(false);
-    setSleepQuality(undefined); setMorningFatigue(undefined); setMoodMotivation(undefined);
+    setSleepQuality(undefined); setMorningEnergy(undefined); setMoodMotivation(undefined);
     setRpe(undefined); setPostFatigue(undefined); setPainIntensity(undefined);
   };
 
@@ -131,17 +173,33 @@ export default function DziennikScreen() {
       return;
     }
 
+    // Godziny snu nie wymagają już walidacji tekstu — suwak (ScalePicker)
+    // fizycznie nie pozwala ustawić wartości spoza swojego zakresu (0-12h od
+    // 06.08.2026), patrz JSX niżej.
+    let durationValue: number | undefined;
+    if (entryType === 'post_training' && duration !== '') {
+      durationValue = parseLocaleNumber(duration);
+      if (!Number.isFinite(durationValue) || durationValue < 0 || durationValue > 360) {
+        setError('Podaj czas trwania w minutach w zakresie 0–360.');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const payload: Record<string, any> = {};
       if (entryType === 'morning') {
-        if (sleepHours !== '') payload.sleep_hours = Number(sleepHours);
+        if (sleepHours !== undefined) payload.sleep_hours = sleepHours;
         if (sleepQuality !== undefined) payload.sleep_quality = sleepQuality;
-        if (morningFatigue !== undefined) payload.morning_fatigue = morningFatigue;
+        // KONWERSJA 06.08.2026: appka zbiera "poziom energii" (0=bardzo niski,
+        // 10=pełnia energii), baza dalej przechowuje `morning_fatigue` z
+        // niezmienioną semantyką "wyżej = bardziej zmęczony" — patrz komentarz
+        // przy deklaracji stanu `morningEnergy` wyżej dla pełnego uzasadnienia.
+        if (morningEnergy !== undefined) payload.morning_fatigue = 10 - morningEnergy;
         if (moodMotivation !== undefined) payload.mood_motivation = moodMotivation;
         if (freeNote.trim()) payload.free_note = freeNote.trim();
       } else {
-        if (duration !== '') payload.duration_minutes = Number(duration);
+        if (durationValue !== undefined) payload.duration_minutes = durationValue;
         if (rpe !== undefined) payload.rpe = rpe;
         if (postFatigue !== undefined) payload.post_fatigue = postFatigue;
       }
@@ -212,13 +270,44 @@ export default function DziennikScreen() {
       {entryType === 'morning' ? (
         <>
           <Text style={styles.label}>Ile godzin spałeś?</Text>
-          <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="decimal-pad" value={sleepHours} onChangeText={setSleepHours} placeholder="np. 7.5" />
+          {/* ZMIANA 05.08.2026, na prośbę Kuby: było pole tekstowe (ryzyko
+              literówek/przecinka z klawiatury) — suwak, ten sam sprawdzony
+              komponent co reszta skal w tym formularzu.
+              ZMIANA 06.08.2026: zakres zawężony z 0-24 do 0-12 (realistyczny
+              zakres snu — 0-24 dawało fałszywe wrażenie, że pół doby przespanej
+              to "połowa suwaka"). `sleep_hours` nie ma węższego CHECK w bazie
+              niż 0-24, więc zawężenie w UI mieści się w istniejącym ograniczeniu;
+              silnik rekomendacji patrzy tylko na wartość, nie na max suwaka.
+              colorForValue: progi dopasowane do progu silnika (7h), nie gradient
+              ciągły — patrz lib/scale-colors.ts. */}
+          <ScalePicker
+            value={sleepHours}
+            onChange={setSleepHours}
+            min={0}
+            max={12}
+            step={0.5}
+            suffix="godz."
+            colorForValue={sleepHoursColor}
+          />
           <Text style={styles.label}>Jakość snu (0 = fatalna, 10 = doskonała)</Text>
-          <ScalePicker value={sleepQuality} onChange={setSleepQuality} />
-          <Text style={styles.label}>Poranne zmęczenie (0 = brak, 10 = wykończony)</Text>
-          <ScalePicker value={morningFatigue} onChange={setMorningFatigue} />
+          <ScalePicker value={sleepQuality} onChange={setSleepQuality} colorForValue={higherIsBetterColor} />
+          <Text style={styles.label}>Poranny poziom energii (0 = bardzo niski, 10 = pełnia energii)</Text>
+          {/* ZMIANA 06.08.2026, na prośbę Kuby: było "poranne zmęczenie" (jedyny
+              suwak w tej formie działający "im wyżej tym gorzej"). Dziś: energia
+              (im wyżej tym lepiej, spójnie z resztą), pokazana jako wariant
+              "bateria" ScalePickera — najbardziej intuicyjny sposób pokazania
+              "co się uzupełnia" (pomysł Kuby 06.08.2026), z opisem słownym pod
+              wartością. Konwersja na `morning_fatigue` przy zapisie, patrz
+              submitDailyLog. */}
+          <ScalePicker
+            value={morningEnergy}
+            onChange={setMorningEnergy}
+            variant="battery"
+            colorForValue={higherIsBetterColor}
+            describeValue={describeEnergyLevel}
+          />
           <Text style={styles.label}>Nastrój / motywacja (0 = fatalny, 10 = świetny)</Text>
-          <ScalePicker value={moodMotivation} onChange={setMoodMotivation} />
+          <ScalePicker value={moodMotivation} onChange={setMoodMotivation} colorForValue={higherIsBetterColor} />
           <Text style={styles.label}>Notatka (opcjonalnie)</Text>
           <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={freeNote} onChangeText={setFreeNote} multiline placeholder="Coś jeszcze warto zapisać?" />
         </>
@@ -240,9 +329,12 @@ export default function DziennikScreen() {
             </Picker>
           </View>
           <Text style={styles.label}>RPE — odczuwany wysiłek (0 = brak, 10 = maksymalny)</Text>
-          <ScalePicker value={rpe} onChange={setRpe} />
+          {/* colorForValue: świadomie NEUTRALNY (nie czerwony/zielony) — wysoki
+              wysiłek treningowy nie jest z definicji "zły", często jest celem.
+              Patrz lib/scale-colors.ts, neutralIntensityColor. */}
+          <ScalePicker value={rpe} onChange={setRpe} colorForValue={neutralIntensityColor} />
           <Text style={styles.label}>Zmęczenie po treningu (0 = brak, 10 = wykończony)</Text>
-          <ScalePicker value={postFatigue} onChange={setPostFatigue} />
+          <ScalePicker value={postFatigue} onChange={setPostFatigue} colorForValue={neutralIntensityColor} />
         </>
       )}
 
@@ -272,7 +364,8 @@ export default function DziennikScreen() {
               </>
             )}
             <Text style={styles.label}>Intensywność (0 = ledwo wyczuwalny, 10 = nie do zniesienia)</Text>
-            <ScalePicker value={painIntensity} onChange={setPainIntensity} />
+            {/* colorForValue: odwrócony gradient — tu im wyżej tym GORZEJ. */}
+            <ScalePicker value={painIntensity} onChange={setPainIntensity} colorForValue={higherIsWorseColor} />
             <TouchableOpacity style={styles.checkboxRow} onPress={() => setPainExcludes((v) => !v)}>
               <Checkbox value={painExcludes} onValueChange={setPainExcludes} />
               <Text style={styles.checkboxLabel}>To wyklucza mnie z treningu</Text>
@@ -292,21 +385,29 @@ export default function DziennikScreen() {
           const dateLabel = new Date(row.created_at).toLocaleString('pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
           const typeLabel = row.entry_type === 'morning' ? 'Poranny' : 'Potreningowy';
           const p = row.payload || {};
-          let detail = '';
+          // OPTYMALIZACJA 06.08.2026 (przy okazji kolorowania suwaków — ten sam
+          // zestaw funkcji z lib/scale-colors.ts, żeby historia dawała się
+          // skanować wzrokiem tak samo intuicyjnie jak formularz powyżej, nie
+          // tylko szarym, niezróżnicowanym tekstem jak dotąd). `detailParts`:
+          // {text, color}[] zamiast pojedynczego stringa — renderowane niżej
+          // jako osobne kolorowe fragmenty <Text> przedzielone neutralną kropką.
+          const detailParts: { text: string; color?: string }[] = [];
           if (row.entry_type === 'morning') {
-            const parts = [];
-            if (p.sleep_hours !== undefined) parts.push(`sen: ${p.sleep_hours}h`);
-            if (p.sleep_quality !== undefined) parts.push(`jakość snu: ${p.sleep_quality}/10`);
-            if (p.morning_fatigue !== undefined) parts.push(`zmęczenie: ${p.morning_fatigue}/10`);
-            if (p.mood_motivation !== undefined) parts.push(`nastrój: ${p.mood_motivation}/10`);
-            detail = parts.join(' · ') || '—';
+            if (p.sleep_hours !== undefined) detailParts.push({ text: `sen: ${p.sleep_hours}h`, color: sleepHoursColor(p.sleep_hours) });
+            if (p.sleep_quality !== undefined) detailParts.push({ text: `jakość snu: ${p.sleep_quality}/10`, color: higherIsBetterColor(p.sleep_quality) });
+            // `morning_fatigue` w bazie jest niezmienione (patrz konwersja w
+            // submitDailyLog) — tu, na wyświetlaniu, przeliczane z powrotem na
+            // energię, żeby cała historia mówiła tym samym językiem co formularz.
+            if (p.morning_fatigue !== undefined) {
+              const energy = 10 - p.morning_fatigue;
+              detailParts.push({ text: `energia: ${energy}/10`, color: higherIsBetterColor(energy) });
+            }
+            if (p.mood_motivation !== undefined) detailParts.push({ text: `nastrój: ${p.mood_motivation}/10`, color: higherIsBetterColor(p.mood_motivation) });
           } else {
-            const parts = [];
-            if (row.session_type) parts.push(SESSION_TYPE_LABELS[row.session_type] ?? row.session_type);
-            if (p.duration_minutes !== undefined) parts.push(`${p.duration_minutes} min`);
-            if (p.rpe !== undefined) parts.push(`RPE: ${p.rpe}/10`);
-            if (p.post_fatigue !== undefined) parts.push(`zmęczenie: ${p.post_fatigue}/10`);
-            detail = parts.join(' · ') || '—';
+            if (row.session_type) detailParts.push({ text: SESSION_TYPE_LABELS[row.session_type] ?? row.session_type });
+            if (p.duration_minutes !== undefined) detailParts.push({ text: `${p.duration_minutes} min` });
+            if (p.rpe !== undefined) detailParts.push({ text: `RPE: ${p.rpe}/10`, color: neutralIntensityColor(p.rpe) });
+            if (p.post_fatigue !== undefined) detailParts.push({ text: `zmęczenie: ${p.post_fatigue}/10`, color: neutralIntensityColor(p.post_fatigue) });
           }
           const pains = row.pain_entries || [];
           return (
@@ -315,12 +416,20 @@ export default function DziennikScreen() {
                 <Text style={styles.historyType}>{typeLabel}</Text>
                 <Text style={styles.historyDate}>{dateLabel}</Text>
               </View>
-              <Text style={styles.historyDetail}>{detail}</Text>
+              <Text style={styles.historyDetail}>
+                {detailParts.length === 0 && '—'}
+                {detailParts.map((part, i) => (
+                  <Text key={i}>
+                    {i > 0 && <Text style={styles.historySeparator}> · </Text>}
+                    <Text style={part.color ? { color: part.color } : undefined}>{part.text}</Text>
+                  </Text>
+                ))}
+              </Text>
               {pains.map((pe: any, i: number) => {
                 const loc = BODY_LOCATION_LABELS[pe.body_location] ?? pe.body_location;
                 const side = pe.side === 'left' ? ' (L)' : pe.side === 'right' ? ' (P)' : '';
                 return (
-                  <Text key={i} style={styles.painTag}>
+                  <Text key={i} style={[styles.painTag, { color: higherIsWorseColor(pe.intensity) }]}>
                     {loc}{side} — {pe.intensity}/10{pe.excludes_from_training ? ' · wyklucza z treningu' : ''}
                   </Text>
                 );
@@ -361,5 +470,6 @@ const styles = StyleSheet.create({
   historyType: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary },
   historyDate: { fontSize: 12, color: colors.textSecondary },
   historyDetail: { ...typography.body, fontSize: 13, color: colors.textSecondary },
-  painTag: { fontSize: 11, color: colors.error, marginTop: 4 },
+  historySeparator: { color: colors.textSecondary },
+  painTag: { fontSize: 11, marginTop: 4 },
 });
