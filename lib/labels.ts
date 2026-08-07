@@ -51,6 +51,38 @@
 // ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
+// PRAKTYKA-EKRAN B6 08.08.2026 — FORMA KANONICZNA NAZW: MAŁA LITERA
+// (decyzja Kuby z 08.08.2026)
+//
+// Do dziś appka mobilna pisała cztery nazwy Title Case'em („Technika
+// Fundamentalna"), a `coach.html`, `asystent_app.html`, e-maile i pushe —
+// małą literą. Zawodnik i trener widzieli więc ten sam obszar zapisany na dwa
+// sposoby; nie był to konflikt znaczeniowy jak przy `mental` (A1), ale był to
+// rozjazd, którego nikt nie umiał uzasadnić.
+//
+// OD 08.08.2026 FORMĄ KANONICZNĄ JEST MAŁA LITERA — czyli zapis zgodny
+// z resztą systemu, a nie z tą jedną appką. Zmienione dokładnie cztery:
+//   techFund     'Technika Fundamentalna'  → 'Technika fundamentalna'
+//   techSpec     'Technika Specjalistyczna'→ 'Technika specjalistyczna'
+//   tolerancja   'Tolerancja (Obciążeń)'   → 'Tolerancja obciążeń'
+//   decyzja      'Szybkość Decyzji'        → 'Szybkość decyzji'
+//
+// ⚠️ PRZY `tolerancja` ZNIKA TAKŻE NAWIAS. To jest więcej niż zmiana wielkości
+// litery i jest świadome: docelowy zapis podany w decyzji brzmi „Tolerancja
+// obciążeń", a nawias był artefaktem tego, że nazwa segmentu bywała skracana
+// do samego słowa „Tolerancja". Odnotowane, żeby nikt nie uznał tego za
+// literówkę przy przepisywaniu.
+//
+// CZEGO TA ZMIANA NIE DOTYKA — i dlaczego:
+//   • KLUCZY (`techFund`, `techSpec`, `tolerancja`, `decyzja`) — to są ID
+//     w bazie (`public.segments`, `diagnostics.scores`, `goals.segment_id`).
+//     Zmiana klucza to migracja, nie etykieta.
+//   • „Odwaga w grze" — to osobna decyzja (A1) i osobna nazwa własna; wielka
+//     litera jest tu na początku zdania, nie w środku.
+//   • pozostałych dziewięciu nazw — one już były jednowyrazowe albo zgodne.
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
 // 13 SEGMENTÓW
 // ─────────────────────────────────────────────────────────────
 
@@ -65,9 +97,10 @@ export const SEGMENT_LABELS: Record<string, string> = {
   moc: 'Moc',
   wytrzymalosc: 'Wytrzymałość',
   fizycznosc: 'Fizyczność',
-  techFund: 'Technika Fundamentalna',
-  techSpec: 'Technika Specjalistyczna',
-  tolerancja: 'Tolerancja (Obciążeń)',
+  // PRAKTYKA-EKRAN B6 08.08.2026 — mała litera (patrz nagłówek).
+  techFund: 'Technika fundamentalna',
+  techSpec: 'Technika specjalistyczna',
+  tolerancja: 'Tolerancja obciążeń',
   regeneracja: 'Regeneracja',
   odpornosc: 'Odporność',
   odzywianie: 'Odżywienie',
@@ -75,7 +108,8 @@ export const SEGMENT_LABELS: Record<string, string> = {
   // NAWIGACJA B3 08.08.2026 — było 'Stan Mentalny' (decyzja A1, patrz nagłówek).
   mental: 'Odwaga w grze',
   percepcja: 'Percepcja',
-  decyzja: 'Szybkość Decyzji',
+  // PRAKTYKA-EKRAN B6 08.08.2026 — mała litera (patrz nagłówek).
+  decyzja: 'Szybkość decyzji',
 };
 
 /** Nazwa segmentu, z bezpiecznym odwrotem na surowe id (nigdy nie zwraca pustego). */

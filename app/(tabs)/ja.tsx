@@ -37,6 +37,37 @@
 // RLS dla członków drużyny) tej pozycji nie da się zrobić uczciwie, a polecenie
 // mówi wprost: nie zgaduj. Gotowy SQL leży w raporcie, sekcja 7.
 // Pozycja wejdzie tutaj, między „Wszystkie rekomendacje" a „Cele".
+//
+// ═══════════════════════════════════════════════════════════════════
+// ZMIANA OBRAZU B5 08.08.2026 — BIBLIOTEKA WYPROWADZIŁA SIĘ STĄD
+// (pozycja M2 audytu po bloku 4)
+//
+// Sekcja „Twoje materiały" — dołożona tu w rundzie 4 (decyzja C1 warstwa 3)
+// — ma od tej rundy WŁASNY EKRAN: `app/(tabs)/biblioteka.tsx`, trasa chowana
+// (`href: null`). Tutaj zostaje NAZWANE WEJŚCIE w sekcji „Twój rozwój", tym
+// samym wzorcem co „Wynik diagnozy", „Wszystkie rekomendacje" i „Cele".
+//
+// POWÓD JEST ZMIERZONY, NIE ODCZUTY. Runda 4 podniosła ten ekran z 803 dp do
+// 1 353 dp, a w najgorszym realnym przypadku (Cel + trzy różne wąskie gardła)
+// do 1 578 dp — 2,64 ekranu scrolla na małym telefonie. Ten sam raport
+// postawił próg: „2,5 ekranu → biblioteka dostaje własną trasę". Skutek:
+// „Ustawienia" i „Wyloguj się" wracają w zasięg jednego przewinięcia.
+// Pomiar odtwarzalny: `npx tsx tests/measure-heights.ts`.
+//
+// CO ZOSTAJE TUTAJ: wyłącznie LICZBA otwartych materiałów w podpisie wejścia.
+// Liczy się z dwóch rzeczy, które ten ekran i tak już pobiera (segmenty
+// aktywnych Celów i wąskie gardła z diagnozy) — ZERO nowych zapytań, tak samo
+// jak przed przeprowadzką.
+//
+// ⚠️ Karty materiałów NADAL nie są klikalne — sposób wydania pliku PDF jest
+// nierozstrzygnięty (M3). Uzasadnienie w nagłówku nowego ekranu.
+//
+// ═══════════════════════════════════════════════════════════════════
+// WIEDZA B4 08.08.2026 — DŁUG N3 (znalezisko B16). Ten ekran pobierał
+// WSZYSTKIE wiersze `decision_recommendations` zawodnika po to, żeby wyliczyć
+// dwie liczby przy podpisach. Po roku gry to kilkaset wierszy przy każdym
+// wejściu na zakładkę. Teraz są to dwa zapytania `head: true` +
+// `count: 'exact'` — baza liczy u siebie i odsyła same liczby, zero wierszy.
 import { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -52,6 +83,7 @@ import {
   detectScenario,
   scenarioHeadline,
 } from '../../components/diagnosisProfile';
+import { unlockedMaterials, libraryEntryHint, LIBRARY_SECTION_LABEL } from '../../lib/materials';
 
 type DiagnosisSummary =
   | { state: 'loading' }
@@ -59,7 +91,7 @@ type DiagnosisSummary =
   | { state: 'unreadable' }
   | { state: 'ready'; headline: string; desc: string; deficitLabels: string[] };
 
-type MenuRoute = '/diagnoza' | '/centrum-decyzji' | '/cele' | '/profil';
+type MenuRoute = '/diagnoza' | '/centrum-decyzji' | '/cele' | '/biblioteka' | '/profil';
 
 export default function JaScreen() {
   const { currentUser, signOut } = useAuth();
@@ -70,13 +102,18 @@ export default function JaScreen() {
   const [openActionableRecs, setOpenActionableRecs] = useState(0);
   const [activeGoals, setActiveGoals] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  // ZMIANA OBRAZU B5 08.08.2026 — po przeprowadzce biblioteki został tu sam
+  // LICZNIK do podpisu wejścia. Liczony z dwóch rzeczy, które ekran i tak już
+  // pobiera: segmentów aktywnych Celów i wąskich gardeł z diagnozy.
+  // ZERO nowych zapytań i zero nowych pytań do zawodnika.
+  const [libraryCount, setLibraryCount] = useState(0);
 
   const load = useCallback(async () => {
     if (!currentUser) return;
 
-    // Cztery zapytania równolegle, żaden nie czeka na inny — ten sam wzorzec
+    // Pięć zapytań równolegle, żadne nie czeka na inne — ten sam wzorzec
     // co `load()` na ekranie Dziś. Każde z nich to WYŁĄCZNIE odczyt.
-    const [diagRes, profileRes, recsRes, goalsRes] = await Promise.all([
+    const [diagRes, profileRes, unreadRes, actionableRes, goalsRes] = await Promise.all([
       // `diagnostics` to log zdarzeń, nie jeden wiersz na diagnozę — filtr
       // `event='email_submitted'` jest konieczny (ten sam co w diagnoza.tsx).
       supabase.from('diagnostics').select('scores')
@@ -84,10 +121,33 @@ export default function JaScreen() {
         .order('created_at', { ascending: false }).limit(1),
       supabase.from('player_profiles').select('position_primary')
         .eq('user_id', currentUser.id).limit(1),
-      supabase.from('decision_recommendations').select('id,recommendation_type,feedback_response,viewed_at')
-        .eq('user_id', currentUser.id),
-      supabase.from('goals').select('id,status').eq('user_id', currentUser.id),
+      // WIEDZA B4 08.08.2026 — dług N3. Dwie liczby, dwa zapytania liczące,
+      // ZERO pobranych wierszy (`head: true` nie ściąga ciała odpowiedzi).
+      // Rozdzielone na dwa, bo to dwa różne warunki — jednym zapytaniem dałoby
+      // się je policzyć tylko pobierając wiersze, czyli wracając do problemu.
+      supabase.from('decision_recommendations').select('id', { count: 'exact', head: true })
+        .eq('user_id', currentUser.id).is('viewed_at', null),
+      supabase.from('decision_recommendations').select('id', { count: 'exact', head: true })
+        .eq('user_id', currentUser.id)
+        .in('recommendation_type', ['specialist_referral', 'position_fit_signal'])
+        .is('feedback_response', null),
+      // WIEDZA B4 08.08.2026 — doszło `segment_id` (karmi bibliotekę) i filtr
+      // `status='active'` przeniesiony do bazy. Było: wszystkie cele zawodnika,
+      // filtrowane w appce tylko po to, żeby policzyć aktywne.
+      supabase.from('goals').select('segment_id').eq('user_id', currentUser.id).eq('status', 'active'),
     ]);
+
+    // WIEDZA B4 08.08.2026 — segmenty aktywnych Celów: podpis przy „Cele"
+    // i pierwsze źródło odblokowań w bibliotece.
+    const goalSegmentIds = ((goalsRes.data ?? []) as { segment_id: string }[])
+      .map((g) => g.segment_id)
+      .filter((s): s is string => !!s);
+    setActiveGoals(goalSegmentIds.length);
+
+    // Wąskie gardła z diagnozy — drugie źródło odblokowań. Wypełniane tylko
+    // w stanie `ready`; przy braku albo nieczytelnej diagnozie zostaje pusta
+    // lista i biblioteka opiera się wyłącznie na Celach.
+    let deficitSegmentIds: string[] = [];
 
     // ─── Skrót profilu z diagnozy ─────────────────────────────────
     if (diagRes.error || !diagRes.data || diagRes.data.length === 0) {
@@ -105,6 +165,7 @@ export default function JaScreen() {
         const deficits = getRelativeDeficits(scores, 3);
         const scenario = detectScenario(scores, hasPosition);
         const { headline, desc } = scenarioHeadline(scenario, deficits.length);
+        deficitSegmentIds = deficits.map(([id]) => id);
         setSummary({
           state: 'ready',
           headline,
@@ -116,19 +177,16 @@ export default function JaScreen() {
 
     // ─── Liczby przy wejściach ────────────────────────────────────
     // Te same dwie miary co przy linku „Wszystkie rekomendacje" na ekranie
-    // Dziś (lib: brak — to trzy linijki filtra, wspólny plik byłby cięższy
-    // od problemu). Nie mylić z badge'em na pasku zakładek: ten SKASOWANO
+    // Dziś. Nie mylić z badge'em na pasku zakładek: ten SKASOWANO
     // 08.08.2026 i nie wraca (decyzja B7).
-    const recs = (recsRes.data ?? []) as {
-      id: number; recommendation_type: string; feedback_response: string | null; viewed_at: string | null;
-    }[];
-    setUnreadRecs(recs.filter((r) => !r.viewed_at).length);
-    setOpenActionableRecs(recs.filter((r) =>
-      (r.recommendation_type === 'specialist_referral' || r.recommendation_type === 'position_fit_signal')
-      && !r.feedback_response).length);
+    // WIEDZA B4 08.08.2026 — dług N3: liczby przychodzą z `count`, nie z
+    // policzonych w appce wierszy. Błąd zapytania daje 0, czyli podpis spada na
+    // wariant opisowy — nigdy na zmyśloną liczbę.
+    setUnreadRecs(unreadRes.error ? 0 : (unreadRes.count ?? 0));
+    setOpenActionableRecs(actionableRes.error ? 0 : (actionableRes.count ?? 0));
 
-    const goals = (goalsRes.data ?? []) as { id: number; status: string }[];
-    setActiveGoals(goals.filter((g) => g.status === 'active').length);
+    // ─── Licznik biblioteki (ZMIANA OBRAZU B5 08.08.2026) ─────────
+    setLibraryCount(unlockedMaterials({ goalSegmentIds, deficitSegmentIds }).length);
   }, [currentUser]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -222,6 +280,10 @@ export default function JaScreen() {
           {renderRow('/diagnoza', 'Wynik diagnozy', '13 obszarów, wąskie gardła i ich przyczyny')}
           {renderRow('/centrum-decyzji', 'Wszystkie rekomendacje', recsHint, unreadRecs > 0)}
           {renderRow('/cele', 'Cele', goalsHint)}
+          {/* ZMIANA OBRAZU B5 08.08.2026 — wejście do biblioteki. Stoi jako
+              ostatnie w „Twoim rozwoju": to jest treść do czytania, a nie
+              rzecz, po którą zawodnik wchodzi tu codziennie. */}
+          {renderRow('/biblioteka', LIBRARY_SECTION_LABEL, libraryEntryHint(libraryCount))}
         </View>
 
         {/* ── USTAWIENIA ───────────────────────────────────────────── */}

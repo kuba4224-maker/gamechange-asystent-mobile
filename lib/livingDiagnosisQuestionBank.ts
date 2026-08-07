@@ -21,6 +21,32 @@
 // 0-7 z index.html — przemapowane raz, tutaj, żeby reszta appki mobilnej
 // nigdy nie musiała znać numerycznego schematu index.html.
 
+// ═══════════════════════════════════════════════════════════════════
+// ZMIANA OBRAZU B5 08.08.2026 — SKALA ODPOWIEDZI, JEDNO ŹRÓDŁO
+//
+// Te sześć etykiet to skala ankiety diagnostycznej („1 Prawie nigdy" …
+// „6 Prawie zawsze", `renderAllQuestions` w index.html). Do tej rundy żyły
+// wyłącznie jako prywatna stała `SCALE` w components/LivingDiagnosisPulseCard
+// .tsx. Rediagnoza przy zamknięciu Bloku Skupienia potrzebuje DOKŁADNIE tej
+// samej skali — a druga kopia tych samych sześciu napisów to ta sama rodzina
+// defektu („jedna rzecz, dwie nazwy"), którą likwidował blok B1. Skala mieszka
+// więc tam, gdzie mieszkają pytania, do których należy.
+//
+// KOLEJNOŚĆ JEST SUROWA, NIE „DOBRA→ZŁA": 6 znaczy „prawie zawsze" i dla
+// segmentów z `dir: -1` (tolerancja, odporność, koncentracja) jest to
+// odpowiedź NIEKORZYSTNA. Kierunek nakłada dopiero agregacja — patrz
+// `answerPosition()` w lib/rediagnosis.ts. Nigdy nie pokazuj tych etykiet jako
+// „poziomu" zawodnika bez uwzględnienia `dir`.
+export const DIAGNOSIS_ANSWER_SCALE: readonly (readonly [number, string])[] = [
+  [1, 'Prawie nigdy'], [2, 'Rzadko'], [3, 'Raczej rzadko'],
+  [4, 'Raczej często'], [5, 'Często'], [6, 'Prawie zawsze'],
+] as const;
+
+/** Najniższa i najwyższa wartość skali — używane zamiast wpisywania 1 i 6
+ *  z palca w logice rediagnozy. */
+export const DIAGNOSIS_ANSWER_MIN = 1;
+export const DIAGNOSIS_ANSWER_MAX = 6;
+
 export type SegmentWording = { t: string; ctx: string };
 
 export type LivingDiagnosisSegment = {

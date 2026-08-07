@@ -27,6 +27,16 @@
 //   trzeba dodać kolumnę — świadomie POMINIĘTE w tej wersji, dawka jest
 //   "ulotna": widoczna tylko w turze, w której wygenerowana ręcznie przez
 //   onRequestCheckinNow, bo tylko wtedy mamy ją w pamięci klienta).
+//
+//   ⚠️ PRAKTYKA-EKRAN B6 08.08.2026 — POWYŻSZY AKAPIT JEST JUŻ NIEAKTUALNY
+//   i zostaje wyłącznie jako zapis tego, jak było. Od rundy 5 pas A zapisuje
+//   dawkę do `focus_blocks.content_doses jsonb` w postaci gotowej na ekran
+//   (kontrakt: claude/RAPORT_ZWROTNY_A_RUNDA_5.md, sekcja 11). Dawka
+//   PRZESTAŁA BYĆ ULOTNA i ten komponent ją czyta — patrz `loadContentDoses`
+//   i `renderContentDose` niżej. Historyczne dawki też są widoczne, jako
+//   zwijana lista „wcześniej w tym Bloku"; osobnej kolumny na
+//   focus_block_checkins nie było trzeba.
+//
 // - Faza 3: przegląd zamknięcia — baner gdy started_at+target_weeks minęło,
 //   generuje podsumowanie (action:'closing_review'), trzy równorzędne
 //   opcje + CTA do programu 97 zł.
@@ -44,12 +54,72 @@
 // zwykłych userów (insert robi wyłącznie cron/backend przez service role)
 // — więc ten komponent NIGDY nie insertuje do focus_block_checkins, tylko
 // czyta i UPDATE'uje answer_text/answered_at.
+//
+// ═══════════════════════════════════════════════════════════════════
+// PRAKTYKA-EKRAN B6 08.08.2026 — DAWKA TREŚCI PRZESTAJE BYĆ NIEWIDOCZNA
+//
+// PO CO: dawka była od rundy 5 zapisywana w bazie i nadal NIE CZYTANA PRZEZ
+// ŻADEN EKRAN — stacja „Praktyka" była domknięta w danych, nie dla człowieka
+// (reguła R1). Zmierzone przez pas A: w 8-tygodniowym Bloku 18 z 27 tur to
+// dziś tury, w których zawodnik wchodzi i NIE MA CZEGO PRZECZYTAĆ.
+//
+// SKĄD DANE — i dlaczego OSOBNYM, WĄSKIM ZAPYTANIEM, a nie dopisaniem kolumny
+// do dużego selecta `focus_blocks` w app/(tabs)/cele.tsx (który i tak ładuje
+// ten wiersz i przekazuje go tu propsem). Dwa powody, oba twarde:
+//   1. `cele.tsx` NIE JEST w pasie tej rundy — polecenie wymienia pliki, które
+//      wolno ruszyć, i tego pliku wśród nich nie ma;
+//   2. — ważniejszy — gdyby `content_doses` weszło do TAMTEGO selecta, a
+//      migracja z sekcji 7 raportu A nie była jeszcze wklejona, PostgREST
+//      odrzuciłby CAŁE zapytanie (błąd `42703` dotyczy zapytania, nie kolumny).
+//      Padłby wtedy nie kafelek dawki, tylko cały odczyt Bloków Skupienia:
+//      nazwa Elementu, blokada „jeden Blok na filar", przegląd zamknięcia.
+//      Nowa funkcja zabiłaby trzy stare. Osobne zapytanie izoluje ten błąd do
+//      jednej sekcji — dokładnie tak, jak opisał to pas A przy `fetchFocusBlock`.
+// Zapytanie idzie RÓWNOLEGLE z odczytem pytania kontrolnego (Promise.all), więc
+// kosztuje jeden request, a nie jedno oczekiwanie więcej.
+//
+// ⚠️ ZERO ZAPISU do tej kolumny i ZERO wywołań `generate-focus-block-content`
+// na potrzeby dawki (zasady 5 i 6 kontraktu). Odczyt z bazy jest darmowy;
+// wywołanie modelu nie jest. Przycisk „Sprawdź teraz, jak idzie" nadal woła
+// endpoint — ale to jest ŚWIADOME działanie zawodnika, nie automat, i po nim
+// odświeżamy odczyt, żeby na ekranie została wersja z bazy.
+//
+// ⚠️ TRZY JAWNE STANY BRAKU (kolumny nie ma / `NULL` / pusta lista) siedzą
+// w lib/contentDose.ts razem z resztą reguł i mają swój selftest. Żaden z nich
+// nie jest błędem na ekranie zawodnika; tylko pierwszy pisze do logu.
 
 import { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Linking } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { formatDatePl, DAYS_OF_WEEK, toLocalDateStr } from '../lib/date-utils';
 import { colors, typography, radii, minTouchHeight } from '../constants/theme';
+import BlockClosingRediagnosis from './BlockClosingRediagnosis';
+// PRAKTYKA-EKRAN B6 08.08.2026 — wszystkie reguły dawki (kształt koperty, trzy
+// jawne stany braku, sześć zasad renderowania z kontraktu pasa A) siedzą
+// w czystych funkcjach z własnym selftestem. Tutaj zostaje wyłącznie zapytanie
+// i rysowanie.
+import {
+  CONTENT_DOSE_COLUMN,
+  CONTENT_DOSE_COLUMN_MISSING_WARN,
+  CONTENT_DOSE_SECTION_LABEL,
+  CONTENT_DOSE_STEP_LABEL,
+  CONTENT_DOSE_CURIOUS_LABEL,
+  CONTENT_DOSE_SOURCE_LABEL,
+  buildContentDoseView,
+  curiousToggleLabel,
+  earlierDosesLabel,
+  isMissingContentDoseColumnError,
+  // ZAPIS B7 08.08.2026 (M23/B36) — „przeczytane": osobna kolumna, appka
+  // zapisuje wyłącznie do niej (nigdy do content_doses, zasada 5 kontraktu).
+  CONTENT_DOSE_SEEN_COLUMN,
+  CONTENT_DOSE_SEEN_COLUMN_MISSING_WARN,
+  isMissingSeenColumnError,
+  parseSeenKeys,
+  parseContentDoses,
+  isDoseSeen,
+  withSeenKey,
+  type ContentDoseCard,
+} from '../lib/contentDose';
 
 const FOCUS_BLOCK_CONTENT_API_URL = 'https://gamechange-app.vercel.app/api/generate-focus-block-content';
 
@@ -173,6 +243,18 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
   // AUDYT 06.08.2026 — dodany widoczny stan błędu dla "Sprawdź teraz, jak idzie".
   const [checkinError, setCheckinError] = useState<string | null>(null);
 
+  // PRAKTYKA-EKRAN B6 08.08.2026 — stan dawki treści z bazy.
+  // `doseRaw === undefined` znaczy „jeszcze nie czytaliśmy", `null` znaczy
+  // „kolumna jest i jest pusta". To NIE jest to samo i `buildContentDoseView`
+  // rozróżnia oba — patrz lib/contentDose.ts.
+  const [doseRaw, setDoseRaw] = useState<unknown>(undefined);
+  const [doseError, setDoseError] = useState<unknown>(null);
+  const [doseLoading, setDoseLoading] = useState(true);
+  const [earlierDosesOpen, setEarlierDosesOpen] = useState(false);
+  // Pogłębienie jest zwijane osobno dla każdej dawki (bieżącej i historycznych),
+  // więc stanem jest mapa po kluczu dawki, nie jeden przełącznik.
+  const [curiousOpen, setCuriousOpen] = useState<Record<string, boolean>>({});
+
   const loadLatestCheckin = useCallback(async () => {
     setCheckinLoading(true);
     try {
@@ -194,7 +276,81 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
     }
   }, [focusBlock.id, focusBlock.status]);
 
-  useEffect(() => { loadLatestCheckin(); }, [loadLatestCheckin]);
+  // PRAKTYKA-EKRAN B6 08.08.2026 — jedno wąskie zapytanie o dawki tego Bloku.
+  // Uzasadnienie osobnego zapytania (zamiast kolumny w selecie z cele.tsx) stoi
+  // w nagłówku pliku. `supabase-js` NIE RZUCA przy braku kolumny — zwraca
+  // `{ data: null, error }` — więc `error` idzie do `buildContentDoseView`
+  // NIETKNIĘTY i to ono rozstrzyga, czy to „nie ma migracji", czy „nie ma dawki".
+  // ZAPIS B7 08.08.2026 — „przeczytane". `null` = kolumny nie ma (migracja
+  // rundy 7 niewklejona) — wtedy nic nie zapisujemy i nic nie mierzymy.
+  const [seenKeys, setSeenKeys] = useState<string[] | null>(null);
+
+  const loadContentDoses = useCallback(async () => {
+    setDoseLoading(true);
+    // ZAPIS B7 08.08.2026 — pytamy też o `content_dose_seen`; gdy tej kolumny
+    // nie ma, powtarzamy samym `content_doses` (ścieżka odzysku — wzorzec
+    // `zawsze_widoczna` z dzis.tsx). PostgREST przy nieznanej kolumnie odrzuca
+    // CAŁE zapytanie, więc bez powtórki brak migracji „seen" zabrałby
+    // zawodnikowi cały ekran dawki.
+    let { data, error: err } = await supabase
+      .from('focus_blocks')
+      .select(`${CONTENT_DOSE_COLUMN},${CONTENT_DOSE_SEEN_COLUMN}`)
+      .eq('id', focusBlock.id)
+      .maybeSingle();
+    let seenAvailable = true;
+    if (err && isMissingSeenColumnError(err) && !isMissingContentDoseColumnError(err)) {
+      console.warn(CONTENT_DOSE_SEEN_COLUMN_MISSING_WARN);
+      seenAvailable = false;
+      ({ data, error: err } = await supabase
+        .from('focus_blocks')
+        .select(CONTENT_DOSE_COLUMN)
+        .eq('id', focusBlock.id)
+        .maybeSingle());
+    }
+    if (err) {
+      setDoseError(err);
+      setDoseRaw(undefined);
+      setSeenKeys(null);
+      // Log mówi wprost, CZEGO ZAWODNIK PRZEZ TO NIE WIDZI — ten sam wzorzec
+      // co `console.warn` przy `goals.component_id` w cele.tsx (runda 5).
+      if (isMissingContentDoseColumnError(err)) console.warn(CONTENT_DOSE_COLUMN_MISSING_WARN);
+      else console.warn('[dawka] Nie udało się odczytać focus_blocks.content_doses:', err);
+    } else {
+      setDoseError(null);
+      const row = data as Record<string, unknown> | null;
+      setDoseRaw(row?.[CONTENT_DOSE_COLUMN] ?? null);
+      setSeenKeys(seenAvailable ? parseSeenKeys(row?.[CONTENT_DOSE_SEEN_COLUMN]) : null);
+    }
+    setDoseLoading(false);
+  }, [focusBlock.id]);
+
+  useEffect(() => {
+    // Równolegle, nie po kolei: dawka nie ma powodu czekać na pytanie kontrolne.
+    Promise.all([loadLatestCheckin(), loadContentDoses()]);
+  }, [loadLatestCheckin, loadContentDoses]);
+
+  // ZAPIS B7 08.08.2026 (M23/B36) — otwarcie Bloku z widoczną dawką oznacza ją
+  // jako przeczytaną. JEDYNY zapis, jaki appka robi przy dawce — i idzie do
+  // OSOBNEJ kolumny `content_dose_seen`, nigdy do `content_doses` (zasada 5).
+  // `seenKeys === null` = migracji nie ma → zero zapisów, zero pomiaru, reszta
+  // ekranu bez zmian. Zapis jest best-effort: porażka to strata pomiaru,
+  // nie funkcji.
+  useEffect(() => {
+    if (doseLoading || doseError || seenKeys === null) return;
+    const parsed = parseContentDoses(doseRaw);
+    if (parsed.kind !== 'ready' || parsed.doses.length === 0) return;
+    const key = parsed.doses[0].klucz;
+    if (!key || isDoseSeen(seenKeys, key)) return;
+    const next = withSeenKey(seenKeys, key);
+    setSeenKeys(next);
+    supabase
+      .from('focus_blocks')
+      .update({ [CONTENT_DOSE_SEEN_COLUMN]: next })
+      .eq('id', focusBlock.id)
+      .then(({ error: uerr }) => {
+        if (uerr) console.warn('[dawka] Nie udało się zapisać „przeczytane" (strata pomiaru, nie funkcji):', uerr);
+      });
+  }, [doseLoading, doseError, doseRaw, seenKeys, focusBlock.id]);
 
   const submitAnswer = async () => {
     if (!checkin || !answerText.trim()) return;
@@ -246,6 +402,11 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.contentDose) setFreshContentDose(data.contentDose);
       else setCheckinError('Tym razem nie ma nowej podpowiedzi — wróć po kolejnej sesji.');
+      // PRAKTYKA-EKRAN B6 08.08.2026 — od rundy 5 backend ZAPISUJE tę dawkę do
+      // `focus_blocks.content_doses`, więc po udanym wywołaniu odczytujemy bazę
+      // ponownie. Dzięki temu na ekranie zostaje wersja trwała, a nie kopia
+      // w pamięci klienta, która ginie przy wyjściu z ekranu.
+      loadContentDoses();
     } catch {
       setCheckinError('Nie udało się teraz sprawdzić — spróbuj za chwilę.');
     } finally {
@@ -262,6 +423,21 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
   const [closingSaving, setClosingSaving] = useState(false);
   const [closingSaveError, setClosingSaveError] = useState<string | null>(null);
 
+  // ZMIANA OBRAZU B5 08.08.2026 — stacja rediagnozy stoi PRZED pytaniem
+  // „Co dalej?". Trzy przyciski zamknięcia pojawiają się dopiero, gdy stacja
+  // się rozstrzygnie: zawodnik odpowiedział, pominął, albo stacji w ogóle nie
+  // ma (brak punktu odniesienia / błąd odczytu — patrz komponent).
+  //
+  // KOLEJNOŚĆ JEST CELOWA. Gdyby trzy przyciski stały obok pytania, zawodnik
+  // dotknąłby najbliższego i rediagnoza nigdy by się nie wydarzyła — a to jest
+  // jedyny moment w całej pętli, w którym da się pokazać zmianę. Odwrotnie niż
+  // przy podpowiedzi na Dziś (runda 4, odstąpienie 1): tam decyzja szła przed
+  // czytaniem, bo czytanie może poczekać. Tu czytanie JEST podsumowaniem pracy.
+  const [rediagnosisResolved, setRediagnosisResolved] = useState(false);
+
+  // Stabilna referencja — komponent stacji woła to raz i tylko raz.
+  const handleRediagnosisResolved = useCallback(() => setRediagnosisResolved(true), []);
+
   const targetEndDate = (() => {
     const start = new Date(focusBlock.started_at);
     const end = new Date(start);
@@ -274,6 +450,7 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
     setReviewOpen(true);
     setReviewLoading(true);
     setReviewError(null);
+    setRediagnosisResolved(false); // ZMIANA OBRAZU B5 08.08.2026
     try {
       const res = await fetch(FOCUS_BLOCK_CONTENT_API_URL, {
         method: 'POST',
@@ -368,6 +545,83 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
     }
   };
 
+  // ─── PRAKTYKA-EKRAN B6 08.08.2026 — dawka treści z bazy ─────────────
+  // Cała decyzja „co pokazać" zapadła już w `buildContentDoseView`. Tutaj nie
+  // ma ani jednego `if` o danych — są wyłącznie `if` o tym, czy dane pole
+  // istnieje, bo to są zasady 2 i 3 kontraktu: `dla_chetnych: null` znaczy
+  // BRAK PRZYCISKU, a brak `material` znaczy BRAK PRZYPISU.
+  const doseView = buildContentDoseView({ loading: doseLoading, error: doseError, raw: doseRaw });
+
+  const renderDoseBody = (card: ContentDoseCard, key: string) => (
+    <View key={key} style={styles.doseCard}>
+      {card.dateLabel && <Text style={styles.doseDate}>{card.dateLabel}</Text>}
+      <Text style={styles.contentDoseLabel}>{CONTENT_DOSE_STEP_LABEL}</Text>
+      {/* ZASADA 1: treść jest gotowa — bez skracania, bez przedrostków, bez
+          zmiany pierwszej litery. Dlatego stoi tu samo `{...}`. */}
+      <Text style={styles.reasoningText}>{card.practicalStep}</Text>
+      {/* ZASADA 2: `dla_chetnych: null` znaczy BRAK PRZYCISKU, nie pusty
+          przycisk. Gdy treść jest — przycisk stoi ZWINIĘTY, bo pomiar
+          (tests/measure-heights.ts) pokazał, że rozwinięty blok przy
+          najdłuższej realnej dawce przekracza jeden ekran na małym telefonie. */}
+      {card.forCurious && (
+        <>
+          <TouchableOpacity
+            style={styles.doseCuriousToggle}
+            onPress={() => setCuriousOpen((prev) => ({ ...prev, [key]: !prev[key] }))}
+          >
+            <Text style={styles.linkTextMuted}>{curiousToggleLabel(!!curiousOpen[key])}</Text>
+          </TouchableOpacity>
+          {curiousOpen[key] && <Text style={styles.reasoningText}>{card.forCurious}</Text>}
+        </>
+      )}
+      {card.source && (
+        <View style={styles.doseSourceBox}>
+          <Text style={styles.doseSourceLabel}>{CONTENT_DOSE_SOURCE_LABEL}</Text>
+          {card.source.text && <Text style={styles.doseSourceText}>{card.source.text}</Text>}
+          <Text style={styles.doseSourceRef}>{card.source.label}</Text>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderContentDose = () => {
+    // Wszystkie stany braku renderują TO SAMO: nic. Rozróżnienie między nimi
+    // jest w logu i w selfteście, nie na ekranie zawodnika — bo dla niego
+    // „migracja nie weszła" i „Blok jest świeży" to ta sama informacja: nie ma
+    // dziś nic nowego do przeczytania, a komunikat o tym byłby szumem.
+    if (doseView.kind !== 'ready') return null;
+    return (
+      <View style={styles.contentDoseBox}>
+        <Text style={styles.doseSectionLabel}>{CONTENT_DOSE_SECTION_LABEL}</Text>
+        {renderDoseBody(doseView.current, doseView.current.key)}
+
+        {/* ZASADA 4: to NIE jest biblioteka. Starsze dawki są zwiniętą listą
+            wewnątrz Bloku — miejscem, w którym można wrócić do dawki sprzed
+            zmiany etapu — a nie katalogiem z własną trasą i wyszukiwarką
+            (decyzja C1: wartość jest w trafieniu w moment, nie w katalogu). */}
+        {doseView.earlier.length > 0 && (
+          <>
+            <TouchableOpacity
+              style={styles.doseEarlierToggle}
+              onPress={() => setEarlierDosesOpen((v) => !v)}
+            >
+              <Text style={styles.linkTextMuted}>
+                {earlierDosesLabel(doseView.earlier.length, earlierDosesOpen)}
+              </Text>
+            </TouchableOpacity>
+            {earlierDosesOpen && doseView.earlier.map((c) => renderDoseBody(c, c.key))}
+          </>
+        )}
+      </View>
+    );
+  };
+
+  // Ulotna dawka z przycisku „Sprawdź teraz" ZOSTAJE jako ścieżka odzysku na
+  // wypadek, gdyby kolumny w bazie nie było — ale nie pokazujemy jej drugi raz,
+  // gdy ta sama treść przyszła już z bazy.
+  const showFreshContentDose = !!freshContentDose
+    && (doseView.kind !== 'ready' || doseView.current.practicalStep !== freshContentDose.practicalStep);
+
   const renderStripeCta = () => {
     const link = STRIPE_LINKS[focusBlock.segment_id];
     const name = PRODUCT_NAMES[focusBlock.segment_id];
@@ -389,7 +643,18 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
         {reviewLoading && <ActivityIndicator size="small" color={colors.textSecondary} style={{ marginVertical: 12 }} />}
         {reviewError && <Text style={styles.error}>{reviewError}</Text>}
         {reviewSummary && <Text style={styles.reasoningText}>{reviewSummary}</Text>}
-        {!reviewLoading && (
+
+        {/* ZMIANA OBRAZU B5 08.08.2026 — „byłeś tu, jesteś tu". Komponent sam
+            renderuje się w null, gdy nie ma punktu odniesienia albo zawodnik
+            pominął pytanie, i wtedy od razu odsłania „Co dalej?". */}
+        <BlockClosingRediagnosis
+          userId={currentUserId}
+          segmentId={focusBlock.segment_id}
+          blockStartedAt={focusBlock.started_at}
+          onResolved={handleRediagnosisResolved}
+        />
+
+        {!reviewLoading && rediagnosisResolved && (
           <View>
             <Text style={styles.label}>Co dalej?</Text>
             <TouchableOpacity
@@ -470,13 +735,17 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
         <Text style={styles.hintText}>Brak jeszcze żadnego pytania kontrolnego dla tego bloku.</Text>
       )}
 
-      {freshContentDose && (
+      {/* PRAKTYKA-EKRAN B6 08.08.2026 — dawka z bazy. Stoi PRZED ulotną, bo to
+          ona jest trwała: przetrwa wyjście z ekranu i niesie ze sobą źródło. */}
+      {renderContentDose()}
+
+      {showFreshContentDose && freshContentDose && (
         <View style={styles.contentDoseBox}>
-          <Text style={styles.contentDoseLabel}>Praktyczny krok</Text>
+          <Text style={styles.contentDoseLabel}>{CONTENT_DOSE_STEP_LABEL}</Text>
           <Text style={styles.reasoningText}>{freshContentDose.practicalStep}</Text>
           {freshContentDose.forCurious && (
             <>
-              <Text style={styles.contentDoseLabel}>Dla chętnych</Text>
+              <Text style={styles.contentDoseLabel}>{CONTENT_DOSE_CURIOUS_LABEL}</Text>
               <Text style={styles.reasoningText}>{freshContentDose.forCurious}</Text>
             </>
           )}
@@ -514,6 +783,16 @@ const styles = StyleSheet.create({
   hintText: { fontSize: 12, color: colors.textSecondary, marginBottom: 8 },
   contentDoseBox: { borderTopWidth: 1, borderTopColor: colors.border, marginTop: 10, paddingTop: 10 },
   contentDoseLabel: { ...typography.bodySemiBold, fontSize: 12, color: colors.textPrimary, marginBottom: 2 },
+  // PRAKTYKA-EKRAN B6 08.08.2026 — dawka treści z bazy.
+  doseSectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 8 },
+  doseCard: { marginBottom: 4 },
+  doseDate: { ...typography.body, fontSize: 11, color: colors.textSecondary, marginBottom: 6 },
+  doseSourceBox: { borderLeftWidth: 2, borderLeftColor: colors.border, paddingLeft: 10, marginTop: 2, marginBottom: 6 },
+  doseSourceLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 4 },
+  doseSourceText: { ...typography.body, fontSize: 12, color: colors.textSecondary, lineHeight: 17, marginBottom: 3 },
+  doseSourceRef: { ...typography.bodyMedium, fontSize: 11, color: colors.textSecondary },
+  doseEarlierToggle: { minHeight: minTouchHeight, justifyContent: 'center', marginTop: 2 },
+  doseCuriousToggle: { minHeight: minTouchHeight, justifyContent: 'center' },
   error: { color: colors.error, fontSize: 13, marginBottom: 8, marginTop: 4 },
   btn: { minHeight: minTouchHeight, justifyContent: 'center', borderRadius: radii.md, backgroundColor: colors.brand, alignItems: 'center', marginTop: 8, paddingHorizontal: 12 },
   btnDisabled: { opacity: 0.4 },

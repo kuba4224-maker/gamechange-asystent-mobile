@@ -66,12 +66,27 @@ type Props = {
   isUnread?: boolean;
   /** Dodatkowa linia nad treścią — na Dziś: „Pomaga Ci w celu: …". */
   headerSlot?: ReactNode;
+  /**
+   * WIEDZA B4 08.08.2026 — blok na SAMYM DOLE karty, pod przyciskami.
+   * Na Dziś: podpowiedź z materiałów Gamechange ze źródłem („Moc, s. 8").
+   *
+   * DLACZEGO POD PRZYCISKAMI, A NIE NAD NIMI — to jedyna decyzja układu w tej
+   * rundzie, która miała realny koszt, więc stoi tu wprost. Runda 3 wywalczyła,
+   * że przyciski feedbacku stoją 489 dp od góry, czyli NAD ZGIĘCIEM także na
+   * najmniejszym telefonie (598 dp widocznego obszaru), z zapasem 109 dp.
+   * Blok podpowiedzi to 80–100 dp — wstawiony NAD przyciskami zjadłby cały ten
+   * zapas i przy dłuższej rekomendacji zepchnąłby jedyną akcję decyzyjną
+   * zawodnika pod zgięcie. Zdobycz rundy 3 jest twardym warunkiem polecenia,
+   * a miejsce podpowiedzi nie jest. Decyzja: najpierw decyzja, potem czytanie.
+   * Pełny rachunek obu wariantów: raport zwrotny B runda 4, sekcja 12.
+   */
+  footerSlot?: ReactNode;
   /** Wołane po udanym zapisie odpowiedzi — rodzic przeładowuje dane. */
   onSubmitted: () => void | Promise<void>;
 };
 
 export default function RecommendationCard({
-  rec, currentUserId, isUnread = false, headerSlot, onSubmitted,
+  rec, currentUserId, isUnread = false, headerSlot, footerSlot, onSubmitted,
 }: Props) {
   const [commentVisible, setCommentVisible] = useState(false);
   const [commentText, setCommentText] = useState('');
@@ -216,6 +231,9 @@ export default function RecommendationCard({
 
       {okMessage ? <Text style={styles.ok}>{okMessage}</Text> : null}
       {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+
+      {/* WIEDZA B4 08.08.2026 — patrz opis `footerSlot` w typie Props. */}
+      {footerSlot}
     </View>
   );
 }

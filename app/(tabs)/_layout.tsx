@@ -46,8 +46,9 @@
 //    ma wejścia. Plik `wiecej.tsx` zostaje na dysku jako przekierowanie do
 //    `/ja` — usunięcie pliku jest po stronie Kuby (sesja nie kasuje plików).
 //  • **Trasy chowane zostają tym samym wzorcem co dotąd** (`href: null`):
-//    kalendarz, cele, centrum-decyzji, profil, diagnoza, wiecej. Nowego
-//    mechanizmu nawigacji nie wprowadzamy.
+//    kalendarz, cele, centrum-decyzji, profil, diagnoza, wiecej — a od
+//    08.08.2026 także **biblioteka**. Nowego mechanizmu nawigacji nie
+//    wprowadzamy.
 //
 // ⚠️ WAŻNE PRZY DOKŁADANIU EKRANU: Expo Router pokazuje w pasku KAŻDY plik
 // z tego katalogu, także ten, którego tu nie wymieniono. Nowy plik w
@@ -69,6 +70,15 @@ export default function TabsLayout() {
       <Tabs.Screen name="centrum-decyzji" options={{ title: 'Wszystkie rekomendacje', href: null }} />
       <Tabs.Screen name="profil" options={{ title: 'Profil', href: null }} />
       <Tabs.Screen name="diagnoza" options={{ title: 'Diagnoza', href: null }} />
+      {/* ZMIANA OBRAZU B5 08.08.2026 — biblioteka materiałów wyprowadziła się
+          z ekranu „Ja" na własną trasę (pozycja M2 audytu po bloku 4: „Ja"
+          miało 2,26-2,64 ekranu scrolla, przy własnej mierze 2,5). Wejście:
+          nazwana pozycja „Twoje materiały" w sekcji „Twój rozwój" w „Ja",
+          tym samym wzorcem co „Wynik diagnozy" i „Cele".
+          ⚠️ TEN WPIS JEST OBOWIĄZKOWY, nie ozdobny — bez niego
+          `app/(tabs)/biblioteka.tsx` pojawiłby się jako PIĄTA ZAKŁADKA i
+          skasował decyzję B8. Patrz uwaga na końcu nagłówka pliku. */}
+      <Tabs.Screen name="biblioteka" options={{ title: 'Twoje materiały', href: null }} />
       {/* NAWIGACJA B3 08.08.2026 — „Więcej" nie jest już ekranem produktu;
           plik przekierowuje do `/ja`. Wpis MUSI tu zostać, dopóki plik leży
           w katalogu — bez niego wróciłby jako piąta zakładka (patrz uwaga

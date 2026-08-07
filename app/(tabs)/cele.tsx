@@ -35,6 +35,29 @@
 // był ustawiany, ale nigdy nieczytany w renderze (render używa wyłącznie
 // `activeBlocksByPillar.has(pillar)`). Pozostałość po Kroku 5a. Usunięty też
 // nieużywany styl `blockedText`.
+//
+// ═══════════════════════════════════════════════════════════════════
+// WIEDZA B4 08.08.2026 — WRACA KONTEKST „SKĄD SIĘ WZIĄŁ TEN CEL"
+// (dług N1 z audytu po bloku 3 / znalezisko B15; decyzja Kuby: wpinamy w /cele,
+//  nie kasujemy)
+//
+// CO SIĘ STAŁO: runda 3 skurczyła hero Celu na ekranie Dziś z ~220 dp do ~101 dp
+// i kontekst „Zasugerowany przez trenera: …" / „Twoja notatka: …" zszedł stamtąd.
+// Miał trafić tutaj — i nie trafił. Przez jedną rundę `lib/goal-prominence.ts`
+// nie miał ANI JEDNEGO konsumenta produkcyjnego (używał go tylko własny
+// selftest), a zawodnik stracił jedyne zdanie mówiące, skąd się ten Cel wziął.
+// To była JEDYNA funkcja z mapy przed/po rundy 3, która po niej nie była nigdzie
+// widoczna.
+//
+// GDZIE WRACA: na kartę Celu, tuż pod nazwą filaru — czyli w miejscu, w którym
+// zawodnik ogląda szczegóły tego Celu, a nie na ekranie domowym, gdzie ta linia
+// kosztowała wysokość potrzebną na przyciski feedbacku.
+//
+// DLACZEGO `goalOriginContext`, A NIE POWTÓRZENIE `refinement_note` NIŻEJ:
+// funkcja rozstrzyga PIERWSZEŃSTWO (notatka trenera > notatka zawodnika >
+// ogólna etykieta wg `origin`) i formatuje zdanie. Karta pokazywała dotąd samo
+// `refinement_note` bez etykiety — czyli notatkę bez informacji, czyja jest.
+// Cel zasugerowany przez trenera wyglądał tak samo jak wybrany samodzielnie.
 import { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -53,6 +76,9 @@ import {
 } from '../../lib/labels';
 import FocusBlockPlanner from '../../components/FocusBlockPlanner';
 import FocusBlockActiveView from '../../components/FocusBlockActiveView';
+// WIEDZA B4 08.08.2026 — dług N1: `goal-prominence.ts` odzyskuje konsumenta
+// produkcyjnego. Patrz nagłówek pliku.
+import { goalOriginContext } from '../../lib/goal-prominence';
 
 // JEDNA DROGA B2 08.08.2026 — lokalne kopie nazw segmentów i podziału na filary
 // usunięte; jedno źródło to lib/labels.ts. Aliasy poniżej zachowują dotychczasowe
@@ -85,10 +111,28 @@ const EVIDENCE_LABELS: Record<string, string> = {
 
 const GOAL_VALIDATION_API_URL = 'https://gamechange-app.vercel.app/api/validate-goal-refinement';
 
+// ZMIANA OBRAZU B5 08.08.2026 — rozpoznanie „nie ma takiej kolumny".
+// PostgREST zgłasza to na dwa sposoby zależnie od wersji (`42703` z Postgresa
+// albo `PGRST204` ze schema cache), a kod bywa pusty — dlatego sprawdzamy oba
+// i treść komunikatu, tak samo jak `isMissingTableError()` w lib/componentHints.ts.
+function isUnknownColumnError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  if (!e) return false;
+  if (e.code === '42703' || e.code === 'PGRST204') return true;
+  const msg = (e.message ?? '').toLowerCase();
+  return msg.includes('component_id') && (msg.includes('column') || msg.includes('schema cache'));
+}
+
 type Goal = {
   id: number; segment_id: string; status: string; is_priority: boolean;
   refinement_note: string | null; horizon_weeks: number | null;
   created_at: string; ended_at: string | null;
+  // WIEDZA B4 08.08.2026 — dług N1. Te dwie kolumny BYŁY już pobierane
+  // (`loadGoals()` robi `select('*')`), tylko typ ich nie znał, więc kontekst
+  // „skąd się wziął ten Cel" nie dało się narysować bez rzutowania. Zero zmian
+  // w zapytaniu. Kształt zgodny z `GoalOriginInfo` z lib/goal-prominence.ts.
+  origin: string | null;
+  suggestion_note: string | null;
 };
 
 type SegmentComponent = { id: string; name: string; evidence_strength?: string | null };
@@ -365,13 +409,63 @@ export default function CeleScreen() {
         is_priority: isPriority,
       };
       if (note.trim()) body.refinement_note = note.trim();
+
+      // ═══════════════════════════════════════════════════════════════
+      // ZMIANA OBRAZU B5 08.08.2026 — pozycja M1 audytu po bloku 4.
+      //
+      // Kolumna `goals.component_id` istnieje od 08.08.2026 i NIKT W NIĄ NIE
+      // PISAŁ. Ekran prowadził zawodnika przez wybór Obszar → Element z
+      // `segment_components`, pokazywał listę, walidował wybór przez AI — a
+      // potem zapisywał sam `segment_id` i nazwę Elementu jako zwykły tekst
+      // w `refinement_note`. Wybór ginął: baza wiedziała, w JAKIM OBSZARZE
+      // zawodnik pracuje, ale nie W CO celuje.
+      //
+      // Koszt tego był policzalny (znalezisko B24): 113 z 214 podpowiedzi z
+      // `component_hints` jest przypiętych do Elementu (63) albo do Obszaru
+      // (43), a `selectHintsForPlayer()` dopuszcza je wyłącznie przy
+      // DOKŁADNYM dopasowaniu `component_id`. Przy pustej kolumnie zostawało
+      // 108 reguł segmentowych — czyli zawodnik bez Bloku Skupienia nie miał
+      // jak dostać połowy korpusu.
+      //
+      // CO DOKŁADNIE ZAPISUJEMY: NAJBARDZIEJ SZCZEGÓŁOWY wybór, jakiego
+      // zawodnik faktycznie dokonał — Element, jeśli go wskazał, a jeśli
+      // zatrzymał się na Obszarze, to Obszar. Nie „zawsze Obszar" i nie
+      // „tylko Element":
+      //   • Element bez Obszaru nie istnieje w tym przepływie (Elementy
+      //     ładują się dopiero po wybraniu Obszaru), więc zapis Elementu
+      //     niczego nie gubi — `segment_components` zna jego rodzica;
+      //   • zapis Obszaru, gdy Element nie został wybrany, jest jedyną drogą
+      //     do 43 podpowiedzi przypiętych do Obszarów;
+      //   • „opisz sam" (`freeTextMode`) czyści OBA identyfikatory
+      //     (`switchToFreeText`), więc zostaje `null` — i to jest poprawne:
+      //     zawodnik nie wskazał żadnego wiersza taksonomii, a wpisanie tam
+      //     czegokolwiek byłoby zgadywaniem za niego.
+      const componentId = selectedElementId ?? selectedObszarId ?? null;
+      if (componentId) body.component_id = componentId;
       if (horizon !== '') {
         body.horizon_weeks = Number(horizon);
         body.horizon_started_at = toLocalDateStr(new Date());
       }
       if (isPriority) body.priority_changed_at = new Date().toISOString();
 
-      const { error: insErr } = await supabase.from('goals').insert(body);
+      let { error: insErr } = await supabase.from('goals').insert(body);
+
+      // ŚCIEŻKA ODZYSKU — ten sam wzorzec co zapis `source_hint` w silniku
+      // (raport A runda 4, sekcja 3.4). Migracja dodająca `goals.component_id`
+      // została wklejona 08.08.2026, ale gdyby tej kolumny w bazie jednak nie
+      // było, BEZ tego bloku zawodnik przestałby móc założyć JAKIKOLWIEK cel —
+      // czyli nowa funkcja zabiłaby starą. Zapisujemy wtedy cel bez tego
+      // jednego pola i mówimy o tym w logu wprost, zamiast po cichu.
+      if (insErr && componentId && isUnknownColumnError(insErr)) {
+        console.warn(
+          '[cele] Kolumna goals.component_id nie istnieje w bazie — cel zapisany BEZ wybranego '
+          + 'Elementu. Zawodnik NIE dostanie podpowiedzi przypiętych do Elementu ani Obszaru. '
+          + 'Migracja: audyt po bloku 4, pozycja M1.'
+        );
+        delete body.component_id;
+        ({ error: insErr } = await supabase.from('goals').insert(body));
+      }
+
       if (insErr) {
         if ((insErr as any).code === '23505' || insErr.message?.includes('idx_goals_one_active_per_segment')) {
           throw new Error('Masz już aktywny cel w tym segmencie — najpierw go zakończ (ukończony/porzucony), zanim dodasz nowy.');
@@ -441,6 +535,8 @@ export default function CeleScreen() {
   const renderGoalCard = (g: Goal) => {
     const label = SEG_LABELS[g.segment_id] ?? g.segment_id;
     const pillar = SEG_PILLAR[g.segment_id] ?? '';
+    // WIEDZA B4 08.08.2026 — dług N1, patrz nagłówek pliku.
+    const originContext = goalOriginContext(g);
     const meta: string[] = [];
     if (g.horizon_weeks) meta.push(`horyzont: ${g.horizon_weeks} tyg.`);
     meta.push('dodano: ' + formatDatePl(g.created_at));
@@ -455,7 +551,15 @@ export default function CeleScreen() {
           {g.status === 'abandoned' && <Text style={styles.badgeAbandoned}>Porzucony</Text>}
         </View>
         <Text style={styles.cardPillar}>{pillar}</Text>
-        {g.refinement_note ? <Text style={styles.cardNote}>{g.refinement_note}</Text> : null}
+        {/* WIEDZA B4 08.08.2026 — dług N1: kontekst „skąd się wziął ten Cel".
+            `goalOriginContext` ZAWIERA W SOBIE `refinement_note` (wariant
+            „Twoja notatka: …"), więc rysowanie obu naraz powtórzyłoby ten sam
+            tekst dwa razy. Surowa notatka zostaje jako odwrót na wypadek
+            nieznanego `origin` — wtedy funkcja zwraca `null`, a notatka i tak
+            ma się pokazać. Nic z dotychczasowej treści karty nie znika. */}
+        {originContext
+          ? <Text style={styles.cardOrigin}>{originContext}</Text>
+          : g.refinement_note ? <Text style={styles.cardNote}>{g.refinement_note}</Text> : null}
         <Text style={styles.cardMeta}>{meta.join(' · ')}</Text>
         {g.status === 'active' && (
           <View style={styles.cardActions}>
@@ -716,6 +820,10 @@ const styles = StyleSheet.create({
   cardSegment: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
   cardPillar: { fontSize: 11, color: colors.textSecondary, marginBottom: 8 },
   cardNote: { ...typography.body, fontSize: 13, color: colors.textPrimary, marginBottom: 8 },
+  // WIEDZA B4 08.08.2026 — dług N1. Ten sam rozmiar i margines co `cardNote`,
+  // którą zastępuje w typowym przypadku — karta nie zmienia wysokości. Kolor
+  // drugorzędny, bo to kontekst, a nie treść Celu.
+  cardOrigin: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginBottom: 8 },
   cardMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 10 },
   badgePriority: { fontSize: 11, backgroundColor: 'rgba(240,149,75,0.15)', color: colors.warning, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
   badgeCompleted: { fontSize: 11, backgroundColor: 'rgba(76,175,107,0.15)', color: colors.success, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },

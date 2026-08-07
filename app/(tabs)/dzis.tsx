@@ -79,6 +79,48 @@
 //    „dodaj i zaplanuj", a nie tylko „otwórz". Formularz dodawania,
 //    cykliczne, nadchodzące, minione i anulowane są nietknięte, jedno
 //    dotknięcie stąd.
+//
+// ═══════════════════════════════════════════════════════════════════
+// WIEDZA B4 08.08.2026 — PODPOWIEDŹ Z MATERIAŁU PRZY REKOMENDACJI
+// (decyzje B1 i C1 warstwa 1, claude/DECYZJE_PRODUKTOWE_07_08_2026.md;
+//  treść i kształt tabeli: claude/PODPOWIEDZI_Z_MATERIALOW_A.md 4.3 i 4.5)
+//
+// CO SIĘ ZMIENIŁO: pod przyciskami karty rekomendacji stoi jedna podpowiedź
+// z materiałów Kuby, Z WIDOCZNYM ŹRÓDŁEM („Moc, s. 8"). To źródło jest całą
+// różnicą — zdanie bez niego mógłby napisać dowolny model; zdanie z nim pochodzi
+// z konkretnej strony konkretnej książki i da się je sprawdzić.
+//
+// SKĄD BIERZEMY DANE — i dlaczego tą drogą. Polecenie dawało dwie: (1) czytać
+// podpowiedź już przypiętą do rekordu rekomendacji przez pas A tej samej rundy,
+// (2) czytać `component_hints` bezpośrednio po `segment_id` aktywnego Celu.
+// SPRAWDZIŁEM PIERWSZĄ: raportu A rundy 4 nie ma w pamięci projektu (najnowszy
+// to `RAPORT_ZWROTNY_A_RUNDA_3.md`), więc kontraktu na przypięcie nie ma, a
+// `RECOMMENDATION_COLUMNS` nie zawiera żadnej kolumny z podpowiedzią. Idę
+// drugą drogą. Gdy pas A dopnie podpowiedź do rekordu, ten ekran przestawia się
+// na nią zmianą w jednym miejscu (`loadHint`), bez ruszania reguł z
+// `lib/componentHints.ts`.
+//
+// ⚠️ BRAMKA WIEKOWA (decyzja A9) jest twarda i jest w `lib/componentHints.ts`:
+// poniżej 16 lat zawodnik nie dostaje podpowiedzi z dawkami suplementacyjnymi,
+// a gdy appka NIE ZNA wieku — też ich nie dostaje. Appka zna wyłącznie rocznik
+// (`users.birth_year`), więc liczymy wiek NAJNIŻSZY MOŻLIWY. Uzasadnienie
+// kierunku błędu stoi przy `minimumPossibleAge`.
+//
+// ⚠️ REGUŁA R5: „nie ma tabeli" i „tabela jest, ale pusta" to DWIE RÓŻNE RZECZY
+// i ekran je rozróżnia. Migracja `component_hints` (214 wierszy) czeka na
+// wklejenie przez Kubę — do tego czasu ekran mówi wprost „materiały dla tego
+// obszaru są w przygotowaniu", zamiast pokazać pustkę udającą, że nic nie ma.
+//
+// ═══════════════════════════════════════════════════════════════════
+// WIEDZA B4 08.08.2026 — STAN ŁADOWANIA (dług N2 / znalezisko B18, otwarte
+// od rundy 2). `loading` było ustawiane i NIGDY nie czytane: przy pierwszym
+// wejściu zawodnik widział przez chwilę „Nie masz jeszcze Celu" i pusty stan
+// rekomendacji, po czym ekran się przemalowywał. To nie jest kosmetyka —
+// pierwsze zdanie, jakie appka mówi zawodnikowi po zalogowaniu, brzmiało
+// nieprawdziwie. `loading` startuje jako `true` i schodzi do `false` po
+// pierwszym `load()`; kolejne odświeżenia (`useFocusEffect`, `RefreshControl`)
+// go NIE podnoszą, bo wtedy na ekranie są już prawdziwe dane i migotanie
+// byłoby gorsze niż jego brak.
 import { useState, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -95,6 +137,39 @@ import { toLocalDateStr, DAYS_OF_WEEK } from '../../lib/date-utils';
 // lokalna kopia 13 nazw usunięta, treść niezmieniona co do znaku.
 import { SEGMENT_LABELS } from '../../lib/labels';
 import { computeFocusBlockProgress, type FocusBlockProgress } from '../../lib/focusBlockProgress';
+// WIEDZA B4 08.08.2026 — wszystkie reguły podpowiedzi (bramka wiekowa A9,
+// rozróżnienie R5, wybór jednej z kilkunastu) siedzą w czystych funkcjach
+// z własnym selftestem. Tutaj zostaje wyłącznie zapytanie i rysowanie.
+import {
+  COMPONENT_HINT_COLUMNS,
+  // ZAPIS B7 08.08.2026 (M19) — treść zawsze widoczna: rozszerzona lista kolumn
+  // + ścieżka odzysku, gdy migracja `zawsze_widoczna` nie jest wklejona.
+  COMPONENT_HINT_COLUMNS_WITH_ALWAYS,
+  shouldRetryWithoutAlwaysVisible,
+  ALWAYS_VISIBLE_COLUMN_MISSING_WARN,
+  buildHintState,
+  minimumPossibleAge,
+  hintKindLabel,
+  hintEyebrow,
+  HINT_EYEBROW,
+  HINT_TABLE_MISSING_TEXT,
+  HINT_ERROR_TEXT,
+  HINT_EMPTY_TEXT,
+  type ComponentHintRow,
+  type HintState,
+} from '../../lib/componentHints';
+// ZAPIS B7 08.08.2026 (M23/B35) — „Nowa porcja w Twoim Bloku": odczyt dawki
+// i listy „przeczytane" tymi samymi czystymi funkcjami co ekran Bloku.
+import {
+  CONTENT_DOSE_COLUMN,
+  CONTENT_DOSE_SEEN_COLUMN,
+  CONTENT_DOSE_SEEN_COLUMN_MISSING_WARN,
+  isMissingContentDoseColumnError,
+  isMissingSeenColumnError,
+  parseContentDoses,
+  parseSeenKeys,
+  isDoseSeen,
+} from '../../lib/contentDose';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
 import LivingDiagnosisPulseCard from '../../components/LivingDiagnosisPulseCard';
 import RecommendationCard, { RECOMMENDATION_COLUMNS, type Recommendation } from '../../components/RecommendationCard';
@@ -115,7 +190,11 @@ type CalEvent = {
   id: number; title: string; event_type: string; scheduled_date: string | null;
   recurrence_rule: string | null; focus_block_id: string | null;
 };
-type FocusBlockRow = { id: string; segment_id: string; status: string };
+// WIEDZA B4 08.08.2026 — doszło `component_id`: to jest Element, nad którym
+// zawodnik faktycznie pracuje, więc podpowiedź wycelowana w ten Element jest
+// trafniejsza niż reguła przekrojowa segmentu. `computeFocusBlockProgress`
+// tej kolumny nie czyta i nie zmienia przez to zachowania.
+type FocusBlockRow = { id: string; segment_id: string; status: string; component_id?: string | null };
 
 function dayCodeFor(date: Date) {
   const idx = (date.getDay() + 6) % 7; // 0=Pon..6=Nd — ta sama konwencja co lib/date-utils.ts
@@ -136,6 +215,9 @@ export default function DzisScreen() {
   const [workProgress, setWorkProgress] = useState<FocusBlockProgress>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
+  // o nią rusza dopiero wtedy, gdy wiadomo, jaki jest segment Celu.
+  const [hintState, setHintState] = useState<HintState>({ state: 'loading' });
 
   // Migawka „co było nieprzeczytane w chwili wejścia na ekran" — ten sam wzorzec
   // co w centrum-decyzji.tsx: kropka „Nowe" nie może zniknąć w trakcie tej samej
@@ -159,6 +241,80 @@ export default function DzisScreen() {
     setFocusRec((prev) => (prev && prev.id === rec.id ? { ...prev, viewed_at: nowIso } : prev));
   }, []);
 
+  // WIEDZA B4 08.08.2026 — jedno zapytanie o podpowiedzi z materiałów.
+  // Rusza dopiero po `load()`, bo dopiero wtedy znany jest segment Celu.
+  //
+  // ⚠️ TU MIESZKA REGUŁA R5. `supabase-js` NIE RZUCA wyjątku, gdy tabeli nie
+  // ma — zwraca `{ data: null, error }`. Gdyby ten kod zrobił
+  // `rows = data ?? []`, brak tabeli byłby nieodróżnialny od „nie ma treści dla
+  // tego segmentu": ekran pokazałby spokojny pusty stan, wszystko wyglądałoby
+  // na wdrożone i nikt nigdy by nie wrócił. Dlatego `error` idzie do
+  // `buildHintState` NIETKNIĘTY i to ono rozstrzyga, co zawodnik zobaczy.
+  // ZAPIS B7 08.08.2026 (M23/B35) — czy w Bloku pod tym Celem czeka NOWA,
+  // nieotwarta dawka treści. Osobne, wąskie zapytanie (nie kolumny w selecie
+  // z Promise.all — PostgREST przy nieznanej kolumnie odrzuca CAŁE zapytanie,
+  // a `content_doses`/`content_dose_seen` to najmłodsze migracje). Każdy brak
+  // — kolumny, koperty, klucza — znaczy po prostu „nie pokazuj linii";
+  // pierwszy z nich dodatkowo mówi w logu dlaczego.
+  const [newDoseWaiting, setNewDoseWaiting] = useState(false);
+  const loadNewDose = useCallback(async (blockId: string | null) => {
+    if (!blockId) { setNewDoseWaiting(false); return; }
+    let { data, error: err } = await supabase
+      .from('focus_blocks')
+      .select(`${CONTENT_DOSE_COLUMN},${CONTENT_DOSE_SEEN_COLUMN}`)
+      .eq('id', blockId)
+      .maybeSingle();
+    if (err && isMissingSeenColumnError(err) && !isMissingContentDoseColumnError(err)) {
+      console.warn(CONTENT_DOSE_SEEN_COLUMN_MISSING_WARN);
+      setNewDoseWaiting(false);
+      return; // bez kolumny „seen" nie ma jak odróżnić nowej od przeczytanej
+    }
+    if (err || !data) { setNewDoseWaiting(false); return; }
+    const row = data as Record<string, unknown>;
+    const parsed = parseContentDoses(row[CONTENT_DOSE_COLUMN]);
+    if (parsed.kind !== 'ready' || parsed.doses.length === 0) { setNewDoseWaiting(false); return; }
+    const seen = parseSeenKeys(row[CONTENT_DOSE_SEEN_COLUMN]);
+    setNewDoseWaiting(!isDoseSeen(seen, parsed.doses[0].klucz));
+  }, []);
+
+  const loadHint = useCallback(async (params: {
+    segmentId: string | null;
+    componentId: string | null;
+    birthYear: number | null;
+  }) => {
+    const { segmentId, componentId, birthYear } = params;
+    if (!segmentId) {
+      setHintState(buildHintState({ hasGoal: false, error: null, rows: null, age: null }));
+      return;
+    }
+    const age = minimumPossibleAge(birthYear);
+    // ZAPIS B7 08.08.2026 (M19) — pytamy rozszerzoną listą kolumn (z
+    // `zawsze_widoczna`); gdy migracji nie ma, powtarzamy starą listą i
+    // zachowanie wraca bajt w bajt do stanu sprzed rundy 6. Diff wprost
+    // z raportu B rundy 6, sekcja 8.1 — to jest WARUNEK wejścia treści
+    // bezpieczeństwa do bazy.
+    let { data, error: err } = await supabase
+      .from('component_hints')
+      .select(COMPONENT_HINT_COLUMNS_WITH_ALWAYS)
+      .eq('segment_id', segmentId)
+      .eq('active', true);
+    if (err && shouldRetryWithoutAlwaysVisible(err)) {
+      console.warn(ALWAYS_VISIBLE_COLUMN_MISSING_WARN);
+      ({ data, error: err } = await supabase
+        .from('component_hints')
+        .select(COMPONENT_HINT_COLUMNS)
+        .eq('segment_id', segmentId)
+        .eq('active', true));
+    }
+    setHintState(buildHintState({
+      hasGoal: true,
+      error: err,
+      rows: err ? null : ((data ?? []) as unknown as ComponentHintRow[]),
+      componentId,
+      age,
+    }));
+  }, []);
+
   const load = useCallback(async () => {
     if (!currentUser) return;
     const todayStr = toLocalDateStr(new Date());
@@ -166,7 +322,7 @@ export default function DzisScreen() {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const [goalsRes, logsRes, recsRes, eventsRes, blocksRes, doneLogsRes] = await Promise.all([
+    const [goalsRes, logsRes, recsRes, eventsRes, blocksRes, doneLogsRes, userRes] = await Promise.all([
       supabase.from('goals').select('id,segment_id,is_priority,status,created_at,origin,suggestion_note,refinement_note')
         .eq('user_id', currentUser.id).eq('status', 'active')
         .order('is_priority', { ascending: false }).order('created_at', { ascending: false }),
@@ -180,12 +336,18 @@ export default function DzisScreen() {
         .order('created_at', { ascending: false }),
       supabase.from('calendar_events').select('id,title,event_type,scheduled_date,recurrence_rule,focus_block_id')
         .eq('user_id', currentUser.id).eq('status', 'scheduled'),
-      supabase.from('focus_blocks').select('id,segment_id,status')
+      // WIEDZA B4 08.08.2026 — doszło `component_id` (Element Bloku Skupienia),
+      // żeby podpowiedź dało się wycelować w to, nad czym zawodnik pracuje.
+      supabase.from('focus_blocks').select('id,segment_id,status,component_id')
         .eq('user_id', currentUser.id).eq('status', 'active'),
       // Wykonanie sesji rozpoznajemy po `daily_logs.calendar_event_id` — ten sam
       // wzorzec co plakietki „Wykonano / Nie wykonano" w kalendarz.tsx.
       supabase.from('daily_logs').select('calendar_event_id')
         .eq('user_id', currentUser.id).not('calendar_event_id', 'is', null),
+      // WIEDZA B4 08.08.2026 — rocznik. JEDYNE źródło wieku, jakie appka ma
+      // (`app/(tabs)/profil.tsx`, etap 0 kreatora). Karmi wyłącznie bramkę
+      // wiekową A9 i nie jest nigdzie pokazywany.
+      supabase.from('users').select('birth_year').eq('id', currentUser.id).limit(1),
     ]);
 
     const goals = (goalsRes.data ?? []) as Goal[];
@@ -218,16 +380,35 @@ export default function DzisScreen() {
     // Cała logika (i uzasadnienie każdej decyzji) siedzi w
     // lib/focusBlockProgress.ts — czysta funkcja, uruchamiana i sprawdzana bez
     // appki przez lib/focusBlockProgress.selftest.ts. Tutaj tylko dane.
+    const activeBlocks = (blocksRes.data ?? []) as FocusBlockRow[];
     setWorkProgress(computeFocusBlockProgress({
       goalSegmentId: goal?.segment_id ?? null,
-      activeBlocks: (blocksRes.data ?? []) as FocusBlockRow[],
+      activeBlocks,
       scheduledEvents: events, // wyłącznie status='scheduled' — patrz zapytanie wyżej
       doneEventIds: new Set(((doneLogsRes.data ?? []) as { calendar_event_id: number }[])
         .map((l) => l.calendar_event_id)),
     }));
 
     setLoading(false);
-  }, [currentUser, markShownAsViewed]);
+
+    // ─── Podpowiedź z materiału (WIEDZA B4 08.08.2026) ────────────────
+    // Świadomie POZA `Promise.all` wyżej: zapytanie potrzebuje `segment_id`
+    // Celu, którego przed tamtym zapytaniem nie znamy. Ekran ma na to własny
+    // stan ładowania, więc rekomendacja nie czeka na podpowiedź.
+    // Blok Skupienia bierzemy ten, który stoi pod Celem — nie dowolny aktywny.
+    const blockForGoal = goal
+      ? activeBlocks.find((b) => b.segment_id === goal.segment_id) ?? null
+      : null;
+    const birthYear = (userRes.data?.[0] as { birth_year: number | null } | undefined)?.birth_year ?? null;
+    loadHint({
+      segmentId: goal?.segment_id ?? null,
+      componentId: blockForGoal?.component_id ?? null,
+      // Błąd odczytu rocznika daje `null`, czyli „appka nie zna wieku", czyli
+      // bramka A9 zamknięta. Nie ma tu cichego fallbacku „załóżmy, że dorosły".
+      birthYear: userRes.error ? null : birthYear,
+    });
+    loadNewDose(blockForGoal?.id ?? null);
+  }, [currentUser, markShownAsViewed, loadHint, loadNewDose]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -240,6 +421,63 @@ export default function DzisScreen() {
   const todayLabel = new Date().toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' });
   const goalSegmentLabel = priorityGoal ? (SEG_LABELS[priorityGoal.segment_id] ?? priorityGoal.segment_id) : null;
   const isRecLinkedToGoal = !!focusRec && !!priorityGoal && focusRec.goal_id === priorityGoal.id;
+
+  // WIEDZA B4 08.08.2026 — podpowiedź z materiału, blok pod przyciskami karty.
+  // Uzasadnienie miejsca (a nie nad przyciskami) stoi przy `footerSlot`
+  // w components/RecommendationCard.tsx. Cztery stany, każdy JAWNY — reguła R5:
+  // pusty wynik i brak tabeli to dwie różne rzeczy i zawodnik ma je rozróżniać
+  // po tekście, nie zgadywać z ciszy.
+  const renderHint = () => {
+    if (hintState.state === 'no_goal') return null;
+    if (hintState.state === 'loading') return null; // nic nie migocze pod przyciskami
+
+    // ZAPIS B7 08.08.2026 (M19) — treść zawsze widoczna (m.in. bezpieczeństwo:
+    // telefon zaufania) stoi NAD rotacyjną i nie znika żadnego dnia. Dziś
+    // (kolumna świeżo wklejona, zero wierszy `true`) ta lista jest pusta,
+    // więc ekran wygląda co do piksela jak przed tą zmianą.
+    const always = hintState.alwaysVisible.map((p) => (
+      <View key={p.hint.klucz} style={styles.hintBox}>
+        <Text style={styles.hintEyebrow}>
+          {hintEyebrow(p.source)}
+          {p.source ? <Text style={styles.hintSource}>{'  ·  ' + p.source}</Text> : null}
+        </Text>
+        <Text style={styles.hintKind}>{hintKindLabel(p.hint.rodzaj)}</Text>
+        <Text style={styles.hintText}>{p.hint.hint}</Text>
+      </View>
+    ));
+    if (hintState.state === 'always_only') return <>{always}</>;
+
+    if (hintState.state === 'ready') {
+      return (
+        <>
+          {always}
+          <View style={styles.hintBox}>
+            {/* Nadtytuł mówi PRAWDĘ o pochodzeniu zdania: „Z materiałów Gamechange"
+                tylko wtedy, gdy da się pokazać źródło. Jedyny wiersz bez źródła
+                (zdanie kierujące po dawki do rodzica, decyzja A9) dostaje
+                „Zasada Gamechange" — patrz `hintEyebrow` w lib/componentHints.ts. */}
+            <Text style={styles.hintEyebrow}>
+              {hintEyebrow(hintState.source)}
+              {hintState.source ? <Text style={styles.hintSource}>{'  ·  ' + hintState.source}</Text> : null}
+            </Text>
+            <Text style={styles.hintKind}>{hintKindLabel(hintState.hint.rodzaj)}</Text>
+            <Text style={styles.hintText}>{hintState.hint.hint}</Text>
+          </View>
+        </>
+      );
+    }
+
+    const quietText =
+      hintState.state === 'table_missing' ? HINT_TABLE_MISSING_TEXT
+        : hintState.state === 'error' ? HINT_ERROR_TEXT
+          : HINT_EMPTY_TEXT;
+    return (
+      <View style={styles.hintBox}>
+        <Text style={styles.hintEyebrow}>{HINT_EYEBROW}</Text>
+        <Text style={styles.hintQuiet}>{quietText}</Text>
+      </View>
+    );
+  };
 
   const allRecsLinkLabel = otherUnreadCount > 0
     ? `Wszystkie rekomendacje (${otherUnreadCount} nowe) →`
@@ -269,7 +507,13 @@ export default function DzisScreen() {
             ekran i zostałaby ucięta wielokropkiem. */}
         <TouchableOpacity style={styles.heroGoal} onPress={() => router.push('/cele')}>
           <Text style={styles.heroEyebrow}>Twój aktywny Cel</Text>
-          {priorityGoal ? (
+          {/* WIEDZA B4 08.08.2026 — dług N2 (znalezisko B18, otwarte od rundy 2).
+              Bez tego zawodnik przy pierwszym wejściu widział przez ułamek
+              sekundy „Nie masz jeszcze Celu" — zdanie nieprawdziwe dla większości
+              zalogowanych. Patrz nagłówek pliku. */}
+          {loading ? (
+            <Text style={styles.heroLoading}>Wczytuję Twój Cel…</Text>
+          ) : priorityGoal ? (
             <>
               <Text style={styles.heroTitle} numberOfLines={1}>{goalSegmentLabel}</Text>
 
@@ -286,6 +530,13 @@ export default function DzisScreen() {
                   <View style={styles.workTrack}>
                     <View style={[styles.workFill, { width: `${Math.round((workProgress.done / workProgress.total) * 100)}%` }]} />
                   </View>
+                  {/* ZAPIS B7 08.08.2026 (M23/B35) — dawka była dotąd za dwoma
+                      kliknięciami i nic na Dziś o niej nie mówiło. Jedna linia,
+                      tylko gdy najnowsza dawka jest NIEOTWARTA; cały kafelek
+                      i tak prowadzi do Celu, więc zero nowych tras. */}
+                  {newDoseWaiting ? (
+                    <Text style={styles.heroAction}>Nowa porcja w Twoim Bloku →</Text>
+                  ) : null}
                 </>
               ) : (
                 // Brak Bloku pod ten Cel → ŻADNEJ zastępczej liczby (nigdy
@@ -306,7 +557,13 @@ export default function DzisScreen() {
             decyzyjna na ekranie domowym. */}
         <View style={{ marginTop: 24 }}>
           <Text style={styles.sectionLabel}>Co dziś zrobić</Text>
-          {focusRec && currentUser ? (
+          {/* WIEDZA B4 08.08.2026 — dług N2: pierwsze wejście nie udaje już, że
+              rekomendacji nie ma. Patrz nagłówek pliku. */}
+          {loading ? (
+            <View style={styles.card}>
+              <Text style={styles.cardBody}>Wczytuję…</Text>
+            </View>
+          ) : focusRec && currentUser ? (
             <>
               <RecommendationCard
                 rec={focusRec}
@@ -315,6 +572,10 @@ export default function DzisScreen() {
                 headerSlot={isRecLinkedToGoal && goalSegmentLabel
                   ? <Text style={styles.linkedToGoal}>Pomaga Ci w celu: {goalSegmentLabel}</Text>
                   : null}
+                // WIEDZA B4 08.08.2026 — SEDNO TEJ RUNDY: konkret z materiałów
+                // Kuby ze źródłem, pod przyciskami. Patrz `footerSlot`
+                // w components/RecommendationCard.tsx.
+                footerSlot={renderHint()}
                 onSubmitted={load}
               />
               <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/centrum-decyzji')}>
@@ -328,6 +589,11 @@ export default function DzisScreen() {
                   ? 'Jeszcze nie mamy dla Ciebie gotowej rekomendacji — pojawi się tu, gdy silnik Centrum Decyzji zacznie działać.'
                   : 'Załóż swój pierwszy Cel, żeby system zaczął podpowiadać, na czym się skupić.'}
               </Text>
+              {/* Brak rekomendacji NIE oznacza braku wiedzy: podpowiedź z materiału
+                  wisi na segmencie Celu, więc zawodnik z Celem, ale bez gotowej
+                  rekomendacji, i tak dostaje dziś konkret. Bez Celu `renderHint()`
+                  zwraca `null` i karta wygląda jak dotąd. */}
+              {renderHint()}
               <TouchableOpacity style={styles.inlineLink} onPress={() => router.push(hasAnyGoal ? '/centrum-decyzji' : '/cele')}>
                 <Text style={styles.cardAction}>{hasAnyGoal ? allRecsLinkLabel : 'Przejdź do Celów →'}</Text>
               </TouchableOpacity>
@@ -410,10 +676,32 @@ const styles = StyleSheet.create({
   heroEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 4 },
   heroTitle: { ...typography.displayExtraBold, fontSize: 21, color: colors.textPrimary, marginBottom: 6 },
   heroAction: { ...typography.bodyMedium, fontSize: 13, color: colors.brand },
+  // WIEDZA B4 08.08.2026 — dług N2. Wysokość dobrana tak, żeby stan ładowania
+  // NIE był wyższy niż stan docelowy (21 px nazwa + 6 marginesu + 13 px wskaźnik
+  // + 5 + 4 pasek ≈ 49 dp; tu 20 + 5 + 4 + 20 = 49). Ekran nie skacze w dół,
+  // gdy dane dojdą — a to jest cały sens tego stanu.
+  heroLoading: { ...typography.body, fontSize: 15, lineHeight: 20, color: colors.textSecondary, marginBottom: 29 },
   // JEDNA DROGA B2 08.08.2026 — wskaźnik pracy.
   workText: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary, marginBottom: 5 },
   workTrack: { height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: 'hidden' },
   workFill: { height: 4, borderRadius: 2, backgroundColor: colors.brand },
+  // WIEDZA B4 08.08.2026 — PODPOWIEDŹ Z MATERIAŁU.
+  // Kreska u góry zamiast własnej ramki: to jest część TEJ karty, a nie druga
+  // karta pod nią. Zawodnik ma przeczytać „to należy do tej rekomendacji", nie
+  // „doszedł kolejny kafelek".
+  hintBox: {
+    marginTop: 16, paddingTop: 14,
+    borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  hintEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6 },
+  // Źródło w kolorze marki — to JEDYNA rzecz na tym ekranie, która mówi
+  // zawodnikowi, że zdanie obok pochodzi z konkretnej strony konkretnej książki,
+  // a nie z generatora. Dlatego nie jest szare.
+  hintSource: { ...typography.bodySemiBold, color: colors.brand, letterSpacing: 0.5 },
+  hintKind: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary, marginBottom: 4 },
+  hintText: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textPrimary },
+  // Stan „nie mam skąd wziąć" (reguła R5) — spokojny, szary, JAWNY. Nigdy pustka.
+  hintQuiet: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary },
   inlineLink: { minHeight: minTouchHeight, justifyContent: 'center' },
   eventLine: { ...typography.body, fontSize: 14, color: colors.textPrimary, marginBottom: 6, lineHeight: 20 },
   eventTitle: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },

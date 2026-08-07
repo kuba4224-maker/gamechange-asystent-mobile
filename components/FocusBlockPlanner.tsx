@@ -34,6 +34,9 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator 
 import Checkbox from 'expo-checkbox';
 import { supabase } from '../lib/supabase';
 import { DAYS_OF_WEEK, toLocalDateStr } from '../lib/date-utils';
+// ZAPIS B7 08.08.2026 — „Skąd to wiemy" przy sugestii dozowania: ten sam
+// formatter źródła co podpowiedź na Dziś i dawka w Bloku (jedna reguła).
+import { formatHintSource } from '../lib/componentHints';
 import { colors, typography, radii, minTouchHeight } from '../constants/theme';
 
 const FOCUS_BLOCK_DOSING_API_URL = 'https://gamechange-app.vercel.app/api/generate-focus-block-dosing';
@@ -52,7 +55,21 @@ const SESSIONS_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
 type Goal = { id: number; segment_id: string; refinement_note: string | null };
 type SegmentComponent = { id: string; name: string; evidence_strength?: string | null };
-type Suggestion = { days: Set<string>; durationMinutes: number; weeks: number; reasoning: string };
+// ZAPIS B7 08.08.2026 — kontrakt fazy 1 (raport A rundy 6, sekcja 13):
+// `sourceHint` ma DOKŁADNIE ten sam kształt co `decision_recommendations.
+// source_hint` (r4) i `content_doses[].zrodlo_podpowiedzi` (r5). `null` =
+// dozowanie powstało bez podpowiedzi z materiałów — sekcji wtedy NIE MA.
+// Pola `celowanie`/`wybor`/`klucz` są diagnostyczne i nie idą na ekran.
+type DosingSourceHint = {
+  wersja?: number;
+  tresc?: string | null;
+  material?: string | null;
+  strona?: string | null;
+};
+type Suggestion = {
+  days: Set<string>; durationMinutes: number; weeks: number; reasoning: string;
+  sourceHint: DosingSourceHint | null;
+};
 
 type Props = {
   goal: Goal;
@@ -200,11 +217,24 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // ZAPIS B7 08.08.2026 — sourceHint defensywnie: starszy backend (bez
+      // rundy 6) w ogóle nie zwraca tego pola, a wersja > 1 znaczy „pas A
+      // rozszerzył kontrakt" — trzon (tresc/material/strona) jest zadeklarowany
+      // jako stabilny, więc renderujemy go nadal, tylko głośno ostrzegamy.
+      let sourceHint: DosingSourceHint | null = null;
+      const sh = data.sourceHint;
+      if (sh && typeof sh === 'object' && typeof sh.tresc === 'string' && sh.tresc.trim()) {
+        sourceHint = sh as DosingSourceHint;
+        if (typeof sh.wersja === 'number' && sh.wersja > 1) {
+          console.warn('[dozowanie] sourceHint.wersja > 1 — sprawdź kontrakt fazy 1 (raport A rundy 6, sekcja 13) zamiast zgadywać.');
+        }
+      }
       setSuggestion({
         days: new Set<string>(data.suggestion.days),
         durationMinutes: data.suggestion.durationMinutes,
         weeks: data.suggestion.weeks,
         reasoning: data.suggestion.reasoning,
+        sourceHint,
       });
       setStep('suggestion');
     } catch (e: any) {
@@ -427,6 +457,24 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
         <Text style={styles.recapText}>{confirmedText}</Text>
         <Text style={styles.reasoningText}>{suggestion.reasoning}</Text>
 
+        {/* ZAPIS B7 08.08.2026 (decyzja po A 8.2, runda 6) — pierwszy moment
+            w produkcie, w którym liczby, które zawodnik dostaje, mają widoczne
+            źródło. Cytat DOSŁOWNY (nie streszczony — streszczenie nie jest
+            dowodem), przypis tą samą regułą co wszędzie: bez strony sam tytuł,
+            bez materiału brak przypisu. `sourceHint === null` ⇒ sekcji NIE MA
+            (żadnego „brak źródła"). */}
+        {suggestion.sourceHint?.tresc ? (
+          <View style={styles.sourceHintBox}>
+            <Text style={styles.sourceHintTitle}>Skąd to wiemy</Text>
+            <Text style={styles.sourceHintText}>{suggestion.sourceHint.tresc}</Text>
+            {formatHintSource(suggestion.sourceHint.material ?? null, suggestion.sourceHint.strona ?? null) ? (
+              <Text style={styles.sourceHintSource}>
+                {formatHintSource(suggestion.sourceHint.material ?? null, suggestion.sourceHint.strona ?? null)}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         <Text style={styles.label}>Dni tygodnia</Text>
         <View style={styles.daysRow}>
           {DAYS_OF_WEEK.map(([code, label]) => (
@@ -492,6 +540,12 @@ const styles = StyleSheet.create({
   label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 8 },
   recapText: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, marginBottom: 8 },
   reasoningText: { ...typography.body, fontSize: 13, color: colors.textSecondary, marginBottom: 12, lineHeight: 18 },
+  // ZAPIS B7 08.08.2026 — „Skąd to wiemy": pionowa kreska jak w panelu trenera
+  // (cudzy, nieruszony tekst z materiału, nie kolejne zdanie systemu).
+  sourceHintBox: { borderLeftWidth: 3, borderLeftColor: colors.border, paddingLeft: 10, marginBottom: 12 },
+  sourceHintTitle: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 4 },
+  sourceHintText: { ...typography.body, fontSize: 13, color: colors.textPrimary, lineHeight: 18 },
+  sourceHintSource: { ...typography.body, fontSize: 12, color: colors.textSecondary, fontStyle: 'italic', marginTop: 4 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary },
   textarea: { minHeight: 60, textAlignVertical: 'top' },
   listRow: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 8 },

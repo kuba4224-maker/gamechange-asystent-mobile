@@ -16,6 +16,16 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import ScalePicker from '../../components/ScalePicker';
 import { toLocalDateStr } from '../../lib/date-utils';
+// ZAPIS B7 08.08.2026 (SEDNO RUNDY 7) — dziennik zasila wskaźnik Celu:
+// logika pytania o sesję Bloku jest czysta i ma własny selftest.
+import {
+  pickBlockSessionToConfirm,
+  blockSessionQuestion,
+  journalSavedMessage,
+  BLOCK_LINK_YES_LABEL,
+  BLOCK_LINK_NO_LABEL,
+  type LinkableCalendarEvent,
+} from '../../lib/focusBlockJournalLink';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
 // JEDNA DROGA B2 08.08.2026 — jedno źródło nazw lokalizacji bólu.
 import { BODY_LOCATIONS, BODY_LOCATION_LABELS, NON_LATERAL_LOCATIONS } from '../../lib/labels';
@@ -59,7 +69,9 @@ function describeEnergyLevel(energy: number): string {
   return 'Bardzo wysoki poziom energii';
 }
 
-type CalendarLinkOption = { id: number; label: string };
+// ZAPIS B7 08.08.2026 — `focusBlockId`/`scheduledDate` potrzebne do pytania
+// „czy to była sesja Bloku" i do komunikatu sukcesu; picker ich nie pokazuje.
+type CalendarLinkOption = { id: number; label: string; focusBlockId: string | null; scheduledDate: string };
 type HistoryRow = {
   id: number; created_at: string; entry_type: 'morning' | 'post_training';
   session_type: string | null; payload: any; pain_entries: any[];
@@ -93,6 +105,10 @@ export default function DziennikScreen() {
   const [duration, setDuration] = useState('');
   const [calendarLinkId, setCalendarLinkId] = useState('');
   const [calendarLinkOptions, setCalendarLinkOptions] = useState<CalendarLinkOption[]>([]);
+  // ZAPIS B7 08.08.2026 — sesja Bloku, o którą pyta wpis potreningowy,
+  // i czy zawodnik już odpowiedział (żeby pytanie nie wracało po „Nie").
+  const [blockSession, setBlockSession] = useState<LinkableCalendarEvent | null>(null);
+  const [blockPromptAnswered, setBlockPromptAnswered] = useState(false);
   const [rpe, setRpe] = useState<number>();
   const [postFatigue, setPostFatigue] = useState<number>();
 
@@ -122,8 +138,19 @@ export default function DziennikScreen() {
     const opts = (data ?? []).map((e: any) => ({
       id: e.id,
       label: `${new Date(e.scheduled_date + 'T00:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' })} — ${e.title}`,
+      focusBlockId: (e.focus_block_id ?? null) as string | null,
+      scheduledDate: e.scheduled_date as string,
     }));
     setCalendarLinkOptions(opts);
+    // ZAPIS B7 08.08.2026 (SEDNO RUNDY) — jeśli w oknie jest sesja Bloku
+    // Skupienia (dziś albo z ostatnich dni, nigdy z przyszłości), wpis
+    // potreningowy dostanie JEDNO pytanie zamiast biernego pickera. Logika
+    // wyboru jest czysta i ma własny selftest.
+    setBlockSession(pickBlockSessionToConfirm(
+      opts.map((o) => ({ id: o.id, scheduled_date: o.scheduledDate, title: o.label, focus_block_id: o.focusBlockId })),
+      toLocalDateStr(new Date()),
+    ));
+    setBlockPromptAnswered(false);
   }, [currentUser]);
 
   const loadHistory = useCallback(async () => {
@@ -153,6 +180,7 @@ export default function DziennikScreen() {
     // wymaga, żeby przełącznik wracał do "Wpis poranny" po KAŻDYM udanym
     // zapisie (także po zapisie potreningowym), nie tylko czyścić pola.
     setEntryType('morning');
+    setBlockPromptAnswered(false); // pytanie o sesję Bloku wraca przy następnym wpisie
     setSleepHours(undefined); setFreeNote(''); setDuration(''); setCalendarLinkId('');
     setHasPain(false); setPainExcludes(false);
     setSleepQuality(undefined); setMorningEnergy(undefined); setMoodMotivation(undefined);
@@ -226,7 +254,12 @@ export default function DziennikScreen() {
         if (painErr) throw new Error('Wpis zapisany, ale wpis bólowy się nie udał: ' + painErr.message);
       }
 
-      setOk('Zapisano.');
+      // ZAPIS B7 08.08.2026 — gdy wpis zaliczył sesję Bloku, mówimy to wprost
+      // (zasada 4: zbieramy tylko wtedy, gdy oddajemy). Zaliczenie = wybrane
+      // wydarzenie ma `focus_block_id`, obojętnie czy przez pytanie, czy picker.
+      const linkedToBlock = entryType === 'post_training' && !!calendarLinkId
+        && !!calendarLinkOptions.find((o) => String(o.id) === calendarLinkId && o.focusBlockId);
+      setOk(journalSavedMessage(linkedToBlock));
       resetForm();
       await loadHistory();
     } catch (e: any) {
@@ -316,6 +349,34 @@ export default function DziennikScreen() {
           </View>
           <Text style={styles.label}>Czas trwania (minuty)</Text>
           <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={duration} onChangeText={setDuration} placeholder="np. 90" />
+          {/* ZAPIS B7 08.08.2026 (SEDNO RUNDY 7) — zamiast liczyć na to, że
+              zawodnik sam otworzy picker niżej, pytamy wprost o sesję Bloku.
+              „Tak" ustawia DOKŁADNIE to samo powiązanie, które od zawsze
+              zalicza sesję we wskaźniku „N z M" (daily_logs.calendar_event_id)
+              — zero nowego znaczenia w bazie. „Nie" niczego nie ocenia i
+              chowa pytanie; picker zostaje dla każdego innego przypadku. */}
+          {blockSession && !blockPromptAnswered && !calendarLinkId ? (
+            <View style={styles.blockPromptBox}>
+              <Text style={styles.blockPromptQuestion}>
+                {blockSessionQuestion(blockSession, toLocalDateStr(new Date()))}
+              </Text>
+              <Text style={styles.blockPromptSession} numberOfLines={1}>{blockSession.title}</Text>
+              <View style={styles.blockPromptRow}>
+                <TouchableOpacity
+                  style={[styles.blockPromptBtn, styles.blockPromptBtnYes]}
+                  onPress={() => { setCalendarLinkId(String(blockSession.id)); setBlockPromptAnswered(true); }}
+                >
+                  <Text style={styles.blockPromptBtnYesTxt}>{BLOCK_LINK_YES_LABEL}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.blockPromptBtn}
+                  onPress={() => setBlockPromptAnswered(true)}
+                >
+                  <Text style={styles.blockPromptBtnTxt}>{BLOCK_LINK_NO_LABEL}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
           <Text style={styles.label}>Powiąż z zaplanowanym wydarzeniem (opcjonalnie)</Text>
           <View style={styles.pickerWrap}>
             <Picker selectedValue={calendarLinkId} onValueChange={setCalendarLinkId}>
@@ -451,6 +512,15 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: spacing.sm, color: colors.textPrimary },
   textarea: { minHeight: 72, textAlignVertical: 'top' },
   pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: spacing.sm },
+  // ZAPIS B7 08.08.2026 — pytanie o sesję Bloku (sedno rundy 7).
+  blockPromptBox: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: 'rgba(232,67,45,0.06)', padding: 12, marginBottom: spacing.sm },
+  blockPromptQuestion: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, marginBottom: 4 },
+  blockPromptSession: { ...typography.body, fontSize: 12, color: colors.textSecondary, marginBottom: 10 },
+  blockPromptRow: { flexDirection: 'row', gap: 8 },
+  blockPromptBtn: { flex: 1, minHeight: minTouchHeight, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface },
+  blockPromptBtnTxt: { ...typography.bodyMedium, fontSize: 14, color: colors.textPrimary },
+  blockPromptBtnYes: { backgroundColor: colors.brand, borderColor: colors.brand },
+  blockPromptBtnYesTxt: { ...typography.bodyMedium, fontSize: 14, color: '#fff' },
   block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.md, marginVertical: spacing.md },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 10 },
   checkboxLabel: { ...typography.body, fontSize: 14, color: colors.textPrimary, flexShrink: 1 },
