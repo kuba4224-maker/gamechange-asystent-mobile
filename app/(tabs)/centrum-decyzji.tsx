@@ -1,79 +1,93 @@
-// Ekran CENTRUM DECYZJI — Krok 11 checklisty. Implementacja wg
-// docs/KONTRAKT_CENTRUM_DECYZJI.md (spisanego z panel-centrum w
-// asystent_app.html). NAJBARDZIEJ złożony ekran, zrobiony na końcu Fazy 2.
+// Ekran WSZYSTKIE REKOMENDACJE (dawniej „Centrum Decyzji") — Krok 11 checklisty.
+// Implementacja wg docs/KONTRAKT_CENTRUM_DECYZJI.md (spisanego z panel-centrum
+// w asystent_app.html).
 //
-// ⚠️ Dwie rzeczy niepotwierdzone na produkcji/GitHub main w chwili audytu
-// wcześniej w tej sesji (patrz claude/BACKUP_asystent_app_html_2026-07-27_
-// przed_migracja_mobilna.md): endpoint /api/submit-recommendation-feedback
-// i etykieta "Co teraz:". Wdrożone tu 1:1 zgodnie z Project Knowledge — jeśli
-// produkcja ich nie ma, to znana rozbieżność, nie błąd tej migracji.
+// AUDYT 27.07.2026: `Linking.openURL` (system browser) -> `expo-web-browser`,
+// `useEffect` -> `useFocusEffect` (ekran nie odmontowuje się przy przełączaniu
+// zakładek — bez tego lista nie odświeżyłaby się po powrocie z Dziennika).
 //
-// ⚠️ Web woła fetch('/api/submit-recommendation-feedback') — ścieżka
-// względna wobec originu strony. Appka natywna nie ma "tego samego originu",
-// więc RECOMMENDATION_FEEDBACK_API_URL niżej zakłada bezwzględny URL na
-// domenie produkcyjnej gamechange-app.vercel.app — DO POTWIERDZENIA przez
-// Kubę, że to poprawna domena tego endpointu, zanim eskalacja będzie
-// testowana na żywo.
-// AUDYT 27.07.2026: `Linking.openURL` (system browser) -> `expo-web-browser`
-// (przeglądarka w kontekście appki) dla linku "Znajdź specjalistę" — ta sama
-// zmiana i to samo uzasadnienie co w docs/../diagnoza.tsx. `useEffect` ->
-// `useFocusEffect` z tego samego powodu (ekran nie odmontowuje się przy
-// przełączaniu zakładek — bez tego lista rekomendacji nie odświeżyłaby się
-// po powrocie z Dziennika/Kalendarza, gdzie dane wpływające na rekomendacje
-// mogły się zmienić).
-import { useState, useCallback, ReactNode } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+// DODANE 06.08.2026 (BRIEF_DELEGACJA_PROMINENCJA_CELU.md, Zakres 2) — wskaźnik
+// „nowe/nieprzeczytane" oparty o kolumnę `viewed_at` (patrz
+// docs/INTEGRACJA_WSKAZNIK_NOWE_SQL.md).
+//
+// ═══════════════════════════════════════════════════════════════════
+// JEDNA DROGA B2 08.08.2026 — CO Z TEGO EKRANU ZOSTAŁO PO SCALENIU
+// (blok B1 „jedna droga, jeden słownik")
+//
+// Najnowszy `training_focus` przeniósł się na ekran Dziś RAZEM z przyciskami
+// feedbacku — to była jedna rzecz pokazywana w dwóch miejscach pod dwiema
+// nazwami („Co dziś zrobić" kontra „Priorytet tygodnia"). Tutaj ta sekcja już
+// NIE istnieje; ekran przestał być drugą drogą do tej samej rekomendacji i stał
+// się tym, czym naprawdę jest: pełną listą wszystkiego, co system Ci powiedział.
+//
+// Zakładka zniknęła z paska (o jedną mniej, zgodnie z kierunkiem na cztery
+// zakładki). Trasa `/centrum-decyzji` ŻYJE — `href: null` w (tabs)/_layout.tsx,
+// ten sam wzorzec co Profil/Diagnoza/Mecz. Wejścia: link „Wszystkie
+// rekomendacje →" na ekranie Dziś oraz pozycja w zakładce „Więcej".
+//
+// NAPRAWIONY `markAsViewed()`. Do 08.08.2026 oznaczał przy KAŻDYM wejściu
+// wszystkie wczytane rekomendacje — łącznie z tymi siedzącymi w ZWINIĘTEJ
+// sekcji „Historia rekomendacji". Zawodnik wchodził na ekran, badge spadał do
+// zera, a on niczego nie przeczytał. Teraz oznaczane jest wyłącznie to, co jest
+// NA EKRANIE WIDOCZNE: sekcja „Warto sprawdzić" od razu, a wiersze historii
+// dopiero w momencie jej rozwinięcia (i tylko one).
+//
+// Karta rekomendacji to `components/RecommendationCard.tsx` — TEN SAM komponent
+// co na ekranie Dziś. Tam też przeniosły się dwie naprawy wskazane w audycie:
+// przełącznik pola komentarza działający w obie strony i komunikat sukcesu
+// renderowany przy karcie, a nie na górze ekranu.
+import { useState, useCallback, useRef } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
-import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
-
-const RECOMMENDATION_FEEDBACK_API_URL = 'https://gamechange-app.vercel.app/api/submit-recommendation-feedback';
-const MARKETPLACE_BASE_URL = 'https://gamechange-marketplace.vercel.app';
-
-const FEEDBACK_LABELS: Record<string, string> = {
-  done: 'Wykonałem', not_done: 'Nie wykonałem', did_not_make_sense: 'Nie miało to sensu',
-  open_to_discussing: 'Chętnie porozmawiam', not_interested: 'Nie jestem zainteresowany',
-};
-const REFERRAL_REASON_LABELS: Record<string, string> = {
-  pain_pattern_match: 'Wzorzec bólu', feedback_escalation: 'Powtarzające się odrzucenia', other: 'Inne',
-};
-const SPECIALIST_CATEGORY_LABELS: Record<string, string> = {
-  strength_conditioning: 'Trener przygotowania motorycznego',
-  physiotherapy: 'Fizjoterapeuta',
-  orthopedics: 'Ortopeda',
-  nutrition: 'Dietetyk sportowy',
-  technical_tactical: 'Trener Techniczno-Taktyczny',
-  sports_psychology: 'Psycholog sportowy',
-};
-
-type Recommendation = {
-  id: number; created_at: string; recommendation_type: string;
-  weekly_focus_text: string | null; recommendation_text: string; rationale_text: string | null;
-  confidence_tone: string | null; referral_reason: string | null; suggested_position: string | null;
-  suggested_specialist_category: string | null;
-  feedback_response: string | null; feedback_comment: string | null;
-};
+import { colors, typography, spacing, minTouchHeight } from '../../constants/theme';
+import RecommendationCard, { RECOMMENDATION_COLUMNS, type Recommendation } from '../../components/RecommendationCard';
 
 export default function CentrumDecyzjiScreen() {
   const { currentUser } = useAuth();
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [commentVisible, setCommentVisible] = useState<Record<number, boolean>>({});
-  const [commentText, setCommentText] = useState<Record<number, string>>({});
-  const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Migawka „co było nieprzeczytane w chwili wejścia na ekran" — kropka „Nowe"
+  // ma zniknąć dopiero przy KOLEJNEJ wizycie, nie w trakcie tej samej.
+  const unreadSnapshotRef = useRef<Set<number>>(new Set());
+  // Które wiersze już oznaczyliśmy w tej wizycie — żeby rozwinięcie historii
+  // nie wysyłało UPDATE-u na te same id po raz drugi.
+  const markedRef = useRef<Set<number>>(new Set());
+
+  // JEDNA DROGA B2 08.08.2026 — oznacza WYŁĄCZNIE przekazane wiersze i wyłącznie
+  // te, które są w tym momencie widoczne na ekranie. Patrz nagłówek pliku.
+  const markAsViewed = useCallback(async (rows: Recommendation[]) => {
+    const unseenIds = rows
+      .filter((r) => !r.viewed_at && !markedRef.current.has(r.id))
+      .map((r) => r.id);
+    if (unseenIds.length === 0) return;
+    unseenIds.forEach((id) => markedRef.current.add(id));
+    const nowIso = new Date().toISOString();
+    const { error: err } = await supabase
+      .from('decision_recommendations')
+      .update({ viewed_at: nowIso })
+      .in('id', unseenIds);
+    if (err) {
+      // Nie blokujemy UI błędem — brak oznaczenia to tylko kropka, która
+      // zostanie przy następnej wizycie, nie utrata danych.
+      unseenIds.forEach((id) => markedRef.current.delete(id));
+      console.error('centrum-decyzji: nie udało się oznaczyć rekomendacji jako przeczytane:', err);
+      return;
+    }
+    setRecommendations((prev) => prev.map((r) => (unseenIds.includes(r.id) ? { ...r, viewed_at: nowIso } : r)));
+  }, []);
 
   const loadRecommendations = useCallback(async () => {
     if (!currentUser) return;
     setLoadError(null);
     const { data, error: err } = await supabase
       .from('decision_recommendations')
-      .select('*')
+      .select(RECOMMENDATION_COLUMNS)
       .eq('user_id', currentUser.id)
       .order('created_at', { ascending: false });
     if (err) {
@@ -81,8 +95,18 @@ export default function CentrumDecyzjiScreen() {
       setRecommendations([]);
       return;
     }
-    setRecommendations((data ?? []) as Recommendation[]);
-  }, [currentUser]);
+    const rows = (data ?? []) as unknown as Recommendation[];
+    unreadSnapshotRef.current = new Set(rows.filter((r) => !r.viewed_at).map((r) => r.id));
+    markedRef.current = new Set();
+    setRecommendations(rows);
+
+    // Widoczne od razu = „Warto sprawdzić". Historia jest zwinięta, więc jej
+    // wierszy tu NIE dotykamy (naprawa opisana w nagłówku pliku).
+    const visibleNow = rows.filter((r) =>
+      (r.recommendation_type === 'specialist_referral' || r.recommendation_type === 'position_fit_signal')
+      && !r.feedback_response);
+    markAsViewed(visibleNow);
+  }, [currentUser, markAsViewed]);
 
   useFocusEffect(useCallback(() => { loadRecommendations(); }, [loadRecommendations]));
 
@@ -92,171 +116,38 @@ export default function CentrumDecyzjiScreen() {
     setRefreshing(false);
   }, [loadRecommendations]);
 
-  const trainingFocusRows = recommendations.filter((r) => r.recommendation_type === 'training_focus');
-  const currentFocus = trainingFocusRows.length ? trainingFocusRows[0] : null; // najnowsza — sortowanie z zapytania
-
   const openActionable = recommendations.filter((r) =>
     (r.recommendation_type === 'specialist_referral' || r.recommendation_type === 'position_fit_signal')
     && !r.feedback_response
   );
 
-  const historyIds = new Set(recommendations.map((r) => r.id));
-  if (currentFocus) historyIds.delete(currentFocus.id);
-  openActionable.forEach((r) => historyIds.delete(r.id));
-  const history = recommendations.filter((r) => historyIds.has(r.id));
+  // JEDNA DROGA B2 08.08.2026 — historia to teraz „wszystko poza sekcją Warto
+  // sprawdzić". Najnowszy training_focus nie jest już wyjmowany do osobnej
+  // sekcji „Priorytet tygodnia" (stoi na ekranie Dziś), ale ZOSTAJE na liście —
+  // inaczej zniknąłby z appki w chwili, gdy zawodnik chce do niego wrócić.
+  const openIds = new Set(openActionable.map((r) => r.id));
+  const history = recommendations.filter((r) => !openIds.has(r.id));
 
-  const toggleComment = (id: number) => setCommentVisible((prev) => ({ ...prev, [id]: true }));
+  const toggleHistory = () => {
+    setShowHistory((prev) => {
+      const next = !prev;
+      // Oznaczamy jako przeczytane DOPIERO gdy historia faktycznie się otwiera.
+      if (next) markAsViewed(history);
+      return next;
+    });
+  };
 
-  async function submitFeedback(recId: number, response: string) {
-    if (!currentUser) return;
-    setOk(null); setLoadError(null);
-    const comment = (commentText[recId] || '').trim();
-    setSubmittingId(recId);
-    try {
-      const res = await fetch(RECOMMENDATION_FEEDBACK_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: currentUser.id,
-          recommendationId: recId,
-          response,
-          comment: comment || undefined,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-      setOk(data?.escalation?.fired
-        ? 'Zapisano Twoją odpowiedź. Widzimy, że kilka razy z rzędu ta sugestia nie trafiała — przygotowaliśmy nową rekomendację, sprawdź listę poniżej.'
-        : 'Zapisano Twoją odpowiedź.');
-      await loadRecommendations();
-    } catch (e: any) {
-      setLoadError('Nie udało się zapisać odpowiedzi: ' + e.message);
-    } finally {
-      setSubmittingId(null);
-    }
-  }
-
-  function renderRecCard(r: Recommendation) {
-    const isReferral = r.recommendation_type === 'specialist_referral';
-    const isPositionSignal = r.recommendation_type === 'position_fit_signal';
-    const toneBadge = r.confidence_tone === 'questioning';
-
-    let headerNode: ReactNode = null;
-    let actionNode: ReactNode;
-    if (isReferral) {
-      const reasonLabel = REFERRAL_REASON_LABELS[r.referral_reason || ''] || r.referral_reason || '';
-      headerNode = <Text style={styles.pillarLine}>{reasonLabel}</Text>;
-      actionNode = <Text style={styles.actionText}>{r.recommendation_text}</Text>;
-    } else if (isPositionSignal) {
-      headerNode = <Text style={styles.pillarLine}>Sugerowana pozycja: {r.suggested_position || ''}</Text>;
-      actionNode = <Text style={styles.actionText}>{r.recommendation_text}</Text>;
-    } else {
-      if (r.weekly_focus_text) {
-        headerNode = (
-          <Text style={styles.focusText}>
-            {r.weekly_focus_text}{toneBadge ? <Text style={styles.toneBadge}>  ton pytający</Text> : null}
-          </Text>
-        );
-      }
-      actionNode = (
-        <Text style={styles.actionText}>
-          {!r.weekly_focus_text && toneBadge ? <Text style={styles.toneBadge}>ton pytający  </Text> : null}
-          <Text style={{ fontWeight: '700' }}>Co teraz: </Text>{r.recommendation_text}
-        </Text>
-      );
-    }
-
-    const dateLabel = new Date(r.created_at).toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' });
-    const showCommentBox = !!commentVisible[r.id];
-    const isReferralCard = isReferral || isPositionSignal;
-
-    return (
-      <View key={r.id} style={[styles.card, isReferralCard && styles.cardReferral]}>
-        {headerNode}
-        {actionNode}
-        {r.rationale_text ? <Text style={styles.rationale}>{r.rationale_text}</Text> : null}
-
-        {r.suggested_specialist_category ? (
-          <TouchableOpacity
-            style={styles.specialistLink}
-            onPress={() => WebBrowser.openBrowserAsync(`${MARKETPLACE_BASE_URL}/specialist_list.html?category=${encodeURIComponent(r.suggested_specialist_category!)}`)}
-          >
-            <Text style={styles.specialistLinkText}>
-              Znajdź specjalistę: {SPECIALIST_CATEGORY_LABELS[r.suggested_specialist_category] || r.suggested_specialist_category} →
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-
-        <Text style={styles.dateLabel}>{dateLabel}</Text>
-
-        {r.feedback_response ? (
-          <Text style={styles.feedbackGiven}>
-            Twoja odpowiedź: {FEEDBACK_LABELS[r.feedback_response] || r.feedback_response}
-            {r.feedback_comment ? ` — „${r.feedback_comment}”` : ''}
-          </Text>
-        ) : isPositionSignal ? (
-          <>
-            <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.secondaryBtn} disabled={submittingId === r.id} onPress={() => submitFeedback(r.id, 'open_to_discussing')}>
-                <Text style={styles.secondaryBtnText}>Chętnie porozmawiam</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} disabled={submittingId === r.id} onPress={() => submitFeedback(r.id, 'not_interested')}>
-                <Text style={styles.secondaryBtnText}>Nie jestem zainteresowany</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={() => toggleComment(r.id)}>
-                <Text style={styles.secondaryBtnText}>Nie miało to sensu</Text>
-              </TouchableOpacity>
-            </View>
-            {showCommentBox && (
-              <View style={{ marginTop: 10 }}>
-                <TextInput
-                  style={[styles.input, styles.textarea]}
-                  placeholder="Dlaczego? (opcjonalnie)"
-                  placeholderTextColor={colors.textSecondary}
-                  multiline
-                  value={commentText[r.id] || ''}
-                  onChangeText={(t) => setCommentText((prev) => ({ ...prev, [r.id]: t }))}
-                />
-                <TouchableOpacity style={styles.secondaryBtn} disabled={submittingId === r.id} onPress={() => submitFeedback(r.id, 'did_not_make_sense')}>
-                  <Text style={styles.secondaryBtnText}>Wyślij</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </>
-        ) : (
-          <>
-            <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.secondaryBtn} disabled={submittingId === r.id} onPress={() => submitFeedback(r.id, 'done')}>
-                <Text style={styles.secondaryBtnText}>Wykonałem</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} disabled={submittingId === r.id} onPress={() => submitFeedback(r.id, 'not_done')}>
-                <Text style={styles.secondaryBtnText}>Nie wykonałem</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={() => toggleComment(r.id)}>
-                <Text style={styles.secondaryBtnText}>Nie miało to sensu</Text>
-              </TouchableOpacity>
-            </View>
-            {showCommentBox && (
-              <View style={{ marginTop: 10 }}>
-                <TextInput
-                  style={[styles.input, styles.textarea]}
-                  placeholder="Dlaczego? (opcjonalnie)"
-                  placeholderTextColor={colors.textSecondary}
-                  multiline
-                  value={commentText[r.id] || ''}
-                  onChangeText={(t) => setCommentText((prev) => ({ ...prev, [r.id]: t }))}
-                />
-                <TouchableOpacity style={styles.secondaryBtn} disabled={submittingId === r.id} onPress={() => submitFeedback(r.id, 'did_not_make_sense')}>
-                  <Text style={styles.secondaryBtnText}>Wyślij</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </>
-        )}
-      </View>
-    );
-  }
+  const renderCard = (r: Recommendation) => (
+    currentUser ? (
+      <RecommendationCard
+        key={r.id}
+        rec={r}
+        currentUserId={currentUser.id}
+        isUnread={unreadSnapshotRef.current.has(r.id)}
+        onSubmitted={loadRecommendations}
+      />
+    ) : null
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -264,33 +155,28 @@ export default function CentrumDecyzjiScreen() {
       contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
     >
-      <Text style={styles.title}>Centrum Decyzji</Text>
+      <Text style={styles.title}>Wszystkie rekomendacje</Text>
+      <Text style={styles.subtitle}>
+        Wszystko, co system Ci dotąd powiedział. To, na czym masz się skupić dziś, stoi na ekranie Dziś.
+      </Text>
 
       {loadError && <Text style={styles.error}>{loadError}</Text>}
-      {ok && <Text style={styles.ok}>{ok}</Text>}
 
-      <View>
-        <Text style={styles.sectionLabel}>Priorytet tygodnia</Text>
-        {currentFocus
-          ? renderRecCard(currentFocus)
-          : <Text style={styles.empty}>Brak jeszcze wygenerowanej rekomendacji — pojawi się tu, gdy silnik Centrum Decyzji zacznie działać.</Text>}
-      </View>
-
-      <View style={{ marginTop: 32 }}>
+      <View style={{ marginTop: 8 }}>
         <Text style={styles.sectionLabel}>Warto sprawdzić</Text>
         {openActionable.length === 0
           ? <Text style={styles.empty}>Nic do sprawdzenia w tej chwili.</Text>
-          : openActionable.map(renderRecCard)}
+          : openActionable.map(renderCard)}
       </View>
 
       <View style={{ marginTop: 32 }}>
-        <TouchableOpacity onPress={() => setShowHistory((v) => !v)}>
+        <TouchableOpacity style={styles.historyToggle} onPress={toggleHistory}>
           <Text style={styles.sectionLabel}>{showHistory ? '▾' : '▸'} Historia rekomendacji</Text>
         </TouchableOpacity>
         {showHistory && (
           history.length === 0
             ? <Text style={styles.empty}>Brak historii.</Text>
-            : history.map(renderRecCard)
+            : history.map(renderCard)
         )}
       </View>
     </ScrollView>
@@ -300,25 +186,10 @@ export default function CentrumDecyzjiScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
+  title: { ...typography.display, fontSize: 28, marginBottom: 6, color: colors.textPrimary },
+  subtitle: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 19, marginBottom: spacing.md },
   sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 14 },
+  historyToggle: { minHeight: minTouchHeight, justifyContent: 'center' },
   error: { color: colors.error, fontSize: 13, marginBottom: 12 },
-  ok: { color: colors.success, fontSize: 13, marginBottom: 12 },
   empty: { textAlign: 'center', padding: 24, color: colors.textSecondary, fontSize: 14 },
-  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 20, marginBottom: 14 },
-  cardReferral: { borderLeftWidth: 3, borderLeftColor: colors.brand },
-  pillarLine: { fontSize: 11, color: colors.textSecondary, marginBottom: 8 },
-  focusText: { ...typography.display, fontSize: 18, color: colors.textPrimary, marginBottom: 10 },
-  actionText: { ...typography.body, fontSize: 15, color: colors.textPrimary, marginBottom: 10 },
-  toneBadge: { fontSize: 11, letterSpacing: 0.5, color: colors.textPrimary, backgroundColor: colors.surfaceElevated, borderRadius: radii.sm, paddingHorizontal: 6, overflow: 'hidden' },
-  rationale: { fontSize: 13, color: colors.textSecondary, marginBottom: 12 },
-  specialistLink: { alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, minHeight: minTouchHeight, justifyContent: 'center', paddingHorizontal: 18, borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md },
-  specialistLinkText: { ...typography.bodyMedium, fontSize: 13, color: colors.brand, letterSpacing: 0.5 },
-  dateLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 10, marginTop: 6 },
-  feedbackGiven: { fontSize: 13, color: colors.textSecondary, fontStyle: 'italic' },
-  actionsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  secondaryBtn: { paddingVertical: 10, paddingHorizontal: 18, minHeight: minTouchHeight, justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md },
-  secondaryBtnText: { ...typography.bodyMedium, fontSize: 13, color: colors.textPrimary, letterSpacing: 0.5 },
-  input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary },
-  textarea: { minHeight: 60, textAlignVertical: 'top' },
 });

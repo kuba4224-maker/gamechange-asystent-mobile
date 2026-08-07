@@ -25,6 +25,8 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import ScalePicker from '../../components/ScalePicker';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+// JEDNA DROGA B2 08.08.2026 — jedno źródło nazw segmentów i lokalizacji bólu.
+import { SEGMENT_LABELS, BODY_LOCATIONS, NON_LATERAL_LOCATIONS } from '../../lib/labels';
 import { MATCH_QUESTION_BANK } from '../../lib/matchQuestionBank';
 import { selectSegmentForMatch, resolveWordingKey, SegmentSelection, RecoveryState } from '../../lib/matchCascade';
 import { fetchPlayerMatchSelectionContext } from '../../lib/matchSegmentSelection';
@@ -36,13 +38,11 @@ const GAME_TYPE_LABELS: Record<string, string> = {
 const SEGMENT_AVAILABILITY_LABELS: Record<string, string> = {
   available: 'dostępne', partial: 'częściowo dostępne', unavailable: 'niedostępne',
 };
-const SEG_LABELS: Record<string, string> = Object.fromEntries([
-  ['moc', 'Moc'], ['wytrzymalosc', 'Wytrzymałość'], ['fizycznosc', 'Fizyczność'],
-  ['techFund', 'Technika Fundamentalna'], ['techSpec', 'Technika Specjalistyczna'],
-  ['tolerancja', 'Tolerancja (Obciążeń)'], ['regeneracja', 'Regeneracja'], ['odpornosc', 'Odporność'], ['odzywianie', 'Odżywienie'],
-  ['koncentracja', 'Koncentracja'], ['mental', 'Stan Mentalny'],
-  ['percepcja', 'Percepcja'], ['decyzja', 'Szybkość Decyzji'],
-]);
+// JEDNA DROGA B2 08.08.2026 — lokalna kopia 13 nazw segmentów usunięta,
+// nazwy pochodzą teraz z lib/labels.ts (jedno źródło dla całej appki).
+// Treść niezmieniona co do znaku — `SEG_LABELS` to alias na tę samą mapę,
+// żeby nie ruszać ani jednego miejsca użycia w tym pliku.
+const SEG_LABELS = SEGMENT_LABELS;
 
 // Treść potwierdzona przez Kubę wcześniej w projekcie (architektura_
 // techniczna.md, Domena 04) — przeniesiona 1:1 z asystent_app.html.
@@ -92,16 +92,9 @@ const RECOVERY_STATE_OPTIONS: { value: RecoveryState; label: string }[] = [
   { value: 'uncertain', label: 'Nie jestem pewien' },
 ];
 
-const BODY_LOCATIONS: [string, string][] = [
-  ['kostka', 'Kostka'], ['kolano', 'Kolano'], ['udo_przednie', 'Udo przednie'],
-  ['udo_tylne', 'Udo tylne'], ['lydka', 'Łydka'], ['pachwina', 'Pachwina'],
-  ['biodro', 'Biodro'], ['stopa', 'Stopa'], ['achilles', 'Ścięgno Achillesa'],
-  ['plecy_kregoslup', 'Plecy / kręgosłup'], ['brzuch_tulow', 'Brzuch / tułów'],
-  ['bark', 'Bark'], ['lokiec', 'Łokieć'], ['nadgarstek_dlon', 'Nadgarstek / dłoń'],
-  ['glowa_twarz', 'Głowa / twarz'], ['klatka_piersiowa_zebra', 'Klatka piersiowa / żebra'],
-  ['inne', 'Inne'],
-];
-const NON_LATERAL_LOCATIONS = new Set(['plecy_kregoslup', 'brzuch_tulow', 'inne']);
+// JEDNA DROGA B2 08.08.2026 — lokalne kopie 17 lokalizacji bólu i listy
+// lokalizacji bez strony ciała usunięte; obie pochodzą teraz z lib/labels.ts
+// (były w trzech identycznych kopiach: dziennik.tsx, mecz.tsx, profil.tsx).
 
 type MatchRow = {
   id: number; created_at: string; game_type: string;
@@ -495,6 +488,51 @@ export default function MeczScreen() {
 
       {renderRoutingBlock()}
 
+      {/* AUDYT 06.08.2026 — KOLEJNOŚĆ ODWRÓCONA.
+          Wcześniej "Stan przed meczem" leżał w połowie formularza, a pytania
+          segmentowe DOPIERO na czwartym ekranie scrolla, pod wynikiem, golami,
+          minutami i całym blokiem bólu — i pojawiały się dopiero po odpowiedzi
+          o regeneracji. Tymczasem walidacja zapisu (`hasSignal`) przepuszcza mecz
+          już po samym RPE, więc zawodnik, który po meczu chciał "szybko zapisać",
+          nigdy tych pytań nie widział. A to jedyne dane, dla których ten ekran
+          został przeprojektowany: `match_context_answers` karmi silnik rekomendacji
+          i meczowy wymiar Gotowości. Teraz są pierwsze. Wynik, minuty, RPE i ból
+          zostają — tylko niżej. */}
+      {/* Regeneracja przed meczem */}
+      <View style={styles.block}>
+        <Text style={styles.sectionLabel}>Stan przed meczem</Text>
+        <Text style={styles.label}>
+          Czy wchodziłeś dziś w mecz w pełni zregenerowany, czy ciało wciąż czuło zmęczenie z ostatnich dni?
+        </Text>
+        <View style={styles.answerList}>
+          {RECOVERY_STATE_OPTIONS.map((opt) => (
+            <TouchableOpacity
+              key={opt.value}
+              style={[styles.answerBtn, enteredRecoveryState === opt.value && styles.answerBtnActive]}
+              onPress={() => handleRecoveryStateChange(opt.value)}
+            >
+              <Text style={[styles.answerBtnText, enteredRecoveryState === opt.value && styles.answerBtnTextActive]}>{opt.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {/* Pytania segmentowe z kaskady */}
+      {segmentSlots.length > 0 && (
+        <View style={{ marginTop: 8 }}>
+          <Text style={styles.sectionLabel}>Kilka pytań o dzisiejszy mecz</Text>
+          {segmentSlots.map(renderSegmentSlot)}
+          {!thirdQuestionOffered && (
+            <TouchableOpacity style={styles.btnSecondary} onPress={loadThirdQuestion}>
+              <Text style={styles.btnSecondaryText}>Pokaż dodatkowe pytanie (opcjonalnie)</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+      {segmentSlots.length === 0 && enteredRecoveryState === null && (
+        <Text style={styles.hint}>Pytania o dzisiejszy mecz pojawią się po zaznaczeniu stanu regeneracji powyżej.</Text>
+      )}
+
       <View style={styles.block}>
         <Text style={styles.sectionLabel}>Zapisz mecz</Text>
 
@@ -543,25 +581,6 @@ export default function MeczScreen() {
             </View>
           </>
         )}
-      </View>
-
-      {/* Regeneracja przed meczem */}
-      <View style={styles.block}>
-        <Text style={styles.sectionLabel}>Stan przed meczem</Text>
-        <Text style={styles.label}>
-          Czy wchodziłeś dziś w mecz w pełni zregenerowany, czy ciało wciąż czuło zmęczenie z ostatnich dni?
-        </Text>
-        <View style={styles.answerList}>
-          {RECOVERY_STATE_OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[styles.answerBtn, enteredRecoveryState === opt.value && styles.answerBtnActive]}
-              onPress={() => handleRecoveryStateChange(opt.value)}
-            >
-              <Text style={[styles.answerBtnText, enteredRecoveryState === opt.value && styles.answerBtnTextActive]}>{opt.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
       </View>
 
       {/* Warunki meczu */}
@@ -618,22 +637,6 @@ export default function MeczScreen() {
           </>
         )}
       </View>
-
-      {/* Pytania segmentowe z kaskady */}
-      {segmentSlots.length > 0 && (
-        <View style={{ marginTop: 8 }}>
-          <Text style={styles.sectionLabel}>Kilka pytań o dzisiejszy mecz</Text>
-          {segmentSlots.map(renderSegmentSlot)}
-          {!thirdQuestionOffered && (
-            <TouchableOpacity style={styles.btnSecondary} onPress={loadThirdQuestion}>
-              <Text style={styles.btnSecondaryText}>Pokaż dodatkowe pytanie (opcjonalnie)</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-      {segmentSlots.length === 0 && enteredRecoveryState === null && (
-        <Text style={styles.hint}>Pytania o dzisiejszy mecz pojawią się po zaznaczeniu stanu regeneracji powyżej.</Text>
-      )}
 
       {/* Wolna notatka */}
       <View style={styles.block}>

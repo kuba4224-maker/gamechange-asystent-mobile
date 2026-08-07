@@ -27,10 +27,14 @@
 // calendar_events) wydzielona do components/FocusBlockPlanner.tsx — zbyt
 // dużo dodatkowego stanu, żeby trzymać to w tym już dużym pliku (patrz
 // komentarz w dokumencie startowym tego kroku o rozważeniu osobnego pliku).
-// Egzekwowanie limitu "jeden aktywny Blok na filar" w UI: `activeBlockPillars`
+// Egzekwowanie limitu "jeden aktywny Blok na filar" w UI: `activeBlocksByPillar`
 // niżej, ładowane razem z celami — prawdziwe wymuszenie to unique index w
 // bazie (`one_active_focus_block_per_pillar`), to tylko czytelny komunikat
 // zamiast surowego błędu bazy na końcu przepływu.
+// AUDYT 06.08.2026 — usunięty równoległy stan `activeBlockPillars` (Set<string>):
+// był ustawiany, ale nigdy nieczytany w renderze (render używa wyłącznie
+// `activeBlocksByPillar.has(pillar)`). Pozostałość po Kroku 5a. Usunięty też
+// nieużywany styl `blockedText`.
 import { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,20 +45,24 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { toLocalDateStr, formatDatePl } from '../../lib/date-utils';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+// JEDNA DROGA B2 08.08.2026 — jedno źródło nazw segmentów i filarów.
+import {
+  SEGMENT_LABELS,
+  SEGMENT_PILLAR,
+  SEGMENTS_BY_PILLAR as SEGMENTS_BY_PILLAR_SHARED,
+} from '../../lib/labels';
 import FocusBlockPlanner from '../../components/FocusBlockPlanner';
 import FocusBlockActiveView from '../../components/FocusBlockActiveView';
 
-const SEGMENTS_BY_PILLAR: [string, [string, string][]][] = [
-  ['Filar 1 — Dominacja fizyczna', [['moc', 'Moc'], ['wytrzymalosc', 'Wytrzymałość'], ['fizycznosc', 'Fizyczność']]],
-  ['Filar 2 — Efektywność techniczna', [['techFund', 'Technika Fundamentalna'], ['techSpec', 'Technika Specjalistyczna']]],
-  ['Filar 3 — Trwałość organizmu', [['tolerancja', 'Tolerancja (Obciążeń)'], ['regeneracja', 'Regeneracja'], ['odpornosc', 'Odporność'], ['odzywianie', 'Odżywienie']]],
-  ['Filar 4 — Mentalność', [['koncentracja', 'Koncentracja'], ['mental', 'Stan Mentalny']]],
-  ['Filar 5 — Boiskowa mądrość', [['percepcja', 'Percepcja'], ['decyzja', 'Szybkość Decyzji']]],
-];
-const SEG_LABELS: Record<string, string> = Object.fromEntries(SEGMENTS_BY_PILLAR.flatMap(([, segs]) => segs));
-const SEG_PILLAR: Record<string, string> = Object.fromEntries(
-  SEGMENTS_BY_PILLAR.flatMap(([pillar, segs]) => segs.map(([id]) => [id, pillar]))
-);
+// JEDNA DROGA B2 08.08.2026 — lokalne kopie nazw segmentów i podziału na filary
+// usunięte; jedno źródło to lib/labels.ts. Aliasy poniżej zachowują dotychczasowe
+// nazwy zmiennych, żeby nie ruszać ani jednego miejsca użycia w tym pliku
+// (Picker, karty celów, przekazanie `pillar` do FocusBlockPlanner).
+// Treść i KOLEJNOŚĆ pozycji niezmienione co do znaku — sprawdzone maszynowo:
+// wypłaszczone SEGMENTS_BY_PILLAR daje dokładnie SEGMENT_ORDER, jak dotąd.
+const SEGMENTS_BY_PILLAR = SEGMENTS_BY_PILLAR_SHARED;
+const SEG_LABELS = SEGMENT_LABELS;
+const SEG_PILLAR = SEGMENT_PILLAR;
 const GOAL_DIRECTION_LABELS: Record<string, string> = {
   more_minutes: 'Więcej minut w meczach',
   move_up: 'Awans na wyższy poziom',
@@ -112,7 +120,6 @@ export default function CeleScreen() {
   // --- Tor 7 Krok 5a: Blok Skupienia — który cel jest właśnie planowany +
   // filary z już aktywnym Blokiem (egzekwowanie limitu w UI, patrz nagłówek pliku) ---
   const [planningGoalId, setPlanningGoalId] = useState<number | null>(null);
-  const [activeBlockPillars, setActiveBlockPillars] = useState<Set<string>>(new Set());
   const [activeBlocksByPillar, setActiveBlocksByPillar] = useState<Map<string, ActiveFocusBlock>>(new Map());
 
   // --- Baza Składowych Segmentów: Obszar → Element → "opisz sam" (Tor 7 Krok 4) ---
@@ -311,7 +318,6 @@ export default function CeleScreen() {
       .eq('status', 'active');
     if (err) return; // cichy fallback — w najgorszym razie UI nie pokaże blokady wcześnie, baza i tak wymusi limit
     const rows = (data ?? []) as any[];
-    setActiveBlockPillars(new Set(rows.map((r) => r.pillar)));
     const byPillar = new Map<string, ActiveFocusBlock>();
     rows.forEach((r) => {
       byPillar.set(r.pillar, {
@@ -735,5 +741,4 @@ const styles = StyleSheet.create({
   // --- Tor 7 Krok 5a: Blok Skupienia (przycisk + komunikat blokady na karcie celu) ---
   focusBlockBtn: { minHeight: minTouchHeight, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, marginTop: 10 },
   focusBlockBtnText: { ...typography.bodySemiBold, fontSize: 13, color: colors.brand, letterSpacing: 0.3 },
-  blockedText: { fontSize: 12, color: colors.textSecondary, marginTop: 10, fontStyle: 'italic' },
 });

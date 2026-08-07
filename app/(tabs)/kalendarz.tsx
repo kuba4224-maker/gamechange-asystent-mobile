@@ -1,12 +1,23 @@
 // Ekran KALENDARZ — Krok 8 checklisty. Implementacja wg
 // docs/KONTRAKT_KALENDARZ.md (spisanego z panel-kalendarz w asystent_app.html).
 //
-// ⚠️ Sekcja "Sugerowane na ten tydzień" (computeCalendarSuggestion niżej) jest
-// opisana w Project Knowledge, ale NIE była potwierdzona jako obecna na
-// produkcji/GitHub main w chwili audytu wcześniej w tej sesji (patrz
-// claude/BACKUP_asystent_app_html_2026-07-27_przed_migracja_mobilna.md).
-// Wdrożona tu 1:1 zgodnie z Project Knowledge — jeśli produkcja jej nie ma,
-// to znana, już zgłoszona rozbieżność, nie błąd tej migracji.
+// AUDYT 06.08.2026 — USUNIĘTA sekcja "Sugerowane na ten tydzień"
+// (SUGGESTED_ACTIVITY_BY_SEGMENT + computeCalendarSuggestion + acceptCalendarSuggestion).
+// Powody, w kolejności ważności:
+//  1. Robiła DOKŁADNIE to samo co Blok Skupienia — planowała mikro-sesję pod cel
+//     priorytetowy — tylko gorzej i z drugiego ekranu. Dwa konkurujące mechanizmy
+//     do jednego zadania to główne źródło bałaganu w tej appce.
+//  2. Nie wiedziała o Blokach Skupienia: `alreadyPlanned` sprawdzało `goal_id`,
+//     ale nie `focus_block_id`, więc proponowała kolejną sesję zawodnikowi, któremu
+//     Blok zaplanował właśnie 18 wpisów w kalendarzu.
+//  3. Treść była zahardkodowana — 13 stałych zdań, niezależnych od diagnozy,
+//     pozycji i poziomu zawodnika. Blok Skupienia dobiera dawkowanie przez
+//     /api/generate-focus-block-dosing, na podstawie realnych danych.
+//  4. Sama sekcja NIE była potwierdzona jako obecna na produkcji/GitHub main
+//     (patrz claude/BACKUP_asystent_app_html_2026-07-27_przed_migracja_mobilna.md) —
+//     czyli usunięcie prawdopodobnie zbliża ten ekran do produkcji, nie oddala.
+// Planowanie pracy nad celem zostaje w JEDNYM miejscu: Cele → "Zaplanuj pracę
+// nad tym celem" → Blok Skupienia.
 // AUDYT 27.07.2026: `useEffect` -> `useFocusEffect` + `RefreshControl` — patrz
 // uzasadnienie w app/(tabs)/dziennik.tsx (ten sam powód: ekran nie
 // odmontowuje się przy przełączaniu zakładek, np. po zalogowaniu wpisu w
@@ -32,38 +43,24 @@ import Checkbox from 'expo-checkbox';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
-import { toLocalDateStr, DAYS_OF_WEEK, DAY_LABELS_PL, getCurrentWeekDayList } from '../../lib/date-utils';
+// AUDYT 06.08.2026 — `getCurrentWeekDayList` stracił konsumenta razem z usuniętą
+// sekcją "Sugerowane na ten tydzień". Zostaje w lib/date-utils (używany gdzie indziej),
+// usunięty tylko z tego importu.
+import { toLocalDateStr, DAYS_OF_WEEK, DAY_LABELS_PL } from '../../lib/date-utils';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+// JEDNA DROGA B2 08.08.2026 — jedno źródło nazw segmentów (lib/labels.ts).
+import { SEGMENT_LABELS } from '../../lib/labels';
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   club_training: 'Trening klubowy', own_training: 'Trening własny',
   micro_session: 'Mikro-sesja', task: 'Zadanie', match: 'Mecz',
 };
 
-const SEG_LABELS: Record<string, string> = Object.fromEntries([
-  ['moc', 'Moc'], ['wytrzymalosc', 'Wytrzymałość'], ['fizycznosc', 'Fizyczność'],
-  ['techFund', 'Technika Fundamentalna'], ['techSpec', 'Technika Specjalistyczna'],
-  ['tolerancja', 'Tolerancja (Obciążeń)'], ['regeneracja', 'Regeneracja'], ['odpornosc', 'Odporność'], ['odzywianie', 'Odżywienie'],
-  ['koncentracja', 'Koncentracja'], ['mental', 'Stan Mentalny'],
-  ['percepcja', 'Percepcja'], ['decyzja', 'Szybkość Decyzji'],
-]);
-
-// Treść 1:1 z asystent_app.html — patrz KONTRAKT_KALENDARZ.md sekcja 5.
-const SUGGESTED_ACTIVITY_BY_SEGMENT: Record<string, string> = {
-  percepcja: 'małe gry i sytuacje meczowe (3v3, przewaga/niedobór) — 15 minut',
-  decyzja: 'ćwiczenia z presją czasu i decyzją pod obciążeniem — 15 minut',
-  koncentracja: 'krótka sesja uważności albo ćwiczenie na powrót po błędzie — 10 minut',
-  mental: 'wizualizacja trudnych sytuacji meczowych i planowanie reakcji — 10 minut',
-  moc: 'krótki blok skoków/sprintów eksplozywnych — 15 minut',
-  wytrzymalosc: 'interwały tlenowe średniej intensywności — 20 minut',
-  fizycznosc: 'ćwiczenia zwinności i zmiany kierunku — 15 minut',
-  techFund: 'żonglerka i prowadzenie piłki w ograniczonej przestrzeni — 15 minut',
-  techSpec: 'dryblingi 1v1 na sucho lub z pasywnym obrońcą — 15 minut',
-  regeneracja: 'rozciąganie i wcześniejsze położenie się spać — 15 minut',
-  odpornosc: 'lekki trening uzupełniający + dbałość o sen — 10 minut',
-  odzywianie: 'przygotowanie posiłku przedtreningowego na następny dzień — 15 minut',
-  tolerancja: 'praca nad mobilnością i stabilizacją stawów — 15 minut',
-};
+// JEDNA DROGA B2 08.08.2026 — lokalna kopia 13 nazw segmentów usunięta,
+// nazwy pochodzą teraz z lib/labels.ts (jedno źródło dla całej appki).
+// Treść niezmieniona co do znaku — `SEG_LABELS` to alias na tę samą mapę,
+// żeby nie ruszać ani jednego miejsca użycia w tym pliku.
+const SEG_LABELS = SEGMENT_LABELS;
 
 type Goal = { id: number; segment_id: string; status: string; is_priority: boolean; refinement_note: string | null };
 type CalEvent = {
@@ -93,6 +90,7 @@ export default function KalendarzScreen() {
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [loggedEventIds, setLoggedEventIds] = useState<Set<number>>(new Set());
   const [showCancelled, setShowCancelled] = useState(false);
+  const [showPast, setShowPast] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -144,59 +142,18 @@ export default function KalendarzScreen() {
 
   const todayStr = toLocalDateStr(new Date());
   const recurring = events.filter((e) => e.status === 'scheduled' && e.recurrence_rule);
-  const upcoming = events
-    .filter((e) => e.status === 'scheduled' && e.scheduled_date)
-    .sort((a, b) => (a.scheduled_date! < b.scheduled_date! ? -1 : a.scheduled_date! > b.scheduled_date! ? 1 : 0));
+  // AUDYT 06.08.2026 — "Nadchodzące" nie miało filtra daty, tylko sortowanie rosnąco.
+  // Efekt: na górze sekcji siedziały wydarzenia sprzed tygodni i miesięcy, w większości
+  // z plakietką "Nie wykonano". Zawodnik wchodził po plan na dziś, a dostawał listę
+  // zaległości. Rozdzielone na dwie sekcje: nadchodzące (od dziś włącznie) i zwinięta
+  // historia (przeszłe), żeby plakietki "Wykonano / Nie wykonano" nadal były dostępne,
+  // ale nie były pierwszą rzeczą, którą widać.
+  const byDateAsc = (a: CalEvent, b: CalEvent) =>
+    (a.scheduled_date! < b.scheduled_date! ? -1 : a.scheduled_date! > b.scheduled_date! ? 1 : 0);
+  const scheduledWithDate = events.filter((e) => e.status === 'scheduled' && e.scheduled_date);
+  const upcoming = scheduledWithDate.filter((e) => e.scheduled_date! >= todayStr).sort(byDateAsc);
+  const past = scheduledWithDate.filter((e) => e.scheduled_date! < todayStr).sort((a, b) => -byDateAsc(a, b));
   const cancelled = events.filter((e) => e.status === 'cancelled');
-
-  // Sugestia Kalendarza — patrz KONTRAKT_KALENDARZ.md sekcja 5.
-  function computeCalendarSuggestion() {
-    const activeGoal = goals.find((g) => g.is_priority && g.status === 'active');
-    if (!activeGoal) return null;
-    const activity = SUGGESTED_ACTIVITY_BY_SEGMENT[activeGoal.segment_id];
-    if (!activity) return null;
-
-    const weekDays = getCurrentWeekDayList().filter((d) => d.dateStr >= todayStr);
-    if (weekDays.length === 0) return null;
-
-    const busyDates = new Set(events.filter((e) => e.status === 'scheduled' && e.scheduled_date).map((e) => e.scheduled_date as string));
-    const busyDayCodes = new Set<string>();
-    events
-      .filter((e) => e.status === 'scheduled' && e.recurrence_rule)
-      .forEach((e) => e.recurrence_rule!.replace('weekly:', '').split(',').forEach((code) => busyDayCodes.add(code)));
-
-    const freeDay = weekDays.find((d) => !busyDates.has(d.dateStr) && !busyDayCodes.has(d.dayCode));
-    if (!freeDay) return null;
-
-    const alreadyPlanned = events.some((e) =>
-      e.status === 'scheduled' && e.goal_id === activeGoal.id && e.event_type === 'micro_session' &&
-      ((e.scheduled_date && busyDates.has(e.scheduled_date)) || e.recurrence_rule)
-    );
-    if (alreadyPlanned) return null;
-
-    return { goal: activeGoal, segmentName: SEG_LABELS[activeGoal.segment_id] || activeGoal.segment_id, activity, day: freeDay };
-  }
-
-  const suggestion = computeCalendarSuggestion();
-
-  async function acceptCalendarSuggestion() {
-    if (!currentUser || !suggestion) return;
-    const { error: insErr } = await supabase.from('calendar_events').insert({
-      user_id: currentUser.id,
-      event_type: 'micro_session',
-      source: 'system',
-      title: `Sugerowane: ${suggestion.segmentName}`,
-      notes: suggestion.activity,
-      status: 'scheduled',
-      scheduled_date: suggestion.day.dateStr,
-      goal_id: suggestion.goal.id,
-    });
-    if (insErr) {
-      setError('Nie udało się dodać sugerowanej aktywności: ' + insErr.message);
-      return;
-    }
-    await loadEvents();
-  }
 
   const resetForm = () => {
     setTitle(''); setNotes(''); setDate(null); setSelectedDays(new Set()); setGoalId('');
@@ -307,17 +264,6 @@ export default function KalendarzScreen() {
       {error && <Text style={styles.error}>{error}</Text>}
       {ok && <Text style={styles.ok}>{ok}</Text>}
 
-      {suggestion && (
-        <View style={[styles.block, styles.suggestionBlock]}>
-          <Text style={styles.sectionLabel}>Sugerowane na ten tydzień</Text>
-          <Text style={styles.suggestionText}><Text style={{ fontWeight: '700' }}>{suggestion.segmentName}</Text> — {suggestion.activity}</Text>
-          <Text style={styles.suggestionHint}>Masz wolny {suggestion.day.label} — dodać tam mikro-sesję powiązaną z Twoim aktywnym celem?</Text>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={acceptCalendarSuggestion}>
-            <Text style={styles.secondaryBtnText}>Dodaj</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       <View style={styles.block}>
         <Text style={styles.label}>Rodzaj</Text>
         <View style={styles.pickerWrap}>
@@ -405,6 +351,15 @@ export default function KalendarzScreen() {
         {upcoming.map(renderEventCard)}
       </View>
 
+      {past.length > 0 && (
+        <View style={{ marginTop: 20 }}>
+          <TouchableOpacity onPress={() => setShowPast((v) => !v)}>
+            <Text style={styles.sectionLabel}>{showPast ? '▾' : '▸'} Minione ({past.length})</Text>
+          </TouchableOpacity>
+          {showPast && past.map(renderEventCard)}
+        </View>
+      )}
+
       <View style={{ marginTop: 20 }}>
         <TouchableOpacity onPress={() => setShowCancelled((v) => !v)}>
           <Text style={styles.sectionLabel}>{showCancelled ? '▾' : '▸'} Anulowane</Text>
@@ -429,9 +384,6 @@ const styles = StyleSheet.create({
   textarea: { minHeight: 72, textAlignVertical: 'top' },
   pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: 8 },
   block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 16, marginBottom: 20 },
-  suggestionBlock: { borderLeftWidth: 3, borderLeftColor: colors.brand },
-  suggestionText: { fontSize: 15, marginBottom: 6, color: colors.textPrimary },
-  suggestionHint: { fontSize: 13, color: colors.textSecondary, marginBottom: 14 },
   toggle: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   toggleBtn: { flex: 1, minHeight: minTouchHeight, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, alignItems: 'center' },
   toggleBtnActive: { backgroundColor: colors.brand, borderColor: colors.brand },

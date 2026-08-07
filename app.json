@@ -22,7 +22,6 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "UIBackgroundModes": [
-          "remote-notification",
           "remote-notification"
         ],
         "NSFaceIDUsageDescription": "Gamechange używa Face ID, żeby szybko i bezpiecznie odblokować dostęp do Twoich danych zamiast wpisywania kodu z maila.",

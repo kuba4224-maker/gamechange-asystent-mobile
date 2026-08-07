@@ -17,21 +17,16 @@ import { useAuth } from '../../lib/auth-context';
 import ScalePicker from '../../components/ScalePicker';
 import { toLocalDateStr } from '../../lib/date-utils';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+// JEDNA DROGA B2 08.08.2026 — jedno źródło nazw lokalizacji bólu.
+import { BODY_LOCATIONS, BODY_LOCATION_LABELS, NON_LATERAL_LOCATIONS } from '../../lib/labels';
 // DODANE 06.08.2026 — kolorowanie suwaków + wariant "bateria" dla energii,
 // patrz lib/scale-colors.ts dla pełnego uzasadnienia per funkcja.
 import { higherIsBetterColor, higherIsWorseColor, sleepHoursColor, neutralIntensityColor } from '../../lib/scale-colors';
 
-const BODY_LOCATIONS: [string, string][] = [
-  ['kostka', 'Kostka'], ['kolano', 'Kolano'], ['udo_przednie', 'Udo przednie'],
-  ['udo_tylne', 'Udo tylne'], ['lydka', 'Łydka'], ['pachwina', 'Pachwina'],
-  ['biodro', 'Biodro'], ['stopa', 'Stopa'], ['achilles', 'Ścięgno Achillesa'],
-  ['plecy_kregoslup', 'Plecy / kręgosłup'], ['brzuch_tulow', 'Brzuch / tułów'],
-  ['bark', 'Bark'], ['lokiec', 'Łokieć'], ['nadgarstek_dlon', 'Nadgarstek / dłoń'],
-  ['glowa_twarz', 'Głowa / twarz'], ['klatka_piersiowa_zebra', 'Klatka piersiowa / żebra'],
-  ['inne', 'Inne'],
-];
-const BODY_LOCATION_LABELS = Object.fromEntries(BODY_LOCATIONS);
-const NON_LATERAL_LOCATIONS = new Set(['plecy_kregoslup', 'brzuch_tulow', 'inne']);
+// JEDNA DROGA B2 08.08.2026 — lokalne kopie 17 lokalizacji bólu, ich mapy nazw
+// i listy lokalizacji bez strony ciała usunięte; wszystkie trzy pochodzą teraz
+// z lib/labels.ts. Były w trzech identycznych kopiach (dziennik.tsx, mecz.tsx,
+// profil.tsx) — treść niezmieniona co do znaku, porównana maszynowo.
 const SESSION_TYPE_LABELS: Record<string, string> = {
   club_training: 'Trening klubowy', own_training: 'Trening własny',
   micro_session: 'Mikro-sesja', match: 'Mecz', other: 'Inne',

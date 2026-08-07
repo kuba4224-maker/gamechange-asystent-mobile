@@ -262,8 +262,16 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
         user_id: currentUserId,
         event_type: 'micro_session',
         source: 'system',
-        title: `Blok Skupienia: ${confirmedText}`,
-        notes: suggestion.reasoning,
+        // AUDYT 06.08.2026 — czas trwania sesji przestaje przepadać.
+        // `suggestion.durationMinutes` był edytowany przez zawodnika i walidowany
+        // ("Podaj czas trwania sesji."), a potem nie trafiał ANI do `focus_blocks`,
+        // ANI do `calendar_events` — informacja ginęła w całości.
+        // Tabela `focus_blocks` nie ma dziś kolumny na czas trwania, więc bez
+        // migracji jedynym miejscem, gdzie ta liczba ma sens dla zawodnika, jest
+        // wpis w kalendarzu. SQL na docelową kolumnę czeka na Kubę — patrz
+        // REJESTR_NAPRAW_AUDYT_06_08_2026.md.
+        title: `Blok Skupienia: ${confirmedText} (${suggestion.durationMinutes} min)`,
+        notes: `Planowany czas sesji: ${suggestion.durationMinutes} min.\n${suggestion.reasoning}`,
         status: 'scheduled',
         scheduled_date: d,
         goal_id: goal.id,
@@ -428,6 +436,18 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* AUDYT 06.08.2026 — deklaracja zawodnika z kroku 2 ("ile razy w tygodniu
+            realistycznie możesz") była po cichu nadpisywana liczbą zaznaczonych dni:
+            zapisywane jest `sessions_per_week: suggestion.days.size`. Zawodnik mówił
+            "3 razy", odznaczał jeden dzień i w bazie lądowało 2, bez słowa. Teraz
+            rozjazd jest widoczny, zanim kliknie "Zatwierdź i zaplanuj". */}
+        {suggestion.days.size !== sessionsPerWeek && suggestion.days.size > 0 ? (
+          <Text style={styles.reasoningText}>
+            Mówiłeś o {sessionsPerWeek} sesjach w tygodniu, a masz zaznaczone {suggestion.days.size}.
+            Zapiszemy {suggestion.days.size} — jeśli to pomyłka, popraw dni powyżej.
+          </Text>
+        ) : null}
 
         <Text style={styles.label}>Czas trwania sesji (minuty)</Text>
         <TextInput

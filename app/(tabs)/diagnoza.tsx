@@ -21,14 +21,48 @@
 // wywołanie load*()) — bez tej zmiany status diagnozy pokazywałby się
 // tylko raz, przy pierwszym wejściu na zakładkę, i NIE odświeżyłby się po
 // powrocie z ankiety diagnozy otwartej w przeglądarce.
+//
+// ═══════════════════════════════════════════════════════════════════════
+// WYNIK DIAGNOZY 07.08.2026 — PRZEBUDOWA ZE STATUSU NA WYNIK
+// (BRIEF_DELEGACJA_WYNIK_DIAGNOZY_W_APCE.md)
+//
+// Do 06.08.2026 ten ekran pokazywał zawodnikowi WYŁĄCZNIE datę ("Pierwsza
+// diagnoza — 12 marca 2026"), mimo że `diagnostics.scores` — 13 obszarów,
+// treść na której stoi cały produkt — leży w bazie i jest już czytane przez
+// lib/livingDiagnosisPulses.ts. Od teraz ekran pokazuje profil: nagłówek
+// scenariuszowy bez surowej liczby, wąskie gardła z opisem PRZYCZYNOWYM,
+// 13 obszarów w grupach ważonych pozycją, powiązanie z aktywnym Celem.
+// Data i przycisk rediagnozy zeszły na dół — to już nie jest sedno ekranu.
+//
+// Język prezentacji NIE jest wymyślony od nowa — jest przeniesiony 1:1 z
+// `gamechange-diagnoza/index.html` (renderResults), czyli z ekranu, na
+// którym zawodnik zobaczył swój wynik po ankiecie. Logika portu:
+// components/diagnosisProfile.ts, widok: components/DiagnosisProfileView.tsx.
+//
+// RLS — SPRAWDZONE NA ŻYWO PRZED NAPISANIEM TEGO KODU (Supabase Dashboard →
+// Database → Policies, projekt kqrbztsvepjtggjmmcdx, 07.08.2026, tylko
+// odczyt): na `public.diagnostics` jest 5 polityk, w tym `diagnostics_
+// select_own` (SELECT, authenticated, `USING (auth.uid() = user_id)`).
+// RLS w Postgresie działa na WIERSZACH, nie na kolumnach — skoro zawodnik
+// czyta swój wiersz po `diagnosis_type,created_at`, czyta też `scores`.
+// ŻADNA MIGRACJA NIE JEST POTRZEBNA do tego ekranu. Przy okazji znalezione
+// osobne, niezwiązane z tym ekranem ryzyko bezpieczeństwa — patrz raport
+// zwrotny B, sekcja 7.
+//
+// Ekran NIE zadaje ani jednego nowego pytania i niczego nie zapisuje —
+// całość jest po stronie oddawania wartości (brief, sekcja OGRANICZENIA).
+// Diagnoza żywa pozostaje ZAMROŻONA — ten plik jej nie dotyka.
+// ═══════════════════════════════════════════════════════════════════════
 import { useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+import DiagnosisProfileView from '../../components/DiagnosisProfileView';
 
 const DIAGNOZA_URL = 'https://gamechange-diagnoza.vercel.app';
 const DIAGNOSIS_TYPE_LABELS: Record<string, string> = {
@@ -39,9 +73,14 @@ type Status = 'loading' | 'done' | 'missing' | 'error';
 
 export default function DiagnozaScreen() {
   const { currentUser } = useAuth();
+  const router = useRouter();
   const [status, setStatus] = useState<Status>('loading');
   const [detail, setDetail] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // WYNIK DIAGNOZY 07.08.2026 — nowy stan ekranu.
+  const [scoresRaw, setScoresRaw] = useState<unknown>(null);
+  const [positionLabel, setPositionLabel] = useState<string | null>(null);
+  const [goalSegmentId, setGoalSegmentId] = useState<string | null>(null);
 
   const loadDiagnoza = useCallback(async () => {
     if (!currentUser) return;
@@ -50,22 +89,51 @@ export default function DiagnozaScreen() {
     try {
       // `diagnostics` to log zdarzeń, nie jeden wiersz na diagnozę — filtr
       // `event=eq.email_submitted` jest konieczny (patrz kontrakt sekcja 3).
-      const { data, error: err } = await supabase
-        .from('diagnostics')
-        .select('diagnosis_type,created_at')
-        .eq('user_id', currentUser.id)
-        .eq('event', 'email_submitted')
-        .order('created_at', { ascending: false })
-        .limit(1);
-      if (err) throw err;
+      //
+      // WYNIK DIAGNOZY 07.08.2026 — do listy kolumn dołączone `scores`.
+      // Kontrakt (sekcja 3) mówił "tylko `diagnosis_type,created_at` — jedyne,
+      // których istnienie potwierdza SQL Domeny 02". `scores` jest potwierdzone
+      // niezależnie i mocniej: czyta je dziś lib/livingDiagnosisPulses.ts,
+      // api/cron-onboard-diagnosis.js i coach.html, a tabela jest widoczna w
+      // Supabase. Kontrakt do aktualizacji przez Kubę — nie edytuję
+      // docs/KONTRAKT_DIAGNOZA.md w tej sesji (nie jest na mojej liście plików).
+      //
+      // Pozycja i aktywny Cel dociągane RÓWNOLEGLE (Promise.all), ten sam
+      // wzorzec co fetchPlayerLivingDiagnosisContext() — trzy sekwencyjne
+      // zapytania dołożyłyby dwa pełne obroty sieci do ekranu, który i tak
+      // odświeża się przy każdym wejściu na zakładkę (useFocusEffect).
+      const [diagRes, profileRes, goalRes] = await Promise.all([
+        supabase
+          .from('diagnostics')
+          .select('diagnosis_type,created_at,scores')
+          .eq('user_id', currentUser.id)
+          .eq('event', 'email_submitted')
+          .order('created_at', { ascending: false })
+          .limit(1),
+        supabase.from('player_profiles').select('position_primary').eq('user_id', currentUser.id).limit(1),
+        // "Aktywny cel" = cel PRIORYTETOWY (is_priority=true) — ten sam
+        // wzorzec co lib/matchSegmentSelection.ts i lib/livingDiagnosisPulses.ts.
+        supabase.from('goals').select('segment_id').eq('user_id', currentUser.id)
+          .eq('status', 'active').eq('is_priority', true).limit(1),
+      ]);
+      if (diagRes.error) throw diagRes.error;
 
-      const latest = data?.[0];
+      // Profil i Cel to KONTEKST wzbogacający, nie warunek działania ekranu:
+      // ich błąd nie może wywalić całego wyniku diagnozy. Bez pozycji ekran
+      // pokazuje 3 grupy zamiast 4 (fallback już obsłużony w
+      // groupSegmentsForDisplay), bez Celu — sekcję zachęty do jego założenia.
+      setPositionLabel(profileRes.error ? null : (profileRes.data?.[0]?.position_primary ?? null));
+      setGoalSegmentId(goalRes.error ? null : (goalRes.data?.[0]?.segment_id ?? null));
+
+      const latest = diagRes.data?.[0];
       if (latest) {
         const typeLabel = DIAGNOSIS_TYPE_LABELS[latest.diagnosis_type] || latest.diagnosis_type || 'Diagnoza';
         const dateLabel = new Date(latest.created_at).toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' });
         setDetail(`${typeLabel} — ${dateLabel}`);
+        setScoresRaw(latest.scores ?? null);
         setStatus('done');
       } else {
+        setScoresRaw(null);
         setStatus('missing');
       }
     } catch (e: any) {
@@ -78,20 +146,54 @@ export default function DiagnozaScreen() {
 
   const openDiagnoza = () => WebBrowser.openBrowserAsync(DIAGNOZA_URL);
 
+  // WYNIK DIAGNOZY 07.08.2026 — wariant awaryjny stanu `done`: wiersz
+  // diagnozy istnieje, ale `scores` jest puste albo nieczytelne (mniej niż 3
+  // wartości liczbowe — patrz parseScores). Zawodnik dostaje wtedy DOKŁADNIE
+  // to, co widział przed tą zmianą (etykieta + data + przycisk rediagnozy w
+  // stopce niżej), plus jedno zdanie mówiące prawdę o tym, czego brakuje.
+  // Świadomie nie pokazujemy pustych grup ani zer.
+  const doneWithoutScores = (
+    <View style={styles.block}>
+      <Text style={styles.missingText}>Twój profil nie jest jeszcze gotowy do pokazania.</Text>
+      <Text style={[styles.missingHint, { marginBottom: 0 }]}>
+        Ta diagnoza nie ma zapisanych szczegółowych wyników — widzisz tylko jej datę. Nowa diagnoza wypełni ten ekran
+        Twoim pełnym profilem: 13 obszarów, wąskie gardła i ich przyczyny.
+      </Text>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <Text style={styles.title}>Diagnoza</Text>
+      {/* AUDYT 06.08.2026 — dodany ScrollView. Wcześniej treść siedziała w zwykłym
+          View: na mniejszym telefonie stan "missing" (tytuł + dwa akapity + przycisk)
+          mógł się nie zmieścić, a przycisk "Wykonaj diagnozę" stawał się fizycznie
+          nieklikalny — na ekranie, który sam siebie nazywa "podstawą pod resztę systemu". */}
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.title}>Diagnoza</Text>
 
       {status === 'loading' && <Text style={styles.empty}>Sprawdzam status...</Text>}
 
       {status === 'done' && (
-        <View style={styles.block}>
-          <Text style={styles.sectionLabel}>Ostatnia diagnoza</Text>
-          <Text style={styles.detail}>{detail}</Text>
-          <TouchableOpacity style={styles.btn} onPress={openDiagnoza}>
-            <Text style={styles.btnText}>Zrób nową diagnozę</Text>
-          </TouchableOpacity>
-        </View>
+        <>
+          <DiagnosisProfileView
+            scoresRaw={scoresRaw}
+            positionLabel={positionLabel}
+            goalSegmentId={goalSegmentId}
+            onOpenGoals={() => router.push('/cele')}
+            onOpenProfile={() => router.push('/profil')}
+            fallback={doneWithoutScores}
+          />
+
+          {/* Data + rediagnoza — WYNIK DIAGNOZY 07.08.2026: zeszły na dół
+              ekranu, zgodnie z briefem. To kontekst, nie treść główna. */}
+          <View style={styles.footerBlock}>
+            <Text style={styles.sectionLabel}>Ostatnia diagnoza</Text>
+            <Text style={styles.detail}>{detail}</Text>
+            <TouchableOpacity style={styles.btn} onPress={openDiagnoza}>
+              <Text style={styles.btnText}>Zrób nową diagnozę</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       )}
 
       {status === 'missing' && (
@@ -114,15 +216,21 @@ export default function DiagnozaScreen() {
       )}
 
       {status === 'error' && error && <Text style={styles.error}>{error}</Text>}
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: spacing.lg, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { padding: spacing.lg, paddingBottom: 60 },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
   sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 14 },
   block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.lg, marginBottom: spacing.lg },
+  // WYNIK DIAGNOZY 07.08.2026 — ten sam wygląd co `block`, ale z odstępem od
+  // profilu powyżej; osobna nazwa, żeby było widać w kodzie, że to stopka
+  // ekranu, nie jego treść główna.
+  footerBlock: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.lg, marginTop: spacing.xl },
   detail: { ...typography.body, fontSize: 15, color: colors.textPrimary, marginBottom: spacing.md },
   missingText: { ...typography.body, fontSize: 15, color: colors.textPrimary, marginBottom: 12 },
   missingHint: { ...typography.body, fontSize: 13, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 19 },

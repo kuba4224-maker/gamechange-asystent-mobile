@@ -25,11 +25,19 @@ type Props = {
   dismissPushPriming: () => Promise<void>;
 };
 
-// Treść — patrz dokument startowy sesji: appka to jedna spójna pętla
-// (Dziennik → Centrum Decyzji → Kalendarz → Cele), nie 7 osobnych funkcji;
-// fraza-kotwica "narzędzie jest nawigatorem, nie trenerem" (już ustalona
-// jako oficjalna tożsamość systemu, PLAN_SPOJNEJ_SCIEZKI.md sekcja 5 pkt 3)
-// wpleciona dosłownie w ekran 1.
+// Treść. Fraza-kotwica "narzędzie jest nawigatorem, nie trenerem" (oficjalna
+// tożsamość systemu, PLAN_SPOJNEJ_SCIEZKI.md sekcja 5 pkt 3) wpleciona dosłownie
+// w ekran 1.
+//
+// AUDYT 06.08.2026 — z czterech ekranów zostały trzy. Usunięte:
+//  • "Jedna pętla, nie 7 osobnych funkcji" — tłumaczył zawodnikowi wewnętrzną
+//    historię refaktoru ("7 funkcji", których nigdy nie widział) i opisywał pętlę
+//    Dziennik → Centrum Decyzji → Kalendarz, w której nie ma ekranu Dziś, czyli
+//    tego, na którym zawodnik za chwilę wyląduje.
+//  • "Twój Cel prowadzi W TLE" — stał w jawnej sprzeczności z decyzją z 06.08.2026
+//    (BRIEF_DELEGACJA_PROMINENCJA_CELU.md), że Cel ma być największym, PIERWSZYM
+//    elementem ekranu Dziś. Onboarding nie został wtedy zaktualizowany.
+// Ekran 2 poniżej zastępuje oba jednym zdaniem zgodnym z aktualną decyzją.
 const STEPS = [
   {
     title: 'Witaj w Gamechange',
@@ -37,19 +45,18 @@ const STEPS = [
       'To narzędzie pomoże Ci świadomie zarządzać swoim rozwojem. Nie poprowadzi za Ciebie treningu i nie zastąpi trenera — pokaże Ci, na czym się dziś skupić i dlaczego.\n\nNarzędzie jest nawigatorem, nie trenerem.',
   },
   {
-    title: 'Jedna pętla, nie 7 osobnych funkcji',
+    title: 'Wszystko kręci się wokół Twojego Celu',
     body:
-      'Na co dzień appka to prosty cykl: zapisujesz obserwacje w Dzienniku → system pokazuje w Centrum Decyzji, co teraz warto zrobić → Ty planujesz to w Kalendarzu. Wszystko po to, żeby Twój Cel realnie się przybliżał.',
-  },
-  {
-    title: 'Twój Cel prowadzi w tle',
-    body:
-      'Masz zawsze jeden aktywny Cel — to on decyduje, która rekomendacja i które wydarzenie w kalendarzu są dla Ciebie najważniejsze. Pełny widok swojego Celu znajdziesz zawsze w zakładce Cele.',
+      'Masz jeden aktywny Cel — zobaczysz go na samej górze ekranu Dziś, za każdym razem gdy otworzysz appkę. To on decyduje, co system Ci podpowiada i co warto zaplanować.\n\nZaczynasz od zapisania, jak się dziś czujesz. Reszta buduje się na tym.',
   },
   {
     title: 'Włącz powiadomienia',
     body:
-      'Przypomnimy Ci o porannym wpisie i nowych rekomendacjach w Centrum Decyzji — bez zalewu, tylko to, co faktycznie wartościowe.',
+      // JEDNA DROGA B2 08.08.2026 — zdanie mówiło zawodnikowi, że nowe rekomendacje
+      // są „w Centrum Decyzji". Po scaleniu najnowsza rekomendacja stoi na ekranie
+      // Dziś, a zakładki o tej nazwie już nie ma — to była instrukcja prowadząca
+      // w miejsce, którego zawodnik nie znajdzie. Zmieniona wyłącznie nazwa miejsca.
+      'Przypomnimy Ci o porannym wpisie i o nowej rekomendacji na ekranie Dziś — bez zalewu, tylko to, co faktycznie wartościowe.',
   },
 ];
 

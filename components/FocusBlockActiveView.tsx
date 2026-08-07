@@ -170,6 +170,8 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
 
   const [requestingCheckin, setRequestingCheckin] = useState(false);
   const [freshContentDose, setFreshContentDose] = useState<{ practicalStep: string; forCurious: string | null } | null>(null);
+  // AUDYT 06.08.2026 — dodany widoczny stan błędu dla "Sprawdź teraz, jak idzie".
+  const [checkinError, setCheckinError] = useState<string | null>(null);
 
   const loadLatestCheckin = useCallback(async () => {
     setCheckinLoading(true);
@@ -222,9 +224,18 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
   // treści), nie zapisuje trwale. To świadomy kompromis — trwałe pytania
   // kontrolne zawsze pochodzą z crona (Faza 2a ma być rytmem, nie
   // czymś generowanym na żądanie w nieskończoność).
+  //
+  // AUDYT 06.08.2026 — audyt zaproponował usunięcie tego przycisku ("nic nie
+  // zapisuje, pusty catch, w typowym przypadku dotknięcie nie zmienia nic").
+  // ŚWIADOMIE ODSTĄPIONO od usunięcia: bez działającego crona to jedyna droga,
+  // żeby Faza 2 pokazała cokolwiek poza "Brak jeszcze żadnego pytania kontrolnego".
+  // Naprawiona została natomiast realna wada — cichy `catch {}`. Teraz błąd jest
+  // widoczny, a brak treści w odpowiedzi też ma swój komunikat, więc dotknięcie
+  // przycisku ZAWSZE coś zmienia na ekranie.
   const requestCheckinNow = async () => {
     setRequestingCheckin(true);
     setFreshContentDose(null);
+    setCheckinError(null);
     try {
       const res = await fetch(FOCUS_BLOCK_CONTENT_API_URL, {
         method: 'POST',
@@ -234,9 +245,9 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.contentDose) setFreshContentDose(data.contentDose);
+      else setCheckinError('Tym razem nie ma nowej podpowiedzi — wróć po kolejnej sesji.');
     } catch {
-      // Best-effort, nie blokuje reszty widoku — brak trwałego stanu błędu,
-      // to opcjonalna wygoda, nie kluczowa ścieżka.
+      setCheckinError('Nie udało się teraz sprawdzić — spróbuj za chwilę.');
     } finally {
       setRequestingCheckin(false);
     }
@@ -472,6 +483,8 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
         </View>
       )}
 
+      {checkinError && <Text style={styles.checkinErrorText}>{checkinError}</Text>}
+
       <TouchableOpacity style={styles.cancelLink} onPress={requestCheckinNow} disabled={requestingCheckin}>
         <Text style={styles.linkTextMuted}>{requestingCheckin ? 'Sprawdzam...' : 'Sprawdź teraz, jak idzie'}</Text>
       </TouchableOpacity>
@@ -487,6 +500,7 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
 
 const styles = StyleSheet.create({
   wrap: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: 'rgba(232,67,45,0.06)', padding: 14, marginTop: 10 },
+  checkinErrorText: { ...typography.body, fontSize: 13, color: colors.textSecondary, marginTop: 10, lineHeight: 19 },
   sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6 },
   stageText: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary, marginBottom: 10 },
   label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 8 },

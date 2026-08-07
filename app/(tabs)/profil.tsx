@@ -72,10 +72,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
 import Checkbox from 'expo-checkbox';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { toLocalDateStr } from '../../lib/date-utils';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+// JEDNA DROGA B2 08.08.2026 — jedno źródło nazw lokalizacji bólu.
+import { BODY_LOCATIONS, BODY_LOCATION_LABELS, NON_LATERAL_LOCATIONS } from '../../lib/labels';
 import {
   isBiometricHardwareAvailable,
   isBiometricLockEnabled,
@@ -111,17 +114,10 @@ const INJURY_MODE_CATEGORY_LABELS: Record<string, string> = {
   upper_body: 'Górna część ciała',
   general: 'Ogólne / całe ciało',
 };
-const BODY_LOCATIONS: [string, string][] = [
-  ['kostka', 'Kostka'], ['kolano', 'Kolano'], ['udo_przednie', 'Udo przednie'],
-  ['udo_tylne', 'Udo tylne'], ['lydka', 'Łydka'], ['pachwina', 'Pachwina'],
-  ['biodro', 'Biodro'], ['stopa', 'Stopa'], ['achilles', 'Ścięgno Achillesa'],
-  ['plecy_kregoslup', 'Plecy / kręgosłup'], ['brzuch_tulow', 'Brzuch / tułów'],
-  ['bark', 'Bark'], ['lokiec', 'Łokieć'], ['nadgarstek_dlon', 'Nadgarstek / dłoń'],
-  ['glowa_twarz', 'Głowa / twarz'], ['klatka_piersiowa_zebra', 'Klatka piersiowa / żebra'],
-  ['inne', 'Inne'],
-];
-const BODY_LOCATION_LABELS = Object.fromEntries(BODY_LOCATIONS);
-const NON_LATERAL_LOCATIONS = new Set(['plecy_kregoslup', 'brzuch_tulow', 'inne']);
+// JEDNA DROGA B2 08.08.2026 — lokalne kopie 17 lokalizacji bólu, ich mapy nazw
+// i listy lokalizacji bez strony ciała usunięte; wszystkie trzy pochodzą teraz
+// z lib/labels.ts. Były w trzech identycznych kopiach (dziennik.tsx, mecz.tsx,
+// profil.tsx) — treść niezmieniona co do znaku, porównana maszynowo.
 
 const STAGE_COUNT = 5;
 
@@ -171,6 +167,19 @@ export default function ProfilScreen() {
   // sam wzorzec co Wzrost tuż wyżej — patrz komentarz na górze pliku.
   const [parentEmailInput, setParentEmailInput] = useState('');
   const [savingParentEmail, setSavingParentEmail] = useState(false);
+  // AUDYT 06.08.2026 — pamięć lokalna ostatnio zapisanego adresu rodzica.
+  // `parent_report_subscriptions` świadomie NIE ma polityki RLS SELECT dla
+  // zawodnika (dostęp tylko przez token, RAPORT_RODZICA_SQL.md), więc appka nie
+  // ma jak zapytać bazy "czy już zapisałem". Skutkiem było to, że zawodnik nie
+  // widział żadnego śladu wcześniejszego zapisu i przy każdym wejściu w Profil
+  // klikał jeszcze raz — a każde kliknięcie tworzyło NOWY wiersz subskrypcji,
+  // czyli rodzic dostawałby raport tyle razy, ile razy dziecko kliknęło.
+  // To obejście po stronie urządzenia: nie przetrwa reinstalacji ani zmiany
+  // telefonu, ale odcina najczęstszy przypadek (kliknięcie dwa razy z rzędu).
+  // PEŁNE ROZWIĄZANIE WYMAGA SQL — patrz REJESTR_NAPRAW_AUDYT_06_08_2026.md:
+  // unikalny indeks na (player_user_id, parent_email) + polityka SELECT dla
+  // właściciela wiersza. Do wklejenia przez Kubę, nie przez sesję.
+  const [savedParentEmail, setSavedParentEmail] = useState<string | null>(null);
 
   // Sekcja 2d — Kod drużyny (05.08.2026). RPC join_team_with_code, formularz
   // NIEZALEŻNY od zapisu etapu, ten sam wzorzec co Raport dla rodzica wyżej
@@ -272,6 +281,14 @@ export default function ProfilScreen() {
   }, [currentUser]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  // AUDYT 06.08.2026 — odczyt lokalnie zapamiętanego adresu rodzica (patrz wyżej).
+  useEffect(() => {
+    if (!currentUser) return;
+    AsyncStorage.getItem(`parent_report_email:${currentUser.id}`)
+      .then((v) => setSavedParentEmail(v))
+      .catch(() => { /* brak pamięci lokalnej nie może blokować ekranu */ });
+  }, [currentUser]);
 
   useEffect(() => {
     let mounted = true;
@@ -421,6 +438,12 @@ export default function ProfilScreen() {
       setProfileError('Podaj prawidłowy adres email rodzica.');
       return;
     }
+    // AUDYT 06.08.2026 — nie twórz drugiej subskrypcji na ten sam adres.
+    if (savedParentEmail && trimmedEmail.toLowerCase() === savedParentEmail.toLowerCase()) {
+      setParentEmailInput('');
+      setProfileOk('Ten adres jest już zapisany — nie trzeba go dodawać drugi raz.');
+      return;
+    }
     setSavingParentEmail(true);
     try {
       const { error } = await supabase
@@ -429,6 +452,8 @@ export default function ProfilScreen() {
       if (error) throw error;
 
       setParentEmailInput('');
+      setSavedParentEmail(trimmedEmail);
+      AsyncStorage.setItem(`parent_report_email:${currentUser.id}`, trimmedEmail).catch(() => {});
       setProfileOk('Zapisano e-mail rodzica — raporty zaczną przychodzić po włączeniu wysyłki.');
     } catch (e: any) {
       setProfileError('Nie udało się zapisać e-maila rodzica: ' + e.message);
@@ -573,6 +598,14 @@ export default function ProfilScreen() {
               podsumowanie Twojego rozwoju — bez logowania, bez dostępu do Twojego
               dziennika czy samopoczucia.
             </Text>
+            {/* AUDYT 06.08.2026 — potwierdzenie, że adres już jest zapisany.
+                Bez tego ekran nie dawał ŻADNEGO śladu wcześniejszego zapisu. */}
+            {savedParentEmail ? (
+              <Text style={styles.hint}>
+                Zapisany adres: {savedParentEmail}. Jeśli wpiszesz inny, raport będzie chodził
+                na oba — ten sam adres nie zostanie dodany drugi raz.
+              </Text>
+            ) : null}
             <Text style={styles.label}>Email rodzica</Text>
             <TextInput
               style={styles.input} placeholderTextColor={colors.textSecondary} value={parentEmailInput} onChangeText={setParentEmailInput}
