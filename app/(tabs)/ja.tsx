@@ -68,10 +68,10 @@
 // dwie liczby przy podpisach. Po roku gry to kilkaset wierszy przy każdym
 // wejściu na zakładkę. Teraz są to dwa zapytania `head: true` +
 // `count: 'exact'` — baza liczy u siebie i odsyła same liczby, zero wierszy.
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
@@ -104,6 +104,11 @@ import { MAPA_ENTRY_LABEL, MAPA_ENTRY_HINT_DOSTEPNA } from '../../lib/mapaDrogi'
 // powód (piąta zakładka, zakaz 10) jest w nagłówku `components/MojaDroga.tsx`.
 import Kalibracja from '../../components/Kalibracja';
 import { KALIBRACJA_ENTRY_LABEL, KALIBRACJA_ENTRY_PODPIS } from '../../lib/kalibracja';
+// PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I1. Karta „Czas na pomiar" na
+// ekranie „Dziś" prowadzi TUTAJ, parametrem `otworz`. Nazwa parametru jest
+// STAŁĄ z `lib/glosTygodnia.ts`, a nie napisem powtórzonym w dwóch plikach:
+// skrót albo literówka nie rzuca błędem, tylko po cichu przestaje trafiać.
+import { OTWORZ_KALIBRACJE } from '../../lib/glosTygodnia';
 import SciezkaWyjscia from '../../components/SciezkaWyjscia';
 import { WYJSCIE_WEJSCIE_LABEL, WYJSCIE_WEJSCIE_PODPIS } from '../../lib/sciezkaWyjscia';
 import { otworzPunktPomocy } from '../../components/PunktPomocy';
@@ -139,6 +144,26 @@ export default function JaScreen() {
   // ścieżkę wyjścia włącza dopiero jawne potwierdzenie w środku modala.
   const [kalibracjaOtwarta, setKalibracjaOtwarta] = useState(false);
   const [wyjscieOtwarte, setWyjscieOtwarte] = useState(false);
+
+  // PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I1: WEJŚCIE Z KARTY GŁOSU TYGODNIA.
+  //
+  // ⚠️ TO NIE JEST DRUGI EKRAN KALIBRACJI. Otwiera się DOKŁADNIE TEN SAM,
+  // jedyny modal zamontowany niżej w tym pliku — ten sam, który otwiera wiersz
+  // „Kalibracja" w sekcji „Twój rozwój". Dwa wejścia, jeden egzemplarz.
+  //
+  // ⚠️ PARAMETR JEST JEDNORAZOWY. Bez `setParams` zostałby na trasie i modal
+  // otwierałby się PONOWNIE przy każdym powrocie na tę zakładkę — także wtedy,
+  // gdy zawodnik świadomie go zamknął. Zamknięcie ekranu przez zawodnika jest
+  // odpowiedzią „nie teraz" i produkt nie ma prawa jej nie usłyszeć.
+  const parametry = useLocalSearchParams<{ otworz?: string | string[] }>();
+  const zadanieOtwarcia = Array.isArray(parametry.otworz) ? parametry.otworz[0] : parametry.otworz;
+  useEffect(() => {
+    if (zadanieOtwarcia !== OTWORZ_KALIBRACJE) return;
+    setKalibracjaOtwarta(true);
+    // Pusty napis, nie `undefined`: `setParams` przyjmuje wartości tekstowe,
+    // a warunek wyżej i tak przepuszcza wyłącznie dokładne dopasowanie.
+    router.setParams({ otworz: '' });
+  }, [zadanieOtwarcia, router]);
 
   const load = useCallback(async () => {
     if (!currentUser) return;

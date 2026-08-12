@@ -202,6 +202,12 @@ import {
   podniescPunktPomocy,
   opisDoLogu,
   poniedzialekTygodnia as poniedzialekGlosu,
+  // PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I1. Karta „Czas na pomiar"
+  // rysowała się od 12.08.2026 i NIE PROWADZIŁA NIGDZIE, a ekran Kalibracji
+  // istniał dwa dotknięcia dalej, w zakładce „Ja". Decyzja „dokąd prowadzi
+  // karta" siedzi w `lib/glosTygodnia.ts` jako czysta funkcja — ten ekran
+  // ją WYKONUJE, nie podejmuje.
+  wejscieZKarty,
   type StanGlosu,
   type WierszGlosu,
 } from '../../lib/glosTygodnia';
@@ -769,15 +775,42 @@ export default function DzisScreen() {
               • brak wiersza — cron jeszcze nie policzył tego tygodnia;
               • błąd odczytu — powód idzie do konsoli, nie na ekran.
             BLOK też nie dostaje karty: ma już kafelek na górze ekranu. */}
-        {pokazacKarte(glos) && glos.rodzaj === 'glos' && (
-          <View style={{ marginTop: 24 }}>
-            <View style={styles.glosCard}>
+        {pokazacKarte(glos) && glos.rodzaj === 'glos' && (() => {
+          // PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I1.
+          // ⚠️ KARTA PROWADZI DO ISTNIEJĄCEGO EKRANU, NIE OTWIERA DRUGIEGO.
+          // Kalibracja jest JEDNYM modalem, zamontowanym w `app/(tabs)/ja.tsx`
+          // (zakaz 10: żadnej piątej zakładki). Stąd idzie WYŁĄCZNIE nawigacja
+          // do „Ja" z parametrem — tamten ekran otwiera swój jedyny egzemplarz.
+          // Drugi egzemplarz byłby drugą drogą do jednego rekordu.
+          // Gdy `wejscieZKarty` zwróci `null`, karta zostaje dokładnie taka,
+          // jaka była: tekstem bez dotknięcia. Tak jest dla exit, injury,
+          // growth i compass — świadomie, patrz nagłówek `lib/glosTygodnia.ts`.
+          const wejscie = wejscieZKarty(glos);
+          const tresc = (
+            <>
               <View style={styles.glosStripe} />
               <Text style={styles.glosTytul}>{glos.tytul}</Text>
               <Text style={styles.glosTresc}>{glos.tresc}</Text>
+              {wejscie && <Text style={styles.glosWejscie}>{wejscie.etykieta}</Text>}
+            </>
+          );
+          return (
+            <View style={{ marginTop: 24 }}>
+              {wejscie ? (
+                <TouchableOpacity
+                  style={styles.glosCard}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${glos.tytul}. ${wejscie.etykieta}`}
+                  onPress={() => router.push({ pathname: wejscie.trasa, params: { otworz: wejscie.otworz } })}
+                >
+                  {tresc}
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.glosCard}>{tresc}</View>
+              )}
             </View>
-          </View>
-        )}
+          );
+        })()}
 
         {/* ZADANIE E2 12.08.2026 — PUNKT POMOCY WYŻEJ W DWÓCH STANACH.
             Kontuzja i ścieżka wyjścia trwają tygodniami i w obu zawodnik ma
@@ -859,6 +892,10 @@ const styles = StyleSheet.create({
   glosStripe: { ...skew.stripe, height: 6, backgroundColor: colors.brand, marginBottom: 12 },
   glosTytul: { ...typography.bodySemiBold, fontSize: 17, color: colors.textPrimary, marginBottom: 6 },
   glosTresc: { ...typography.body, fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
+  // PLAN-D-I 08.2026 — wejście z karty głosu tygodnia (I1). Te same wartości
+  // co `cardAction`: to jest ta sama rzecz co „zobacz" na innych kartach,
+  // więc nie ma powodu, żeby wyglądała inaczej.
+  glosWejscie: { ...typography.bodyMedium, fontSize: 13, color: colors.brand, marginTop: 10 },
   // ZADANIE E2 12.08.2026 — wiersz punktu pomocy.
   pomocCard: { borderColor: colors.brand },
   pomocPodpis: { ...typography.body, fontSize: 12, color: colors.textTertiary, lineHeight: 17 },

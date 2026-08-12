@@ -15,6 +15,9 @@
 import {
   stanGlosu,
   pokazacKarte,
+  wejscieZKarty,
+  OTWORZ_KALIBRACJE,
+  KARTA_WEJSCIE_LABEL,
   podniescPunktPomocy,
   opisDoLogu,
   poniedzialekTygodnia,
@@ -94,6 +97,41 @@ for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]
     s.rodzaj === 'nie_wiem', JSON.stringify(s));
   check('…i mówi wprost, że appka jest starsza niż baza',
     s.rodzaj === 'nie_wiem' && s.powod.includes('starsza niż baza'), JSON.stringify(s));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 3a. PLAN-D-I 08.2026 (12.08.2026) — I1: KARTA MA DOKĄD PROWADZIĆ
+// ═══════════════════════════════════════════════════════════════════
+{
+  const s = stanGlosu(wiersz('calibration'));
+  const w = wejscieZKarty(s);
+  check('(I1) karta „Czas na pomiar" PROWADZI gdzieś — do 12.08.2026 nie prowadziła nigdzie',
+    w !== null, JSON.stringify(w));
+  check('(I1) …i prowadzi do ISTNIEJĄCEGO ekranu w zakładce „Ja", nie do nowej trasy',
+    w !== null && w.trasa === '/ja', JSON.stringify(w));
+  check('(I1) …parametrem, po którym „Ja" otwiera swój JEDYNY egzemplarz modala',
+    w !== null && w.otworz === OTWORZ_KALIBRACJE && OTWORZ_KALIBRACJE === 'kalibracja', JSON.stringify(w));
+  check('(I1) …i ma niepustą etykietę wejścia', w !== null && w.etykieta === KARTA_WEJSCIE_LABEL && w.etykieta.length > 5, JSON.stringify(w));
+}
+for (const g of ['exit', 'injury', 'growth', 'compass'] as Glos[]) {
+  check(`(I1) ${g}: karta NIE prowadzi nigdzie — nie ma dokąd, a link donikąd jest gorszy niż jego brak`,
+    wejscieZKarty(stanGlosu(wiersz(g))) === null, g);
+}
+{
+  check('(I1) block nie ma karty, więc nie ma i wejścia',
+    wejscieZKarty(stanGlosu(wiersz('block'))) === null, 'block');
+  check('(I1) cisza nie ma wejścia — cisza jest decyzją, a nie zaproszeniem',
+    wejscieZKarty(stanGlosu(wiersz('silence'))) === null, 'silence');
+  check('(I1) brak wiersza nie ma wejścia', wejscieZKarty(stanGlosu(null, null)) === null, 'brak_wiersza');
+  check('(I1) błąd odczytu nie ma wejścia — nie zapraszamy do ekranu na podstawie niewiedzy',
+    wejscieZKarty(stanGlosu(null, 'network request failed')) === null, 'nie_wiem');
+}
+{
+  // Strażnik dubla: wejście z karty i wiersz w „Ja" MUSZĄ prowadzić do tego
+  // samego modala. Ten test nie umie tego udowodnić sam — pilnuje tego, żeby
+  // parametr był JEDNĄ stałą, a nie napisem powtórzonym w dwóch plikach.
+  check('(I1) parametr wejścia jest stałą eksportowaną, nie napisem wklepanym w ekranie',
+    typeof OTWORZ_KALIBRACJE === 'string' && OTWORZ_KALIBRACJE.length > 0, OTWORZ_KALIBRACJE);
 }
 
 // ═══════════════════════════════════════════════════════════════════

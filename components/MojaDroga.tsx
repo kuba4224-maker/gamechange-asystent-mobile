@@ -89,7 +89,38 @@ export const EXIT_MODE_WARN =
  * Nie ma w bazie niczego, z czego dałoby się wywnioskować „koledzy z drużyny
  * odpadli". Przekazujemy `null`, czyli „nie wiem" — i to jest zapisane tutaj,
  * a nie ukryte w `false`, bo `false` znaczyłoby „sprawdziłem i nie jest
- * świadkiem". Treść wariantu jest w bazie i czeka na wyzwalacz.
+ * świadkiem". Szesnaście wierszy treści tego wariantu czeka w `road_factors`
+ * od 11.08.2026.
+ *
+ * ── PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I2: ROZSTRZYGNIĘTE, NA NIE ────
+ * Zadaniem było ustalić, SKĄD produkt ma to wiedzieć. Sprawdzone zostały
+ * trzy jedyne drogi, jakie dziś istnieją, i żadna nie działa:
+ *
+ * 1. WYWNIOSKOWAĆ Z DRUŻYNY. `team_memberships` ma kolumnę `left_at`, więc
+ *    z kształtu wygląda na źródło. Zmierzone 12.08.2026: tabela ma **0
+ *    wierszy**, a w obu repozytoriach nie ma **ANI JEDNEGO** zapisu do niej
+ *    (`insert`/`update`/`upsert` — zero trafień; czytają ją wyłącznie ekrany
+ *    trenera). Nawet gdyby dane były: `left_at` nie odróżnia deselekcji od
+ *    zmiany klubu, przeprowadzki i rzucenia piłki — a produkt musiałby
+ *    odróżnić, bo cała treść tego wariantu mówi o DECYZJI SYSTEMU.
+ * 2. WYWNIOSKOWAĆ Z `exit_mode` KOLEGÓW. Wymagałoby czytania cudzego wiersza
+ *    o deselekcji, żeby zmienić ekran osoby trzeciej — czyli ujawnienia
+ *    jednemu małoletniemu, że drugi odpadł. To jest decyzja o bezpieczeństwie
+ *    nieletnich i o prywatności, więc należy do Kuby i do prawnika, nie do
+ *    sesji. Osobno: `team_memberships` jest puste, więc nie ma nawet po czym
+ *    połączyć zawodników w drużynę.
+ * 3. ZAPYTAĆ ZAWODNIKA WPROST. Da się — i to jest jedyna droga, która daje
+ *    prawdziwą odpowiedź. Ale to jest NOWE PYTANIE do zawodnika, w jego
+ *    najgorszym tygodniu, o cudzą deselekcję. Brzmienie takiego pytania
+ *    należy do Kuby (zakaz 5), a moment i forma — do rozstrzygnięcia po
+ *    pierwszej prawdziwej rozmowie z zawodnikiem.
+ *
+ * DLATEGO NIE ZBUDOWANE, ŚWIADOMIE. Zgadywanie, że komuś odpadli koledzy,
+ * jest gorsze niż niepokazanie treści: wariant otwiera się zdaniem „to, co
+ * się stało, nie było oceną ich wartości" — i jeżeli nikomu nic się nie
+ * stało, produkt właśnie powiedział zawodnikowi coś nieprawdziwego o jego
+ * drużynie. Cichy brak z pustką jest tu tańszy niż cichy brak ze zmyśleniem.
+ * ──────────────────────────────────────────────────────────────────────────
  */
 const SWIADEK_BRAK_ZRODLA = null;
 

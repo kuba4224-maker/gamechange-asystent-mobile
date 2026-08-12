@@ -196,8 +196,45 @@ for (const slad of ['expires', 'wygasa', 'DNI_BEZ_WPISU', 'TTL', 'setTimeout', '
 }
 check('źródło nie czyta zegara (data wchodzi parametrem, reguła E-N2)',
   !/new Date\(\)/.test(zrodlo), 'new Date()');
-check('źródło nie zapisuje stanu „paused_decision" — patrz nagłówek pliku',
+// ─────────────────────────────────────────────────────────────────────
+// PLAN-D-I 08.2026 (12.08.2026) — REGUŁA TEJ ASERCJI ZMIENIŁA SIĘ.
+//
+// DO 12.08.2026 pilnowała ona czegoś innego i z innego powodu: appka nie
+// mogła zapisać `paused_decision`, bo czytnik arbitra uznawał za aktywną
+// ścieżkę wyjścia KAŻDY otwarty wiersz o `state <> 'closed'` — więc taki
+// zapis WYCISZYŁBY PRODUKT W CAŁOŚCI (szczebel 0 drabiny), zamiast zrobić
+// to, czego chce spec 6.4.
+//
+// TA PRZYCZYNA ZNIKŁA. Zadanie I3 rozdzieliło oba stany w
+// `gamechange-app/lib/arbiter-glosu-io.js`: `paused_decision` nie jest już
+// ścieżką wyjścia, nie zabiera głosu i nie ustawia ciszy — jest STANEM
+// (skrócony horyzont Bloku, Mapa na to, co w rękach zawodnika, liczba
+// systemowa). Pilnują tego cztery komplety asercji po tamtej stronie,
+// z przebiegiem 52 tygodni na czwartym profilu włącznie.
+//
+// ASERCJA ZOSTAJE, ale pilnuje NOWEJ reguły, i ta reguła jest węższa:
+// ten plik zna dwa stany, które SAM ZAPISUJE (`active`, `closed`), i nie
+// zapisuje trzeciego. Powodem nie jest już ryzyko ciszy, tylko to, że
+// stan „czekam na decyzję" WŁĄCZA ZAWODNIK (spec 6.4), a wejścia do niego
+// w produkcie dziś NIE MA. Plik, który zapisuje stan, do którego nikt nie
+// ma jak wejść, tworzy wiersze bez właściciela.
+// ⚠️ Gdy to wejście powstanie, tej asercji NIE WOLNO po prostu skasować —
+// ma się zamienić na sprawdzenie, że wejście zapisuje `paused_decision`
+// jawnie i odwracalnie jednym ruchem, jak reszta tego pliku.
+// ─────────────────────────────────────────────────────────────────────
+check('źródło zapisuje WYŁĄCZNIE dwa stany, które sam zna: „active" i „closed"',
+  zrodlo.includes("'active'") && zrodlo.includes("'closed'"), 'active/closed');
+check('źródło NIE zapisuje „paused_decision" — ten stan włącza zawodnik, a wejścia do niego jeszcze nie ma',
   !zrodlo.includes("'paused_decision'"), 'paused_decision');
+{
+  // Druga połowa nowej reguły, i ta jest ważniejsza: gdyby taki wiersz
+  // POJAWIŁ SIĘ w bazie (włączony kiedykolwiek i skądkolwiek), ekran ma go
+  // NAZWAĆ, a nie pokazać jak zwykłe włączenie ścieżki wyjścia. „Nie znam
+  // tego stanu" i „ścieżka wyjścia jest włączona" to dwie różne rzeczy.
+  const s = stanSciezki(wiersz({ state: 'paused_decision' }), null);
+  check('…a gdyby taki wiersz jednak był, ekran nazywa go osobno, zamiast udawać zwykłe włączenie',
+    s.rodzaj === 'wlaczona' && s.nieznanyStan === 'paused_decision', JSON.stringify(s));
+}
 
 // Klasyfikator: ten plik nie ma prawa czytać treści wpisów zawodnika.
 for (const slad of ['daily_logs', 'payload', 'diagnostics', 'ryzyk', 'score']) {
