@@ -200,9 +200,62 @@ export function passesAgeGate(row: Pick<ComponentHintRow, 'min_age'>, age: numbe
   return age >= row.min_age;
 }
 
-/** Odbiorca: zawodnik widzi `zawodnik` i `oba`. `rodzic` należy do raportu rodzica (A3/C3). */
+/**
+ * Odbiorca: zawodnik widzi `zawodnik` i `oba`. `rodzic` należy do raportu
+ * rodzica (A3/C3) — ale patrz `audienceAllowsPlayer` niżej: od rundy 11
+ * zawodnik PEŁNOLETNI jest własnym rodzicem i tę warstwę dostaje wprost.
+ * Ta funkcja zostaje czysta (sam wiersz, bez wieku), bo tak używa jej
+ * kontrakt A9 i raport rodzica po stronie backendu.
+ */
 export function isForPlayer(row: Pick<ComponentHintRow, 'odbiorca'>): boolean {
   return row.odbiorca === 'zawodnik' || row.odbiorca === 'oba';
+}
+
+// ─────────────────────────────────────────────────────────────
+// DOROSŁY R11 08.08.2026 — „18+ = własny rodzic"
+// ─────────────────────────────────────────────────────────────
+// Routing `odbiorca='rodzic'` istnieje po to, żeby LICZBOWE dawki suplementów
+// szły do osoby, która u nieletniego kupuje i pilnuje dawki. U zawodnika
+// PEŁNOLETNIEGO tą osobą jest on sam — dotychczas nie widział tej warstwy
+// wcale, bo dorosły amator nie ma konta rodzica (audyt ograniczeń wiekowych,
+// AUDYT_OGRANICZEN_WIEKOWYCH_R11.md, rekomendacja 1).
+//
+// DWIE reguły, obie zależne od DOLNEJ granicy wieku (`minimumPossibleAge`,
+// ten sam konserwatyzm co bramka A9 — rocznik 2008 w 2026 daje dolną 17,
+// więc warstwa rodzica wejdzie dopiero, gdy pełnoletność jest PEWNA):
+//   1. wiersze `odbiorca='rodzic'` WCHODZĄ do puli zawodnika,
+//   2. odesłania do rodzica (teksty systemowe decyzji A9, `zrodlo` zawiera
+//      „decyzja A9") WYCHODZĄ z puli — „ustal z rodzicem, on pilnuje dawki"
+//      jest u dorosłego zdaniem fałszywym, a od tej rundy stałaby OBOK
+//      właściwej dawki.
+// Nieznany wiek NIGDY nie włącza warstwy rodzica (fail-closed, jak A9).
+
+/** Dolna granica pełnoletności. */
+export const ADULT_MIN_AGE = 18;
+
+/** Czy DOLNA granica wieku dowodzi pełnoletności. `null` = nie dowodzi. */
+export function isAdultLowerBound(age: number | null): boolean {
+  return age != null && age >= ADULT_MIN_AGE;
+}
+
+/** Tekst systemowy kierujący po dawki do rodzica (decyzja A9) — nie z materiału. */
+export function isParentReferralRow(row: Pick<ComponentHintRow, 'zrodlo'>): boolean {
+  return (row.zrodlo ?? '').toLowerCase().includes('decyzja a9');
+}
+
+/**
+ * Filtr odbiorcy Z WIEKIEM — tego używa `selectHintsForPlayer`.
+ * Nieletni i nieznany wiek: dokładnie dawne `isForPlayer` (bajt w bajt).
+ * Dorosły: dodatkowo wiersze `rodzic`. Bramka A9 (`passesAgeGate`) działa
+ * na tych wierszach dalej, bez zmian — 18 ≥ 16, więc niczego nie ukryje,
+ * ale gdyby kiedyś powstał wiersz `min_age=21`, bramka go przytrzyma.
+ */
+export function audienceAllowsPlayer(
+  row: Pick<ComponentHintRow, 'odbiorca'>,
+  age: number | null,
+): boolean {
+  if (isForPlayer(row)) return true;
+  return row.odbiorca === 'rodzic' && isAdultLowerBound(age);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -265,7 +318,10 @@ export function selectHintsForPlayer(params: {
   const { rows, componentId = null, age } = params;
   const eligible = rows.filter((r) =>
     r.active !== false
-    && isForPlayer(r)
+    // DOROSŁY R11: odbiorca zależy od wieku — u pełnoletniego wchodzi też
+    // warstwa `rodzic`, a odesłania do rodzica (teksty A9) wypadają.
+    && audienceAllowsPlayer(r, age)
+    && !(isAdultLowerBound(age) && isParentReferralRow(r))
     && passesAgeGate(r, age)
     && typeof r.hint === 'string'
     && r.hint.trim().length > 0

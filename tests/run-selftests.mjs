@@ -58,7 +58,12 @@ for (const file of selftests) {
   const path = join(libDir, file);
   const shown = relative(root, path);
   console.log(`${'═'.repeat(66)}\n▶  ${shown}\n${'═'.repeat(66)}`);
-  const run = spawnSync('npx', ['tsx', path], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+  // W1-fix 08.08.2026: `shell: true` na Windows skleja argumenty BEZ cudzysłowów,
+  // więc absolutna ścieżka ze spacjami („…\Kuba - Gamechange\…") była cięta na
+  // pierwszej spacji (objaw: url 'file:///C:/Users/Marta/Desktop/Kuba', 0/13 FAIL,
+  // zweryfikowane na żywo 08.08.2026). Ścieżka WZGLĘDNA względem cwd=root nie
+  // zawiera spacji (`lib/xxx.selftest.ts`), więc przechodzi przez powłokę w całości.
+  const run = spawnSync('npx', ['tsx', join('lib', file)], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
   if (run.error) {
     console.error(`\nNie udało się uruchomić ${shown}: ${run.error.message}`);
     console.error('Jeśli brakuje `tsx`: npm install --no-save tsx');

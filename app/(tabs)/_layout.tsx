@@ -54,19 +54,42 @@
 // z tego katalogu, także ten, którego tu nie wymieniono. Nowy plik w
 // `app/(tabs)/` bez wpisu `href: null` poniżej pojawi się jako piąta zakładka.
 import { Tabs } from 'expo-router';
+// W1: 08.2026 — pasek dostaje język wizualny z koncepcji identyfikacji
+// (komponent 6): aktywna zakładka = WYPEŁNIONA ikona + kolor marki,
+// nieaktywne = kontur w ink3, tło = bg, obrys = line. Zero badge'ów (B7).
+// Struktura czterech zakładek i trasy chowane — NIETKNIĘTE.
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../../constants/theme';
+
+// W1: ikona w dwóch stanach — wypełniona (aktywna) / kontur (nieaktywna).
+function tabIcon(filled: keyof typeof Ionicons.glyphMap, outline: keyof typeof Ionicons.glyphMap) {
+  return ({ focused, color, size }: { focused: boolean; color: string; size: number }) => (
+    <Ionicons name={focused ? filled : outline} color={color} size={size} />
+  );
+}
 
 export default function TabsLayout() {
   return (
-    <Tabs screenOptions={{ headerShown: false }}>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        // W1: kolory paska z tokenów (lib/theme.ts)
+        tabBarActiveTintColor: colors.brand,
+        tabBarInactiveTintColor: colors.textTertiary,
+        tabBarStyle: { backgroundColor: colors.background, borderTopColor: colors.border },
+      }}
+    >
       {/* ── Cztery zakładki widoczne ─────────────────────────────── */}
-      <Tabs.Screen name="dzis" options={{ title: 'Dziś' }} />
-      <Tabs.Screen name="dziennik" options={{ title: 'Dziennik' }} />
-      <Tabs.Screen name="mecz" options={{ title: 'Mecz' }} />
-      <Tabs.Screen name="ja" options={{ title: 'Ja' }} />
+      <Tabs.Screen name="dzis" options={{ title: 'Dziś', tabBarIcon: tabIcon('today', 'today-outline') }} />
+      <Tabs.Screen name="dziennik" options={{ title: 'Dziennik', tabBarIcon: tabIcon('book', 'book-outline') }} />
+      <Tabs.Screen name="mecz" options={{ title: 'Mecz', tabBarIcon: tabIcon('football', 'football-outline') }} />
+      <Tabs.Screen name="ja" options={{ title: 'Ja', tabBarIcon: tabIcon('person', 'person-outline') }} />
 
       {/* ── Trasy chowane: żyją, otwierane z linku ───────────────── */}
       <Tabs.Screen name="kalendarz" options={{ title: 'Kalendarz', href: null }} />
-      <Tabs.Screen name="cele" options={{ title: 'Cele', href: null }} />
+      {/* PLAN-D-A 08.2026 — nazwa TRASY (`cele`) zostaje, zmienia się tylko
+          tytuł widoczny dla zawodnika. */}
+      <Tabs.Screen name="cele" options={{ title: 'Wąskie gardła', href: null }} />
       <Tabs.Screen name="centrum-decyzji" options={{ title: 'Wszystkie rekomendacje', href: null }} />
       <Tabs.Screen name="profil" options={{ title: 'Profil', href: null }} />
       <Tabs.Screen name="diagnoza" options={{ title: 'Diagnoza', href: null }} />

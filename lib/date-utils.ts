@@ -32,6 +32,25 @@ export function getCurrentWeekDayList() {
   return days;
 }
 
+// PORZADEK R9 08.08.2026 (M26/B37) — KANONICZNY słownik miesięcy (dopełniacz),
+// przeniesiony z lib/contentDose.ts, żeby istniał w JEDNYM miejscu. Powód
+// powstania (B37, raport B rundy 6): na Hermesie (Android) pełne dane `Intl`
+// bywają przycięte i `toLocaleDateString('pl-PL')` potrafi dać miesiąc po
+// angielsku albo jako liczbę — dlatego dawka treści formatuje datę z tej
+// listy, nie przez `Intl`. Nowy kod, który potrzebuje polskiej daty
+// odpornej na Hermes, ma brać TĘ listę, nie zakładać własnej.
+export const MONTHS_GENITIVE_PL = [
+  'stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca',
+  'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia',
+] as const;
+
+// ⚠️ B37 (raport B rundy 6, 08.08.2026): ta funkcja stoi na
+// `toLocaleDateString('pl-PL')` — na Hermesie miesiąc MOŻE wyjść po angielsku
+// (nie zweryfikowane na urządzeniu). Świadomie NIE przepisana na słownik
+// wyżej w rundzie 9: używa jej kilka ekranów z różnymi opcjami Intl i ręczna
+// podróbka mogłaby zmienić widoczne formaty na urządzeniach ze zdrowym ICU.
+// Jeśli Kuba zobaczy na telefonie angielskie miesiące — to jest to miejsce,
+// a lekarstwem jest MONTHS_GENITIVE_PL (wzorzec: contentDoseDateLabel).
 export function formatDatePl(iso: string, opts?: Intl.DateTimeFormatOptions) {
   return new Date(iso).toLocaleDateString('pl-PL', opts ?? { day: 'numeric', month: 'short' });
 }

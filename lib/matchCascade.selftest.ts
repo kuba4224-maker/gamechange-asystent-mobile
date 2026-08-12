@@ -7,7 +7,13 @@
 // samo polecenie). Wszystkie 5 scenariuszy przeszło w sesji Cowork z
 // 29.07.2026 przy pierwszym uruchomieniu — uruchom ponownie po każdej
 // zmianie w matchCascade.ts/positionProfiles.ts/matchQuestionBank.ts.
-import { selectSegmentForMatch, PlayerMatchSelectionContext } from './matchCascade';
+// PLAN-D-E 12.08.2026 — dopisane `type` przy imporcie typu (znalezisko E-N8).
+// `PlayerMatchSelectionContext` to `export type`. Pod `tsx` import bez tego słowa
+// przechodzi, bo `tsx` transpiluje; pod wbudowanym strippingiem typów Node 22
+// plik wywala się NA STARCIE — czyli runner po cichu przestałby sprawdzać tę
+// kaskadę. Dziś nic nie psuje; zepsuje w dniu, w którym projekt zejdzie z `tsx`
+// albo ktoś włączy `verbatimModuleSyntax`.
+import { selectSegmentForMatch, type PlayerMatchSelectionContext } from './matchCascade';
 
 let passed = 0;
 let failed = 0;

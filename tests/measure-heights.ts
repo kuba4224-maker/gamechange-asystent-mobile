@@ -29,6 +29,9 @@ import {
   LIBRARY_NO_DOWNLOAD_TEXT, LIBRARY_SCREEN_INTRO,
 } from '../lib/materials';
 import { HINT_EYEBROW, HINT_TABLE_MISSING_TEXT } from '../lib/componentHints';
+// PORZADEK R8 08.08.2026 — teksty pytania o sesję Bloku brane z tego samego
+// modułu, którym rysuje je dziennik (zero przepisywania co do znaku ręcznie).
+import { blockSessionQuestion } from '../lib/focusBlockJournalLink';
 
 const lh = (fs: number, given?: number) => given ?? Math.round(fs * 1.25 * 10) / 10;
 const lines = (text: string, availDp: number, fs: number, em = 0.5) =>
@@ -291,6 +294,96 @@ if (jaWorstScroll > JA_SCROLL_LIMIT) {
 }
 console.log(`✅ Ekran „Ja" zszedł do ${jaWorstScroll.toFixed(2)} ekranu scrolla (próg ${JA_SCROLL_LIMIT}).`);
 
+// ═══════════════════════════════════════════════════════════
+// PORZADEK R8 08.08.2026 — CZWARTY I PIĄTY PRÓG REGRESJI
+// ═══════════════════════════════════════════════════════════
+// Runda 7 dołożyła dwie rzeczy, które stoją NAD istniejącą treścią, więc obie
+// dostają swój próg — wzorem trzech powyżej (przyciski feedbacku, „Ja", dawka).
+//
+// (4) LINIA „Nowa porcja w Twoim Bloku →" (M23) stoi WEWNĄTRZ hero Celu, czyli
+// NAD przyciskami feedbacku — to PIERWSZA zmiana od rundy 3, która realnie
+// podnosi BUTTONS_TOP, gdy czeka nieotwarta dawka. Stała hero (107 dp) w
+// DZIS_DO_PRZYCISKOW celowo zostaje bez zmian: opisuje stan BEZ linii (linia
+// jest warunkowa), a tu liczymy stan Z linią.
+// heroAction w dzis.tsx: fontSize 13, bez lineHeight i bez marginesów
+// (odczyt arkusza stylów 08.08.2026, nie założenie).
+const HERO_DOSE_LINE = lh(13);
+const BUTTONS_TOP_Z_LINIA = Math.round((BUTTONS_TOP + HERO_DOSE_LINE) * 10) / 10;
+
+console.log('\n══════════════════════════════════════════════════════════════');
+console.log('LINIA „Nowa porcja w Twoim Bloku →" W HERO (M23, runda 7)');
+console.log('══════════════════════════════════════════════════════════════\n');
+console.log(`    +${HERO_DOSE_LINE} dp  jedna linia heroAction (fontSize 13, bez marginesów)`);
+console.log(`    GÓRA PRZYCISKÓW FEEDBACKU z linią: ${BUTTONS_TOP_Z_LINIA} dp (bez linii: ${BUTTONS_TOP} dp)`);
+let doseLineRegres = false;
+for (const s of SCREENS) {
+  const zapas = Math.round((s.visible - BUTTONS_TOP_Z_LINIA) * 10) / 10;
+  if (zapas <= 0) doseLineRegres = true;
+  console.log(`    ${zapas > 0 ? '✅' : '❌'} ${s.name}: zapas ${zapas} dp`);
+}
+
+// (5) PYTANIE O SESJĘ BLOKU w dzienniku (sedno rundy 7). Pytanie, na które ten
+// próg odpowiada: czy zawodnik widzi pytanie RAZEM z przyciskami „Tak, to ten"
+// i „Nie" bez przewijania. Pytanie, którego nie widać w całości, to dokładnie
+// ten sam bierny mechanizm, który runda 7 usuwała — tylko o jeden ekran niżej.
+//
+// Założenia (GÓRNE szacunki, ten sam kierunek błędu co 0,50 em wyżej):
+//   • natywny Picker Androida ≈ 50 dp + ramka 2 (nie mierzone na urządzeniu);
+//   • pole tekstowe: padding 10×2 + linia 14 px + ramka 2;
+//   • reszta przepisana z arkusza stylów dziennik.tsx (08.08.2026): scroll
+//     padding 20, tytuł 28 px + 24, przełącznik 48 + 24, etykieta 4+lh(11)+6,
+//     odstępy spacing.sm = 8; box pytania: ramka 2 + padding 12×2, pytanie
+//     bodySemiBold 14 (linia 20), tytuł sesji 12 px w JEDNEJ linii
+//     (numberOfLines={1}), rząd przycisków 48.
+const PICKER_H = 52;
+const INPUT_H = Math.round(20 + lh(14) + 2);
+const DZIENNIK_DO_PYTANIA: [string, number][] = [
+  ['padding górny', 20],
+  ['tytuł „Dziennik zawodnika"', lh(28) + 24],
+  ['przełącznik poranny/potreningowy', 48 + 24],
+  ['etykieta „RODZAJ SESJI"', 4 + lh(11) + 6],
+  ['picker rodzaju sesji', PICKER_H + 8],
+  ['etykieta „CZAS TRWANIA (MINUTY)"', 4 + lh(11) + 6],
+  ['pole czasu trwania', INPUT_H + 8],
+];
+const PYTANIE_TOP = DZIENNIK_DO_PYTANIA.reduce((a, [, v]) => a + v, 0);
+
+// Oba brzmienia pytania — z tego samego modułu, którym rysuje je ekran.
+const PROMPT_TODAY = blockSessionQuestion(
+  { id: 1, scheduled_date: '2026-08-08', title: 'x', focus_block_id: 'b' }, '2026-08-08');
+const PROMPT_PAST = blockSessionQuestion(
+  { id: 1, scheduled_date: '2026-08-06', title: 'x', focus_block_id: 'b' }, '2026-08-08');
+
+function blockPromptHeight(w: number, question: string) {
+  const avail = w - 40 - 26; // scroll padding 20×2 + padding boxu 12×2 + ramka
+  let h = 2 + 24;                                  // ramka + padding pionowy
+  h += lines(question, avail, 14) * 20 + 4;        // pytanie (bodySemiBold 14)
+  h += lh(12) + 10;                                // tytuł sesji, JEDNA linia
+  h += 48;                                         // rząd „Tak, to ten" / „Nie"
+  return h;
+}
+
+console.log('\n══════════════════════════════════════════════════════════════');
+console.log('PYTANIE O SESJĘ BLOKU W DZIENNIKU (sedno rundy 7)');
+console.log('══════════════════════════════════════════════════════════════\n');
+{
+  let a = 0;
+  for (const [n, v] of DZIENNIK_DO_PYTANIA) { a += v; console.log(`    ${String(Math.round(a)).padStart(4)} dp  ${n}`); }
+}
+console.log(`\n    GÓRA BOXU PYTANIA: ${Math.round(PYTANIE_TOP)} dp (formularz potreningowy)`);
+let promptRegres = false;
+for (const s of SCREENS) {
+  console.log(`\n    ${s.name}`);
+  for (const [k, q] of [['sesja z dziś', PROMPT_TODAY], ['sesja z poprzednich dni', PROMPT_PAST]] as [string, string][]) {
+    const h = Math.round(blockPromptHeight(s.w, q));
+    const bottom = Math.round(PYTANIE_TOP + h);
+    const ok = bottom < s.visible;
+    if (!ok) promptRegres = true;
+    console.log(`      ${ok ? '✅' : '❌'} ${String(h).padStart(4)} dp  ${k}  →  dół boxu na ${bottom} dp `
+      + `(${ok ? `zapas ${s.visible - bottom} dp` : `${bottom - s.visible} dp POD ZGIĘCIEM`})`);
+  }
+}
+
 // PRAKTYKA-EKRAN B6 08.08.2026 — TRZECI PRÓG REGRESJI.
 if (doseWorstScroll > DOSE_SCREEN_LIMIT) {
   throw new Error(`REGRESJA: jedna dawka treści zajmuje ${doseWorstScroll.toFixed(2)} ekranu `
@@ -299,3 +392,44 @@ if (doseWorstScroll > DOSE_SCREEN_LIMIT) {
 }
 console.log(`✅ Najgorsza realna dawka mieści się w ${doseWorstScroll.toFixed(2)} ekranu `
   + `(próg ${DOSE_SCREEN_LIMIT.toFixed(2)}).`);
+
+// PORZADEK R8 08.08.2026 — CZWARTY PRÓG REGRESJI.
+if (doseLineRegres) {
+  throw new Error('REGRESJA: z linią „Nowa porcja w Twoim Bloku →" przyciski feedbacku '
+    + 'zeszły pod zgięcie. Skróć hero albo przenieś linię, nie każ scrollować do przycisków.');
+}
+console.log(`✅ Z linią „Nowa porcja w Twoim Bloku →" przyciski feedbacku nadal nad zgięciem `
+  + `(góra: ${BUTTONS_TOP_Z_LINIA} dp na najmniejszym ekranie 598 dp).`);
+
+// BUDZET R8 08.08.2026 — SZÓSTY PRÓG: OBJĘTOŚĆ dzis.tsx (przegląd całości,
+// sekcja 6: „rósł 3 rundy z rzędu, wysokość ekranu jest pilnowana, objętość
+// pliku nie"). To nie jest miara dla zawodnika, tylko dla utrzymania: Dziś
+// jest ekranem domowym i każda runda coś na nim dokłada. Stan: runda 5
+// ~36,2 kB → runda 7 40,4 kB (~+2 kB/rundę). Próg 48 kB ≈ jeszcze 3–4 rundy
+// wzrostu — po przekroczeniu WYDZIEL sekcje do components/ (jak
+// RecommendationCard), nie podnoś progu.
+import { statSync } from 'node:fs';
+import { join as joinPath, dirname as dirName } from 'node:path';
+import { fileURLToPath as fileUrl } from 'node:url';
+
+const DZIS_MAX_BYTES = 48_000;
+const dzisPath = joinPath(dirName(dirName(fileUrl(import.meta.url))), 'app', '(tabs)', 'dzis.tsx');
+const dzisBytes = statSync(dzisPath).size;
+console.log(`\n  Objętość dzis.tsx: ${dzisBytes} B (próg ${DZIS_MAX_BYTES} B).`);
+
+// PORZADEK R8 08.08.2026 — PIĄTY PRÓG REGRESJI.
+if (promptRegres) {
+  throw new Error('REGRESJA: pytanie o sesję Bloku w dzienniku nie mieści się w całości '
+    + 'nad zgięciem (pytanie + „Tak, to ten" + „Nie"). Skróć brzmienie pytania albo odchudź '
+    + 'formularz NAD pytaniem — pytanie, którego nie widać, to bierny mechanizm, '
+    + 'czyli dokładnie to, co runda 7 usuwała.');
+}
+console.log('✅ Pytanie o sesję Bloku w całości nad zgięciem na wszystkich trzech telefonach.');
+
+// BUDZET R8 08.08.2026 — SZÓSTY PRÓG REGRESJI.
+if (dzisBytes > DZIS_MAX_BYTES) {
+  throw new Error(`REGRESJA: dzis.tsx ma ${dzisBytes} B (próg ${DZIS_MAX_BYTES}) — ekran domowy `
+    + 'urósł ponad miarę. Wydziel sekcję do components/ (wzorzec RecommendationCard), '
+    + 'zamiast podnosić próg.');
+}
+console.log(`✅ dzis.tsx mieści się w progu objętości (${dzisBytes} / ${DZIS_MAX_BYTES} B).`);

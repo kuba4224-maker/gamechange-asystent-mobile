@@ -92,6 +92,22 @@ export function playerMedianAndSpread(scores: Record<string, number>): { median:
   return { median, stdDev: Math.sqrt(variance) };
 }
 
+/**
+ * Słabość segmentu liczona TYLKO wtedy, gdy jest istotna — te same dwa progi,
+ * których getRelativeDeficits używa, żeby w ogóle nazwać segment wąskim gardłem.
+ * Poprawka 12.08.2026: bez tego wystarczyło być poniżej mediany o cokolwiek, więc
+ * przy profilu Moc 30 / reszta 77-81 jako "główna przyczyna" wychodziła Szybkość
+ * Decyzji z wynikiem 77 na 100 — obszar w normie. Nie wprowadzamy nowego progu:
+ * używamy tego, któremu produkt już ufa. Zmierzone na żywym lejku 12.08.2026.
+ */
+export function meaningfulWeakness(score: number | undefined, median: number, stdDev: number): number {
+  if (score === undefined || score === null) return 0;
+  const gap = median - score;
+  if (gap < MIN_ABS_GAP) return 0;
+  if (score >= median - DEV_MULTIPLIER * stdDev) return 0;
+  return gap;
+}
+
 export function getRelativeDeficits(scores: Record<string, number>, limit = 4): [string, number][] {
   const { median, stdDev } = playerMedianAndSpread(scores);
   const deficits = Object.entries(scores).filter(([, score]) =>
@@ -215,21 +231,24 @@ export const DEPENDENCY_CASCADES: Cascade[] = [
 
 const CASCADE_DAMPING = 0.75;
 
-function pairSignificance(scores: Record<string, number>, from: string, to: string, weight: number, median: number): number {
+function pairSignificance(scores: Record<string, number>, from: string, to: string, weight: number, median: number, stdDev: number): number {
   const a = scores[from];
   const b = scores[to];
   if (a === undefined || b === undefined) return 0;
-  return Math.max(0, median - a) * Math.max(0, median - b) * weight;
+  // PRZYCZYNA musi być istotnie słaba (12.08.2026); SKUTEK zostaje jak dotąd — nadaje wielkość.
+  const weakA = meaningfulWeakness(a, median, stdDev);
+  if (weakA === 0) return 0;
+  return weakA * Math.max(0, median - b) * weight;
 }
 
-function cascadeSignificance(scores: Record<string, number>, path: string[], weight: number, median: number): number {
+function cascadeSignificance(scores: Record<string, number>, path: string[], weight: number, median: number, stdDev: number): number {
   const uniqueNodes = Array.from(new Set(path));
   let product = weight * CASCADE_DAMPING;
   for (const node of uniqueNodes) {
     const val = scores[node];
     if (val === undefined) return 0;
-    const weak = Math.max(0, median - val);
-    if (weak === 0) return 0; // dowolny węzeł w normie => kaskada nieaktywna
+    const weak = meaningfulWeakness(val, median, stdDev);
+    if (weak === 0) return 0; // węzeł w normie albo słaby nieistotnie => kaskada nieaktywna
     product *= weak;
   }
   return product;
@@ -240,12 +259,12 @@ export type Influence =
   | { kind: 'cascade'; significance: number; weight: number; nodes: string[] };
 
 export function getRankedInfluences(scores: Record<string, number>, targetId: string, limit = 3): Influence[] {
-  const { median } = playerMedianAndSpread(scores);
+  const { median, stdDev } = playerMedianAndSpread(scores);
   const results: Influence[] = [];
 
   for (const rec of DEPENDENCY_NETWORK) {
     if (rec.to !== targetId) continue;
-    const sig = pairSignificance(scores, rec.from, rec.to, rec.weight, median);
+    const sig = pairSignificance(scores, rec.from, rec.to, rec.weight, median, stdDev);
     if (sig > 0) {
       results.push({ kind: 'pair', significance: sig, weight: rec.weight, from: rec.from, to: rec.to, nodes: [rec.from, rec.to] });
     }
@@ -253,14 +272,26 @@ export function getRankedInfluences(scores: Record<string, number>, targetId: st
 
   for (const casc of DEPENDENCY_CASCADES) {
     if (!casc.path.includes(targetId)) continue;
-    const sig = cascadeSignificance(scores, casc.path, casc.weight, median);
+    const sig = cascadeSignificance(scores, casc.path, casc.weight, median, stdDev);
     if (sig > 0) {
       results.push({ kind: 'cascade', significance: sig, weight: casc.weight, nodes: Array.from(new Set(casc.path)) });
     }
   }
 
   results.sort((a, b) => b.significance - a.significance);
-  return results.slice(0, limit);
+
+  // DEDUPLIKACJA W RANKINGU (12.08.2026). Dotąd deduplikował dopiero describeCause,
+  // więc każdy inny konsument getRankedInfluences nadal dostawał ten sam segment dwa
+  // razy. Klucz: źródło przyczyny; kolejność rankingu zachowana.
+  const widziane = new Set<string>();
+  const unikalne: Influence[] = [];
+  for (const inf of results) {
+    const klucz = inf.kind === 'cascade' ? 'k:' + inf.nodes.join('>') : 'p:' + inf.from;
+    if (widziane.has(klucz)) continue;
+    widziane.add(klucz);
+    unikalne.push(inf);
+  }
+  return unikalne.slice(0, limit);
 }
 
 /**

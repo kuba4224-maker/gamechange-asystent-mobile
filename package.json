@@ -10,7 +10,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@expo-google-fonts/barlow-condensed": "*",
+    "@expo-google-fonts/archivo": "*",
     "@expo-google-fonts/inter": "*",
     "@expo/vector-icons": "*",
     "@react-native-async-storage/async-storage": "2.2.0",

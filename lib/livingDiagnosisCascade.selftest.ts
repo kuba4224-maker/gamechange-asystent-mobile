@@ -8,11 +8,13 @@
 // testowa co reszta appki mobilnej (NIE tests/test-*.js, to konwencja z
 // drugiego repo, gamechange-app). Uruchom ponownie po każdej zmianie w
 // livingDiagnosisCascade.ts/positionProfiles.ts/livingDiagnosisQuestionBank.ts.
+// PLAN-D-E 12.08.2026 — dopisane `type` przy imporcie typu (znalezisko E-N8),
+// z tego samego powodu co w matchCascade.selftest.ts.
 import {
   selectSegmentForLivingDiagnosis,
   isPulseDueToday,
   getRelativeDeficits,
-  PlayerLivingDiagnosisContext,
+  type PlayerLivingDiagnosisContext,
   FRESHNESS_COOLDOWN_DAYS,
   PULSE_INTERVAL_DAYS,
 } from './livingDiagnosisCascade';

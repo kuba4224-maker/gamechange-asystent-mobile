@@ -24,11 +24,10 @@
 // `scheduled_date` — stąd ten komponent tworzy N osobnych wierszy
 // `calendar_events` ze `scheduled_date`, nie jeden cykliczny wiersz.
 //
-// Egzekwowanie limitu "jeden aktywny Blok na filar": prawdziwe wymuszenie to
-// unique index `one_active_focus_block_per_pillar` w bazie (złapane niżej,
-// kod błędu 23505) — cele.tsx dodatkowo sprawdza to PRZED pokazaniem
-// przycisku (żeby zawodnik nie dotarł do końca przepływu na darmo), ten
-// komponent tylko obsługuje przypadek wyścigu (dwa urządzenia naraz).
+// ⚠️ NIEAKTUALNE OD 10.08.2026, zostawione jako zapis stanu: „jeden aktywny
+// Blok na filar" było egzekwowane indeksem `one_active_focus_block_per_pillar`.
+// Ten indeks NIE ISTNIEJE — patrz sekcja „BUDŻET UWAGI" niżej i
+// claude/STAN_BAZY_POTWIERDZONY_A1_10_08_2026.md (odczyt produkcyjny).
 import { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import Checkbox from 'expo-checkbox';
@@ -38,6 +37,16 @@ import { DAYS_OF_WEEK, toLocalDateStr } from '../lib/date-utils';
 // formatter źródła co podpowiedź na Dziś i dawka w Bloku (jedna reguła).
 import { formatHintSource } from '../lib/componentHints';
 import { colors, typography, radii, minTouchHeight } from '../constants/theme';
+// PLAN-D-A 08.2026 — czysta logika budżetu uwagi, sprawdzana przez
+// lib/budzetUwagi.selftest.ts bez uruchamiania Reacta.
+import {
+  type BudzetStan,
+  type BudzetView,
+  type OtwartyBlok,
+  jednostkiSlowo,
+  budzetBlokadaKomunikat,
+  isBudzetError,
+} from '../lib/budzetUwagi';
 
 const FOCUS_BLOCK_DOSING_API_URL = 'https://gamechange-app.vercel.app/api/generate-focus-block-dosing';
 
@@ -52,6 +61,16 @@ const EVIDENCE_LABELS: Record<string, string> = {
 };
 
 const SESSIONS_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
+
+// PLAN-D-A 08.2026 — BUDŻET UWAGI (naprawa A2).
+// Cała logika i całe uzasadnienie siedzą w `lib/budzetUwagi.ts`, razem
+// z selftestem. Tutaj zostaje wyłącznie rysowanie.
+//
+// DLACZEGO BUDŻET JEST W TYM KOMPONENCIE, A NIE TYLKO W OBSŁUDZE BŁĘDU:
+// cała różnica między limitem a budżetem polega na tym, że budżet WIDAĆ
+// WCZEŚNIEJ. Limit jest regułą, o której zawodnik dowiaduje się, uderzając
+// w nią na końcu przepływu; budżet jest liczbą, którą można pokazać na
+// początku. Jeśli zawodnik poznaje go z błędu — ta zmiana nie ma sensu.
 
 type Goal = { id: number; segment_id: string; refinement_note: string | null };
 type SegmentComponent = { id: string; name: string; evidence_strength?: string | null };
@@ -106,6 +125,53 @@ function buildScheduledDates(dayCodes: string[], weeks: number): string[] {
 
 export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentUserId, onClose, onCreated }: Props) {
   const [step, setStep] = useState<'refine' | 'frequency' | 'suggestion'>('refine');
+
+  // ── PLAN-D-A 08.2026 — budżet uwagi, ładowany PRZED pierwszym wyborem ──
+  const [budzet, setBudzet] = useState<BudzetView>({ kind: 'loading' });
+  const [otwarteBloki, setOtwarteBloki] = useState<OtwartyBlok[]>([]);
+
+  const loadBudzet = useCallback(async () => {
+    // `focus_budget_state()` to jedyne źródło liczb budżetu — appka NIE liczy
+    // ich sama, żeby nie powstała druga definicja tego samego limitu.
+    // Funkcja może zwrócić obiekt albo jednoelementową tablicę zależnie od
+    // tego, jak jest zadeklarowana — czytamy oba kształty.
+    const { data, error: err } = await supabase.rpc('focus_budget_state');
+    const wiersz: any = Array.isArray(data) ? data[0] : data;
+    if (err || !wiersz || typeof wiersz.limit_jednostek !== 'number') {
+      // R5: brak odpowiedzi i „zero zajęte" to dwie różne rzeczy. Nigdy nie
+      // udajemy pustego budżetu — zawodnik dostałby wtedy zaproszenie do
+      // zaplanowania Bloku, który baza i tak odrzuci.
+      console.warn('[budzet] Nie udało się odczytać focus_budget_state():', err?.message ?? 'nieznany kształt odpowiedzi');
+      setBudzet({ kind: 'unknown' });
+      return;
+    }
+    setBudzet({ kind: 'ready', stan: wiersz as BudzetStan });
+  }, []);
+
+  const loadOtwarteBloki = useCallback(async () => {
+    // Potrzebne wyłącznie po to, żeby komunikat o przekroczeniu budżetu mógł
+    // powiedzieć, KTÓRY Blok zamknąć. Bez tego zostaje „nie możesz".
+    const { data, error: err } = await supabase
+      .from('focus_blocks')
+      .select('id, segment_id, custom_description, sessions_per_week, segment_components(name)')
+      .eq('user_id', currentUserId)
+      .eq('status', 'active');
+    if (err) {
+      console.warn('[budzet] Nie udało się odczytać otwartych Bloków:', err.message);
+      setOtwarteBloki([]);
+      return;
+    }
+    setOtwarteBloki(((data ?? []) as any[]).map((r) => ({
+      id: r.id,
+      label: r.custom_description ?? r.segment_components?.name ?? r.segment_id,
+      jednostki: r.sessions_per_week ?? 1,
+    })));
+  }, [currentUserId]);
+
+  useEffect(() => {
+    loadBudzet();
+    loadOtwarteBloki();
+  }, [loadBudzet, loadOtwarteBloki]);
 
   // --- Krok "co precyzyjnie" — reużywa wzorzec Obszar→Element→"opisz sam"
   // z cele.tsx (Tor 7 Krok 4), zawężony do stałego segmentu tego celu. ---
@@ -281,8 +347,23 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
         .select('id')
         .single();
       if (fbErr) {
-        if ((fbErr as any).code === '23505' || fbErr.message?.includes('one_active_focus_block_per_pillar')) {
-          throw new Error('Masz już aktywny Blok w tej kategorii — zamknij go albo poczekaj.');
+        // PLAN-D-A 08.2026 — dwa RÓŻNE powody odmowy, dwa różne zdania.
+        //
+        // 1) REGUŁA UWAGI (wyzwalacz, SQLSTATE GC001). To nie jest awaria —
+        //    to rozmowa. Komunikat musi dać wyjście: zamknij konkretny Blok
+        //    albo weź lżejszy wariant. Surowy tekst z bazy („BUDZET_UWAGI: …")
+        //    nie trafia na ekran nigdy.
+        if (isBudzetError(fbErr)) {
+          // Odświeżamy liczby, bo mogły się zmienić od wejścia w przepływ.
+          loadBudzet(); loadOtwarteBloki();
+          throw new Error(budzetBlokadaKomunikat((fbErr as any).hint, otwarteBloki));
+        }
+        // 2) REGUŁA DANYCH (unikalny indeks po SEGMENCIE od 10.08.2026).
+        //    Do tej daty indeks szedł po `pillar` i komunikat mówił „w tej
+        //    kategorii" — od 10.08.2026 to nieprawda, bo dwa segmenty jednego
+        //    filaru są dozwolone.
+        if ((fbErr as any).code === '23505' || fbErr.message?.includes('one_active_focus_block_per_segment')) {
+          throw new Error(`Masz już otwarty Blok nad tym samym obszarem (${segmentLabel}) — zamknij go, zanim zaczniesz nowy.`);
         }
         throw fbErr;
       }
@@ -300,7 +381,9 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
         // migracji jedynym miejscem, gdzie ta liczba ma sens dla zawodnika, jest
         // wpis w kalendarzu. SQL na docelową kolumnę czeka na Kubę — patrz
         // REJESTR_NAPRAW_AUDYT_06_08_2026.md.
-        title: `Blok Skupienia: ${confirmedText} (${suggestion.durationMinutes} min)`,
+        // PLAN-D-A 08.2026 — tytuł wchodzi do Kalendarza, więc to brzmienie
+        // widzi zawodnik poza tym ekranem.
+        title: `Blok: ${confirmedText} (${suggestion.durationMinutes} min)`,
         notes: `Planowany czas sesji: ${suggestion.durationMinutes} min.\n${suggestion.reasoning}`,
         status: 'scheduled',
         scheduled_date: d,
@@ -318,13 +401,76 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
 
       onCreated();
     } catch (e: any) {
-      setSaveError(e.message || 'Nie udało się zapisać Bloku Skupienia.');
+      setSaveError(e.message || 'Nie udało się zapisać Bloku.');
     } finally {
       setSaving(false);
     }
   };
 
   // --- Render ---
+
+  // PLAN-D-A 08.2026 — budżet widoczny na KAŻDYM kroku planowania, w tym na
+  // pierwszym. To jest cała wartość tej zmiany: liczba, zanim zawodnik wybierze.
+  const renderBudzet = () => {
+    if (budzet.kind === 'loading') return null; // nic nie migocze nad wyborem
+    if (budzet.kind === 'unknown') {
+      return (
+        <View style={styles.budzetBox}>
+          <Text style={styles.budzetLabel}>Twój tydzień</Text>
+          <Text style={styles.budzetUnknown}>
+            Nie udało się teraz sprawdzić, ile masz wolnego czasu w tygodniu.
+            Możesz planować dalej — jeśli się nie zmieści, powiemy to przed zapisem.
+          </Text>
+        </View>
+      );
+    }
+    const s = budzet.stan;
+    return (
+      <View style={styles.budzetBox}>
+        <Text style={styles.budzetLabel}>Twój tydzień</Text>
+        <Text style={styles.budzetText}>
+          {/* PLAN-D-A 08.2026 — po „z" idzie dopełniacz i jest on ZAWSZE „sesji",
+              niezależnie od liczby („0 z 4 sesji", „1 z 4 sesji"). `jednostkiSlowo`
+              odmienia mianownik po liczbie („1 sesję", „3 sesje") i w tym zdaniu
+              dawało „0 z 4 sesje". */}
+          {s.uzyte_jednostki} z {s.limit_jednostek} sesji w tygodniu już zajętych
+          {' · '}otwarte Bloki: {s.uzyte_bloki} z {s.limit_blokow}
+        </Text>
+        {!s.mozna_zaczac ? (
+          <Text style={styles.budzetWarn}>
+            {otwarteBloki.length > 0
+              ? `Nie masz teraz miejsca na nowy Blok. Zamknij jeden z otwartych: ${otwarteBloki.map((b) => `${b.label} (${b.jednostki})`).join(', ')}.`
+              : 'Nie masz teraz miejsca na nowy Blok — zamknij jeden z otwartych na liście wąskich gardeł.'}
+          </Text>
+        ) : null}
+      </View>
+    );
+  };
+
+  // Ile ten Blok będzie kosztował. Na kroku „ile razy w tygodniu" to deklaracja
+  // zawodnika, na kroku sugestii — liczba zaznaczonych dni (to ona idzie do
+  // `sessions_per_week`, patrz `confirmAndSave`).
+  const kosztPlanowany = step === 'suggestion' && suggestion ? suggestion.days.size : sessionsPerWeek;
+  const renderKoszt = () => {
+    if (budzet.kind !== 'ready' || kosztPlanowany <= 0) return null;
+    const wolne = budzet.stan.wolne_jednostki;
+    if (kosztPlanowany <= wolne) {
+      return (
+        <Text style={styles.budzetOk}>
+          Ten Blok kosztuje {kosztPlanowany} {jednostkiSlowo(kosztPlanowany)} w tygodniu. Zmieści się — masz wolne: {wolne}.
+        </Text>
+      );
+    }
+    return (
+      <Text style={styles.budzetWarn}>
+        Ten Blok kosztuje {kosztPlanowany} {jednostkiSlowo(kosztPlanowany)} w tygodniu, a masz wolne: {wolne}.
+        {otwarteBloki.length > 0
+          ? ` Zamknij jeden z otwartych Bloków (${otwarteBloki.map((b) => `${b.label} (${b.jednostki})`).join(', ')})`
+          : ' Zamknij jeden z otwartych Bloków'}
+        {wolne > 0 ? ` albo zaznacz ${wolne} ${wolne === 1 ? 'dzień' : 'dni'}.` : '.'}
+      </Text>
+    );
+  };
 
   const renderRefineStep = () => {
     if (!browsing) {
@@ -440,6 +586,9 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
           </TouchableOpacity>
         ))}
       </View>
+      {/* PLAN-D-A 08.2026 — koszt wyboru widoczny OD RAZU po dotknięciu liczby,
+          a nie dopiero przy zapisie. */}
+      {renderKoszt()}
       {dosingError && <Text style={styles.error}>{dosingError}</Text>}
       <TouchableOpacity style={[styles.btn, dosingLoading && styles.btnDisabled]} disabled={dosingLoading} onPress={fetchDosing}>
         <Text style={styles.btnText}>{dosingLoading ? 'Dobieram dawkowanie...' : 'Zaproponuj plan'}</Text>
@@ -513,6 +662,20 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
           onChangeText={(v) => setSuggestion({ ...suggestion, weeks: Number(v) || 0 })}
         />
 
+        {/* PLAN-D-A 08.2026 — ostatnie miejsce, w którym koszt jest widoczny
+            PRZED zapisem. Świadomie NIE blokujemy przycisku: budżet może się
+            zmienić (zawodnik zamyka Blok na drugim ekranie), a bramką jest
+            baza — appka ma ostrzegać, nie zgadywać za nią.
+
+            ⚠️ POPRAWKA 11.08.2026, po obejrzeniu ekranu na telefonie.
+            Po odmowie zapisu zawodnik dostawał DWA niemal identyczne zdania
+            jeden pod drugim: ostrzeżenie appki (pomarańczowe, wyliczone
+            z `focus_budget_state`) i komunikat z bazy (czerwony, wyliczony
+            z `hint` wyzwalacza). Oba mówiły to samo, tylko innymi słowami —
+            i to jest gorsze niż jedno zdanie, bo brzmi jak dwa różne problemy.
+            Gdy jest odpowiedź BAZY, ona wygrywa: pochodzi z prawdziwej próby
+            zapisu, a nie z liczb sprzed kilku minut. */}
+        {!saveError && renderKoszt()}
         {saveError && <Text style={styles.error}>{saveError}</Text>}
         <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={confirmAndSave}>
           <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Zatwierdź i zaplanuj'}</Text>
@@ -526,7 +689,10 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.sectionLabel}>Blok Skupienia — {segmentLabel}</Text>
+      <Text style={styles.sectionLabel}>Nowy Blok — {segmentLabel}</Text>
+      {/* Budżet stoi NAD wyborem na każdym kroku — patrz nagłówek sekcji
+          „BUDŻET UWAGI" na górze pliku. */}
+      {renderBudzet()}
       {step === 'refine' && renderRefineStep()}
       {step === 'frequency' && renderFrequencyStep()}
       {step === 'suggestion' && renderSuggestionStep()}
@@ -535,15 +701,15 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
 }
 
 const styles = StyleSheet.create({
-  wrap: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: 'rgba(232,67,45,0.06)', padding: 14, marginTop: 10 },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 10 },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 8 },
+  wrap: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: colors.brandSofter, padding: 14, marginTop: 10 }, // W1: token
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 10 }, // W1: ink3
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 8 }, // W1: ink3
   recapText: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, marginBottom: 8 },
   reasoningText: { ...typography.body, fontSize: 13, color: colors.textSecondary, marginBottom: 12, lineHeight: 18 },
   // ZAPIS B7 08.08.2026 — „Skąd to wiemy": pionowa kreska jak w panelu trenera
   // (cudzy, nieruszony tekst z materiału, nie kolejne zdanie systemu).
   sourceHintBox: { borderLeftWidth: 3, borderLeftColor: colors.border, paddingLeft: 10, marginBottom: 12 },
-  sourceHintTitle: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 4 },
+  sourceHintTitle: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 4 }, // W1: ink3
   sourceHintText: { ...typography.body, fontSize: 13, color: colors.textPrimary, lineHeight: 18 },
   sourceHintSource: { ...typography.body, fontSize: 12, color: colors.textSecondary, fontStyle: 'italic', marginTop: 4 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary },
@@ -551,7 +717,7 @@ const styles = StyleSheet.create({
   listRow: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 8 },
   rowText: { ...typography.body, fontSize: 14, color: colors.textPrimary },
   rowEvidence: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  selectedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: 'rgba(232,67,45,0.08)', paddingVertical: 10, paddingHorizontal: 12, marginBottom: 10 },
+  selectedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: colors.brandSoft, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 10 }, // W1: token
   rowTextSelected: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, flexShrink: 1, marginRight: 8 },
   linkText: { color: colors.brand, fontSize: 13, ...typography.bodyMedium },
   linkTextMuted: { color: colors.textSecondary, fontSize: 13, ...typography.bodyMedium },
@@ -563,6 +729,14 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.4 },
   btnText: { ...typography.bodySemiBold, color: colors.white, fontSize: 15, letterSpacing: 0.5 },
   cancelLink: { marginTop: 12, alignItems: 'center' },
+  // PLAN-D-A 08.2026 — budżet uwagi. Ta sama rodzina co „Skąd to wiemy"
+  // (pionowa kreska), bo to też jest kontekst, a nie kolejny przycisk.
+  budzetBox: { borderLeftWidth: 3, borderLeftColor: colors.border, paddingLeft: 10, marginBottom: 12 },
+  budzetLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 4 },
+  budzetText: { ...typography.body, fontSize: 13, color: colors.textPrimary, lineHeight: 18 },
+  budzetUnknown: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
+  budzetOk: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 18, marginTop: 4, marginBottom: 4 },
+  budzetWarn: { ...typography.body, fontSize: 13, color: colors.warning, lineHeight: 18, marginTop: 4, marginBottom: 4 },
   numRow: { flexDirection: 'row', gap: 6, marginBottom: 8 },
   numBtn: { flex: 1, height: 44, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface },
   numBtnActive: { backgroundColor: colors.brand, borderColor: colors.brand },

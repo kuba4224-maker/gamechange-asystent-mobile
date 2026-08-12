@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   scrollContent: { padding: spacing.lg, paddingBottom: 60 },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 14 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 14 }, // W1: ink3
   block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.lg, marginBottom: spacing.lg },
   // WYNIK DIAGNOZY 07.08.2026 — ten sam wygląd co `block`, ale z odstępem od
   // profilu powyżej; osobna nazwa, żeby było widać w kodzie, że to stopka

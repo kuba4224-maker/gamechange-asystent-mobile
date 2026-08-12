@@ -170,9 +170,46 @@ import {
   parseSeenKeys,
   isDoseSeen,
 } from '../../lib/contentDose';
-import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+import { colors, typography, spacing, radii, minTouchHeight, skew } from '../../constants/theme';
+// PLAN-D-E 12.08.2026, zaktualizowane 12.08.2026 wieczorem — ZASADA PUNKTU
+// POMOCY I JEJ JEDYNY WYJATEK. Czytaj razem z komentarzem "ZADANIE E2" nizej;
+// wczesniej te dwa miejsca mowily co innego, a to jest dokladnie taki defekt,
+// ktory nastepna sesja rozstrzyga po tym, na ktory komentarz trafi pierwsza.
+//
+// ZASADA (decyzja Kuby z 12.08.2026): zadnego przycisku pomocy na ekranach,
+// na ktorych stoja glowne rzeczy produktu. Podstawowe wejscie to nazwany wiersz
+// w sekcji "Pomoc" na dole zakladki "Ja". NIE DOKLADAC tu nic "przy okazji".
+// `paddingBottom` zostaje 60 dp.
+//
+// WYJATEK ("ZADANIE E2", pas F, 12.08.2026): wiersz pomocy pokazuje sie na tym
+// ekranie przy glosie `injury` albo `exit` — i przy zadnym innym. Warunek stoi
+// w jednym miejscu: `podniescPunktPomocy()` w `lib/glosTygodnia.ts`.
+// DECYZJA KUBY z 12.08.2026, wieczorem: ZOSTAWIC TAK, JAK JEST. Wyjatek jest
+// zatwierdzony przez wlasciciela produktu i przestaje byc otwarta sprawa
+// (znalezisko E-N15 w `claude/RAPORT_E_OS_DECYZJI_11_08_2026.md` — zamkniete).
+// Zakres wyjatku jest ZAMKNIETY na dwa stany: `injury` i `exit`. Dolozenie
+// trzeciego stanu, drugiego ekranu albo drugiego wejscia jest cofnieciem
+// decyzji wlasciciela, nie ulepszeniem — tego dotyczy ZASADA wyzej.
 import LivingDiagnosisPulseCard from '../../components/LivingDiagnosisPulseCard';
 import RecommendationCard, { RECOMMENDATION_COLUMNS, type Recommendation } from '../../components/RecommendationCard';
+// PLAN-D-F 08.2026 (12.08.2026) — GŁOS TYGODNIA. Ekran czyta gotowy wiersz
+// `weekly_voice`; drabinę liczy backend (gamechange-app/lib/arbiter-glosu.js,
+// wołany raz dziennie przez api/cron-weekly-voice.js). Appka NIE rozstrzyga,
+// kto ma głos — czyta wynik i decyduje, co z nim zrobić na ekranie.
+import {
+  stanGlosu,
+  pokazacKarte,
+  podniescPunktPomocy,
+  opisDoLogu,
+  poniedzialekTygodnia as poniedzialekGlosu,
+  type StanGlosu,
+  type WierszGlosu,
+} from '../../lib/glosTygodnia';
+// ZADANIE E2 12.08.2026 — punkt pomocy wyżej w kontuzji i ścieżce wyjścia.
+// Stąd idzie WYŁĄCZNIE prośba o otwarcie tego samego, jedynego modala
+// zamontowanego w app/_layout.tsx. Zero drugiego egzemplarza.
+import { otworzPunktPomocy } from '../../components/PunktPomocy';
+import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
 
 const SEG_LABELS = SEGMENT_LABELS;
 
@@ -207,6 +244,17 @@ export default function DzisScreen() {
 
   const [priorityGoal, setPriorityGoal] = useState<Goal | null>(null);
   const [hasAnyGoal, setHasAnyGoal] = useState(false);
+  // PIERWSZE URUCHOMIENIE 10.08.2026 (zatwierdzone przez Kubę) — ekran Dziś
+  // do dziś NIE MIAŁ ANI JEDNEGO odwołania do diagnozy, więc nie potrafił
+  // odróżnić zawodnika, który ją ma, od takiego, który jej nie ma, i obu
+  // mówił to samo: „załóż Cel". A `api/cron-onboard-diagnosis.js` onboarduje
+  // WYŁĄCZNIE zawodników Z diagnozą — kto jej nie zrobi, nie dostanie ani
+  // zaproponowanego Celu, ani pierwszej rekomendacji, nigdy. Jedyne miejsce,
+  // które o diagnozie wspominało, siedziało dwa dotknięcia dalej, w zakładce
+  // „Ja", pod nazwą „WYNIK diagnozy" — co dla kogoś, kto jej nie robił,
+  // brzmi jak raport, nie jak zaproszenie. Znalezione przy przejściu ścieżki
+  // na świeżym koncie 10.08.2026 (zgłosił Kuba).
+  const [hasDiagnosis, setHasDiagnosis] = useState<boolean | null>(null);
   const [loggedToday, setLoggedToday] = useState(false);
   const [focusRec, setFocusRec] = useState<RecommendationRow | null>(null);
   const [otherUnreadCount, setOtherUnreadCount] = useState(0);
@@ -217,7 +265,17 @@ export default function DzisScreen() {
   const [loading, setLoading] = useState(true);
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
   // o nią rusza dopiero wtedy, gdy wiadomo, jaki jest segment Celu.
-  const [hintState, setHintState] = useState<HintState>({ state: 'loading' });
+  // PLAN-D-E 08.2026 — dopisane `alwaysVisible: []`. Wariant `loading` typu
+  // `HintState` wymaga tego pola od rundy ZAPIS B7; stan początkowy go nie
+  // podawał i `npx tsc --noEmit` zgłaszał tu TS2345. Zachowanie bez zmian:
+  // `renderHint` wychodzi przez `return null` przy `state === 'loading'`,
+  // zanim w ogóle sięgnie po `alwaysVisible`.
+  const [hintState, setHintState] = useState<HintState>({ state: 'loading', alwaysVisible: [] });
+
+  // PLAN-D-F 08.2026 — głos tygodnia. Stan początkowy to `brak_wiersza`, a NIE
+  // `cisza`: przed odczytem nie wiadomo, czy arbiter policzył ten tydzień, a
+  // cisza jest DECYZJĄ arbitra i nie wolno jej udawać. Patrz lib/glosTygodnia.ts.
+  const [glos, setGlos] = useState<StanGlosu>({ rodzaj: 'brak_wiersza' });
 
   // Migawka „co było nieprzeczytane w chwili wejścia na ekran" — ten sam wzorzec
   // co w centrum-decyzji.tsx: kropka „Nowe" nie może zniknąć w trakcie tej samej
@@ -293,18 +351,28 @@ export default function DzisScreen() {
     // zachowanie wraca bajt w bajt do stanu sprzed rundy 6. Diff wprost
     // z raportu B rundy 6, sekcja 8.1 — to jest WARUNEK wejścia treści
     // bezpieczeństwa do bazy.
-    let { data, error: err } = await supabase
+    // PLAN-D-E 08.2026 — rozbite na dwie osobne odpowiedzi zamiast ponownego
+    // przypisania do tej samej pary zmiennych. Powód jest wyłącznie typowy:
+    // druga próba pyta KRÓTSZĄ listą kolumn, więc supabase-js wywodzi dla niej
+    // inny kształt `data` niż dla pierwszej, i `npx tsc --noEmit` zgłaszał tu
+    // TS2322 (`GenericStringError[]`). Zachowanie jest bajt w bajt to samo:
+    // pierwsze zapytanie, warunek powtórki, drugie zapytanie, ten sam `console.warn`.
+    const pierwsza = await supabase
       .from('component_hints')
       .select(COMPONENT_HINT_COLUMNS_WITH_ALWAYS)
       .eq('segment_id', segmentId)
       .eq('active', true);
+    let data: ComponentHintRow[] | null = pierwsza.data as unknown as ComponentHintRow[] | null;
+    let err: unknown = pierwsza.error;
     if (err && shouldRetryWithoutAlwaysVisible(err)) {
       console.warn(ALWAYS_VISIBLE_COLUMN_MISSING_WARN);
-      ({ data, error: err } = await supabase
+      const druga = await supabase
         .from('component_hints')
         .select(COMPONENT_HINT_COLUMNS)
         .eq('segment_id', segmentId)
-        .eq('active', true));
+        .eq('active', true);
+      data = druga.data as unknown as ComponentHintRow[] | null;
+      err = druga.error;
     }
     setHintState(buildHintState({
       hasGoal: true,
@@ -322,7 +390,7 @@ export default function DzisScreen() {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const [goalsRes, logsRes, recsRes, eventsRes, blocksRes, doneLogsRes, userRes] = await Promise.all([
+    const [goalsRes, logsRes, recsRes, eventsRes, blocksRes, doneLogsRes, userRes, diagRes, glosRes] = await Promise.all([
       supabase.from('goals').select('id,segment_id,is_priority,status,created_at,origin,suggestion_note,refinement_note')
         .eq('user_id', currentUser.id).eq('status', 'active')
         .order('is_priority', { ascending: false }).order('created_at', { ascending: false }),
@@ -348,12 +416,46 @@ export default function DzisScreen() {
       // (`app/(tabs)/profil.tsx`, etap 0 kreatora). Karmi wyłącznie bramkę
       // wiekową A9 i nie jest nigdzie pokazywany.
       supabase.from('users').select('birth_year').eq('id', currentUser.id).limit(1),
+      // PIERWSZE URUCHOMIENIE 10.08.2026 — samo ISTNIENIE diagnozy, nic więcej.
+      // `head: true` + `count: 'exact'` nie ściąga ani jednego wiersza, więc
+      // dokładamy do tej paczki zapytanie o zerowym koszcie transferu.
+      // Warunek `scores is not null` jest ten sam, którego używa
+      // `fetchLatestDiagnosisPerUser()` w cronie onboardującym — żeby appka
+      // i silnik liczyły „ma diagnozę" DOKŁADNIE tak samo. Bez tego appka
+      // mogłaby uznać za wypełnioną ankietę, której cron nie widzi.
+      supabase.from('diagnostics').select('id', { count: 'exact', head: true })
+        .eq('user_id', currentUser.id).not('scores', 'is', null),
+      // PLAN-D-F 08.2026 — głos tygodnia na BIEŻĄCY tydzień. Poniedziałek liczony
+      // tą samą regułą co w backendzie (`poniedzialekGlosu`), więc appka pyta
+      // dokładnie o ten wiersz, który zapisał cron.
+      // ⚠️ `weekly_voice` ma politykę `select_own` — to zapytanie idzie tokenem
+      // zawodnika i zobaczy WYŁĄCZNIE jego wiersz. Zapis robi cron rolą
+      // service_role, appka nigdy tu nie pisze.
+      supabase.from('weekly_voice').select('week_start, voice, reason, spoke_at')
+        .eq('user_id', currentUser.id).eq('week_start', poniedzialekGlosu(new Date())).limit(1),
     ]);
+
+    // PLAN-D-F 08.2026 — trzy różne powody, dla których tu może nic nie być:
+    // błąd odczytu / arbiter jeszcze nie policzył / arbiter policzył CISZĘ.
+    // `stanGlosu` je rozdziela, a `opisDoLogu` mówi który zaszedł — bez tego
+    // „Dziś nic nie pokazuje" jest nie do zdiagnozowania.
+    const stanTygodnia = stanGlosu(
+      ((glosRes.data ?? [])[0] as WierszGlosu | undefined) ?? null,
+      glosRes.error ? glosRes.error.message : null,
+    );
+    setGlos(stanTygodnia);
+    if (stanTygodnia.rodzaj === 'nie_wiem') console.error(`dzis: ${opisDoLogu(stanTygodnia)}`);
+    else console.log(`dzis: ${opisDoLogu(stanTygodnia)}`);
 
     const goals = (goalsRes.data ?? []) as Goal[];
     const goal = goals.find((g) => g.is_priority) ?? goals[0] ?? null;
     setPriorityGoal(goal);
     setHasAnyGoal(goals.length > 0);
+    // PIERWSZE URUCHOMIENIE 10.08.2026 — przy błędzie zapytania NIE udajemy,
+    // że diagnozy nie ma (to wepchnęłoby zawodnika z gotową diagnozą w ekran
+    // pierwszego kroku). Błąd = zostawiamy `null`, czyli stan „nie wiem",
+    // a ekran zachowuje się wtedy jak dotąd.
+    setHasDiagnosis(diagRes.error ? null : (diagRes.count ?? 0) > 0);
 
     setLoggedToday(!!(logsRes.data && logsRes.data.length > 0));
 
@@ -421,6 +523,13 @@ export default function DzisScreen() {
   const todayLabel = new Date().toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' });
   const goalSegmentLabel = priorityGoal ? (SEG_LABELS[priorityGoal.segment_id] ?? priorityGoal.segment_id) : null;
   const isRecLinkedToGoal = !!focusRec && !!priorityGoal && focusRec.goal_id === priorityGoal.id;
+
+  // PIERWSZE URUCHOMIENIE 10.08.2026 — stan „zawodnik zero": ani diagnozy,
+  // ani Celu. Świadomie WYMAGA OBU warunków: kto zdążył założyć Cel sam,
+  // dostaje ekran Celu jak dotąd — nie odbieramy mu tego, co już zrobił.
+  // `hasDiagnosis === false` (a nie `!hasDiagnosis`) jest celowe: `null`
+  // oznacza „nie udało się sprawdzić" i wtedy ekran zachowuje się po staremu.
+  const showFirstStep = hasDiagnosis === false && !hasAnyGoal;
 
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału, blok pod przyciskami karty.
   // Uzasadnienie miejsca (a nie nad przyciskami) stoi przy `footerSlot`
@@ -505,14 +614,32 @@ export default function DzisScreen() {
             raport zwrotny B runda 3, sekcja 12. Dlatego rozmiar to 21 px,
             a nie 22: przy 22 px najdłuższa nazwa wychodziła 5 dp za wąski
             ekran i zostałaby ucięta wielokropkiem. */}
-        <TouchableOpacity style={styles.heroGoal} onPress={() => router.push('/cele')}>
-          <Text style={styles.heroEyebrow}>Twój aktywny Cel</Text>
+        {/* PIERWSZE URUCHOMIENIE 10.08.2026 — kafelek prowadzi do diagnozy,
+            dopóki zawodnik nie ma ani diagnozy, ani Celu. Patrz `showFirstStep`
+            wyżej i komentarz przy `hasDiagnosis` na górze pliku. */}
+        <TouchableOpacity style={styles.heroGoal} onPress={() => router.push(showFirstStep ? '/diagnoza' : '/cele')}>
+          {/* W1: krecha 12° — motyw ścięcia z logo, karta „to jest o Tobie" */}
+          <View style={styles.heroStripe} />
+          {/* PLAN-D-A 08.2026 — kafelek pokazuje `goals`, czyli WĄSKIE GARDŁO
+              (miesiące), a nie CEL (lata). Słowo „Cel" jest w produkcie
+              zarezerwowane dla kierunku na lata — patrz lib/labels.ts. */}
+          <Text style={styles.heroEyebrow}>{showFirstStep ? 'Twój pierwszy krok' : 'Nad czym pracujesz'}</Text>
           {/* WIEDZA B4 08.08.2026 — dług N2 (znalezisko B18, otwarte od rundy 2).
               Bez tego zawodnik przy pierwszym wejściu widział przez ułamek
               sekundy „Nie masz jeszcze Celu" — zdanie nieprawdziwe dla większości
               zalogowanych. Patrz nagłówek pliku. */}
           {loading ? (
-            <Text style={styles.heroLoading}>Wczytuję Twój Cel…</Text>
+            <Text style={styles.heroLoading}>Wczytuję…</Text>
+          ) : showFirstStep ? (
+            /* Brzmienie zatwierdzone przez Kubę 10.08.2026 */
+            <>
+              <Text style={styles.heroTitle}>Zacznij od diagnozy</Text>
+              <Text style={styles.heroFirstStepBody}>
+                Odpowiadasz na pytania o swoją grę, a system pokazuje, co ogranicza Cię dziś
+                najbardziej. Z wyniku sam wskaże Ci pierwsze wąskie gardło — nie musisz zgadywać.
+              </Text>
+              <Text style={styles.heroAction}>Zrób diagnozę →</Text>
+            </>
           ) : priorityGoal ? (
             <>
               <Text style={styles.heroTitle} numberOfLines={1}>{goalSegmentLabel}</Text>
@@ -542,13 +669,13 @@ export default function DzisScreen() {
                 // Brak Bloku pod ten Cel → ŻADNEJ zastępczej liczby (nigdy
                 // „0 z 0"), tylko zaproszenie. Zwykły tekst, nie osobny
                 // przycisk: cały kafelek prowadzi w to samo miejsce.
-                <Text style={styles.heroAction}>Zaplanuj pracę nad tym Celem →</Text>
+                <Text style={styles.heroAction}>Zaplanuj Blok →</Text>
               )}
             </>
           ) : (
             <>
-              <Text style={styles.heroTitle}>Nie masz jeszcze Celu</Text>
-              <Text style={styles.heroAction}>Załóż pierwszy Cel →</Text>
+              <Text style={styles.heroTitle}>Nie masz jeszcze wąskiego gardła</Text>
+              <Text style={styles.heroAction}>Wskaż pierwsze wąskie gardło →</Text>
             </>
           )}
         </TouchableOpacity>
@@ -570,7 +697,7 @@ export default function DzisScreen() {
                 currentUserId={currentUser.id}
                 isUnread={unreadSnapshotRef.current.has(focusRec.id)}
                 headerSlot={isRecLinkedToGoal && goalSegmentLabel
-                  ? <Text style={styles.linkedToGoal}>Pomaga Ci w celu: {goalSegmentLabel}</Text>
+                  ? <Text style={styles.linkedToGoal}>Pomaga Ci przy: {goalSegmentLabel}</Text>
                   : null}
                 // WIEDZA B4 08.08.2026 — SEDNO TEJ RUNDY: konkret z materiałów
                 // Kuby ze źródłem, pod przyciskami. Patrz `footerSlot`
@@ -585,21 +712,93 @@ export default function DzisScreen() {
           ) : (
             <View style={styles.card}>
               <Text style={styles.cardBody}>
-                {hasAnyGoal
-                  ? 'Jeszcze nie mamy dla Ciebie gotowej rekomendacji — pojawi się tu, gdy silnik Centrum Decyzji zacznie działać.'
-                  : 'Załóż swój pierwszy Cel, żeby system zaczął podpowiadać, na czym się skupić.'}
+                {/* PODMIANA 08.08.2026, zatwierdzona przez Kubę. Poprzednie
+                    brzmienie: „Jeszcze nie mamy dla Ciebie gotowej rekomendacji
+                    — pojawi się tu, gdy silnik Centrum Decyzji zacznie działać."
+                    Trzy powody zmiany, wszystkie widoczne na żywym telefonie:
+                    (1) SPRZECZNOŚĆ — tuż pod tym zdaniem `renderHint()` podaje
+                        zawodnikowi konkretne zadanie z materiału, więc karta
+                        mówiła „nie mamy nic" i natychmiast dawała coś;
+                    (2) ŻARGON — „silnik" to nasze słowo, nie słowo zawodnika;
+                    (3) MARTWY ODSYŁACZ — „Centrum Decyzji" po przebudowie
+                        nawigacji (B2/B3, 08.08.2026) nie istnieje już nigdzie
+                        w interfejsie; ekran nazywa się „Wszystkie rekomendacje",
+                        więc tekst odsyłał do miejsca, którego nie da się znaleźć.
+                    Każdy nowy tester widzi ten stan pierwszego dnia, przed
+                    pierwszą rekomendacją — dlatego to nie jest kosmetyka. */}
+                {/* PIERWSZE URUCHOMIENIE 10.08.2026 — trzeci wariant, brzmienie
+                    zatwierdzone przez Kubę. Zdanie o „następnym dniu rano" NIE
+                    jest ozdobne: `cron-onboard-diagnosis` chodzi raz na dobę
+                    (vercel.json: `0 4 * * *`), więc bez tego zawodnik wypełnia
+                    diagnozę, wraca na Dziś, nic się nie zmienia i uznaje, że
+                    appka się zawiesiła. Druga część zdania jest po to, żeby nie
+                    zabrać mu możliwości ruszenia od razu. */}
+                {showFirstStep
+                  ? 'Twoje pierwsze wąskie gardło wyliczy się z diagnozy i pojawi się tu następnego dnia rano. Możesz też wskazać je sam, jeśli już wiesz, nad czym chcesz pracować.'
+                  : hasAnyGoal
+                    ? 'Twoja pierwsza rekomendacja pojawi się tu, gdy system przetrawi Twoją diagnozę i pierwsze wpisy. Na razie zacznij od tego, co niżej.'
+                    : 'Wskaż swoje pierwsze wąskie gardło, żeby system zaczął podpowiadać, na czym się skupić.'}
               </Text>
               {/* Brak rekomendacji NIE oznacza braku wiedzy: podpowiedź z materiału
                   wisi na segmencie Celu, więc zawodnik z Celem, ale bez gotowej
                   rekomendacji, i tak dostaje dziś konkret. Bez Celu `renderHint()`
                   zwraca `null` i karta wygląda jak dotąd. */}
               {renderHint()}
-              <TouchableOpacity style={styles.inlineLink} onPress={() => router.push(hasAnyGoal ? '/centrum-decyzji' : '/cele')}>
-                <Text style={styles.cardAction}>{hasAnyGoal ? allRecsLinkLabel : 'Przejdź do Celów →'}</Text>
+              {/* PIERWSZE URUCHOMIENIE 10.08.2026 — bez tego wiersza kafelek
+                  mówiłby o diagnozie, a przycisk prowadził do Celów. */}
+              <TouchableOpacity
+                style={styles.inlineLink}
+                onPress={() => router.push(showFirstStep ? '/diagnoza' : hasAnyGoal ? '/centrum-decyzji' : '/cele')}
+              >
+                <Text style={styles.cardAction}>
+                  {showFirstStep ? 'Zrób diagnozę →' : hasAnyGoal ? allRecsLinkLabel : 'Przejdź do wąskich gardeł →'}
+                </Text>
               </TouchableOpacity>
             </View>
           )}
         </View>
+
+        {/* PLAN-D-F 08.2026 — GŁOS TYGODNIA.
+            Karta pojawia się WYŁĄCZNIE wtedy, gdy arbiter dał głos jednemu
+            z narzędzi osi decyzji. Trzy sytuacje NIE rysują tu niczego i to
+            jest zamierzone:
+              • CISZA — arbiter policzył i zdecydował, że w tym tygodniu żadne
+                narzędzie nie ma nic do powiedzenia. To DECYZJA, nie brak danych;
+                zastępczy komunikat („nic nowego") zamieniłby ją w kolejne
+                odezwanie i unieważnił cały budżet uwagi;
+              • brak wiersza — cron jeszcze nie policzył tego tygodnia;
+              • błąd odczytu — powód idzie do konsoli, nie na ekran.
+            BLOK też nie dostaje karty: ma już kafelek na górze ekranu. */}
+        {pokazacKarte(glos) && glos.rodzaj === 'glos' && (
+          <View style={{ marginTop: 24 }}>
+            <View style={styles.glosCard}>
+              <View style={styles.glosStripe} />
+              <Text style={styles.glosTytul}>{glos.tytul}</Text>
+              <Text style={styles.glosTresc}>{glos.tresc}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ZADANIE E2 12.08.2026 — PUNKT POMOCY WYŻEJ W DWÓCH STANACH.
+            Kontuzja i ścieżka wyjścia trwają tygodniami i w obu zawodnik ma
+            powód czuć się poza drużyną. W tych dwóch — i TYLKO w tych dwóch —
+            numer przysuwa się bliżej, zamiast czekać, aż ktoś go poszuka
+            w zakładce „Ja".
+            ⚠️ To jest podniesienie WIDOCZNOŚCI, nie powiadomienie: nic nie
+            wysyła, nic nie zapisuje, nikogo nie zawiadamia — ani rodzica, ani
+            trenera (claude/R2a_SCIEZKA_ESKALACJI_KRYZYS_11_08_2026.md).
+            ⚠️ I nie jest klasyfikatorem ryzyka: reaguje na dwa JAWNE stany,
+            nie na treść wpisów zawodnika. */}
+        {podniescPunktPomocy(glos) && (
+          <TouchableOpacity
+            style={[styles.card, styles.pomocCard, { marginTop: 12 }]}
+            onPress={otworzPunktPomocy}
+            accessibilityRole="button"
+          >
+            <Text style={styles.cardLabel}>{POMOC_PRZYCISK}</Text>
+            <Text style={styles.pomocPodpis}>{POMOC_WIERSZ_PODPIS}</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Diagnoza żywa — Funkcja 10, część 2 (INTEGRACJA_DIAGNOZA_ZYWA.md).
             Renderuje się sama w null, gdy pulse nie jest dziś należny.
@@ -648,11 +847,21 @@ export default function DzisScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  eyebrow: { ...typography.bodyMedium, fontSize: 12, letterSpacing: 1, textTransform: 'capitalize', color: colors.textSecondary, marginBottom: 4 },
+  // W1: nadtytuły/etykiety sekcji na ink3 (koncepcja: ink3 = podpisy, nadtytuły)
+  eyebrow: { ...typography.bodyMedium, fontSize: 12, letterSpacing: 1, textTransform: 'capitalize', color: colors.textTertiary, marginBottom: 4 },
   title: { ...typography.display, fontSize: 32, marginBottom: spacing.lg, color: colors.textPrimary },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 10 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 10 },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 16, marginBottom: 10 },
   cardMuted: { opacity: 0.7 },
+  // PLAN-D-F 08.2026 — karta głosu tygodnia. Ta sama rodzina co `card`,
+  // z krechą 12° jak hero: to jest zdanie o zawodniku, nie pozycja listy.
+  glosCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 16, overflow: 'hidden' },
+  glosStripe: { ...skew.stripe, height: 6, backgroundColor: colors.brand, marginBottom: 12 },
+  glosTytul: { ...typography.bodySemiBold, fontSize: 17, color: colors.textPrimary, marginBottom: 6 },
+  glosTresc: { ...typography.body, fontSize: 14, color: colors.textSecondary, lineHeight: 21 },
+  // ZADANIE E2 12.08.2026 — wiersz punktu pomocy.
+  pomocCard: { borderColor: colors.brand },
+  pomocPodpis: { ...typography.body, fontSize: 12, color: colors.textTertiary, lineHeight: 17 },
   cardLabel: { ...typography.bodySemiBold, fontSize: 15, color: colors.textPrimary, marginBottom: 4 },
   cardBody: { ...typography.body, fontSize: 14, color: colors.textSecondary, marginBottom: 8, lineHeight: 20 },
   cardAction: { ...typography.bodyMedium, fontSize: 13, color: colors.brand },
@@ -668,12 +877,16 @@ const styles = StyleSheet.create({
   // 30 px → 22 px, usunięte `heroContext` i `heroLinksRow`.
   // Cały kafelek jest dotykalny, więc nie potrzebuje własnych stref dotyku
   // 48 dp w środku — i to jest połowa oszczędzonej wysokości.
+  // W1: prosta krecha borderLeft → krecha ŚCIĘTA 12° (transform, nie obrazek;
+  // koncepcja 08.2026, komponent 1 — wyłącznie karty „to jest o Tobie").
+  // Absolutna, więc wysokość hero bez zmian (~101 dp, rachunek wyżej aktualny).
   heroGoal: {
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-    borderLeftWidth: 4, borderLeftColor: colors.brand, borderRadius: radii.lg,
-    paddingVertical: 12, paddingHorizontal: 16, marginBottom: 4,
+    borderRadius: radii.lg,
+    paddingVertical: 12, paddingLeft: 24, paddingRight: 16, marginBottom: 4,
   },
-  heroEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 4 },
+  heroStripe: { ...skew.stripe, height: 44, backgroundColor: colors.brand },
+  heroEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 4 },
   heroTitle: { ...typography.displayExtraBold, fontSize: 21, color: colors.textPrimary, marginBottom: 6 },
   heroAction: { ...typography.bodyMedium, fontSize: 13, color: colors.brand },
   // WIEDZA B4 08.08.2026 — dług N2. Wysokość dobrana tak, żeby stan ładowania
@@ -681,10 +894,16 @@ const styles = StyleSheet.create({
   // + 5 + 4 pasek ≈ 49 dp; tu 20 + 5 + 4 + 20 = 49). Ekran nie skacze w dół,
   // gdy dane dojdą — a to jest cały sens tego stanu.
   heroLoading: { ...typography.body, fontSize: 15, lineHeight: 20, color: colors.textSecondary, marginBottom: 29 },
+  // PIERWSZE URUCHOMIENIE 10.08.2026 — jedyny akapit opisowy w tym kafelku.
+  // Te same wartości co `heroBody` w zakładce „Ja", żeby oba ekrany pierwszego
+  // uruchomienia czytały się jak jeden głos.
+  heroFirstStepBody: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: 4, marginBottom: 10 },
   // JEDNA DROGA B2 08.08.2026 — wskaźnik pracy.
   workText: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary, marginBottom: 5 },
-  workTrack: { height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: 'hidden' },
-  workFill: { height: 4, borderRadius: 2, backgroundColor: colors.brand },
+  // W1: ścięty koniec paska postępu (motyw 12°) — skewX na wypełnieniu,
+  // lewa krawędź prostowana clipem toru (overflow hidden). Wysokość bez zmian.
+  workTrack: { height: 4, borderRadius: 2, backgroundColor: colors.track, overflow: 'hidden' },
+  workFill: { height: 4, backgroundColor: colors.brand, transform: [{ skewX: skew.angle }] },
   // WIEDZA B4 08.08.2026 — PODPOWIEDŹ Z MATERIAŁU.
   // Kreska u góry zamiast własnej ramki: to jest część TEJ karty, a nie druga
   // karta pod nią. Zawodnik ma przeczytać „to należy do tej rekomendacji", nie
@@ -693,7 +912,7 @@ const styles = StyleSheet.create({
     marginTop: 16, paddingTop: 14,
     borderTopWidth: 1, borderTopColor: colors.border,
   },
-  hintEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6 },
+  hintEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6 }, // W1: ink3
   // Źródło w kolorze marki — to JEDYNA rzecz na tym ekranie, która mówi
   // zawodnikowi, że zdanie obok pochodzi z konkretnej strony konkretnej książki,
   // a nie z generatora. Dlatego nie jest szare.

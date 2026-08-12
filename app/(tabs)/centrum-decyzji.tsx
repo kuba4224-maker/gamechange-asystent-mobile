@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 28, marginBottom: 6, color: colors.textPrimary },
   subtitle: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 19, marginBottom: spacing.md },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 14 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 14 }, // W1: ink3
   historyToggle: { minHeight: minTouchHeight, justifyContent: 'center' },
   error: { color: colors.error, fontSize: 13, marginBottom: 12 },
   empty: { textAlign: 'center', padding: 24, color: colors.textSecondary, fontSize: 14 },

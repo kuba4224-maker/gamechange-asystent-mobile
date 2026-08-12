@@ -75,7 +75,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
-import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+import { colors, typography, spacing, radii, minTouchHeight, skew } from '../../constants/theme';
 import { segmentLabel } from '../../lib/labels';
 import {
   parseScores,
@@ -84,6 +84,30 @@ import {
   scenarioHeadline,
 } from '../../components/diagnosisProfile';
 import { unlockedMaterials, libraryEntryHint, LIBRARY_SECTION_LABEL } from '../../lib/materials';
+// PLAN-D-E 08.2026 — OŚ DECYZJI wchodzi tym ekranem.
+//
+// ⚠️ PUNKTU POMOCY TU NIE MA I NIE MA GO TU DOKŁADAĆ jako komponentu. Jest
+// zamontowany raz, w `app/_layout.tsx`, nad `<Slot />` — czyli leży nad KAŻDYM
+// ekranem, także nad Dziennikiem i Meczem (decyzja Kuby 11.08.2026). Druga
+// kopia tutaj znaczyłaby dwa `useEffect` czytające tę samą flagę „ekran prawdy
+// już był" i wyścig, w którym oba mogą otworzyć modal.
+// Stąd idzie WYŁĄCZNIE prośba o otwarcie: `otworzPunktPomocy()`.
+//
+// MAPA DROGI — pełnoekranowy modal, NIE nowa trasa w `app/(tabs)/`.
+// Powód (piąta zakładka, zakaz 10) jest w nagłówku `components/MojaDroga.tsx`.
+import MojaDroga from '../../components/MojaDroga';
+import { MAPA_ENTRY_LABEL, MAPA_ENTRY_HINT_DOSTEPNA } from '../../lib/mapaDrogi';
+// PLAN-D-H 08.2026 (12.08.2026) — DWA MARTWE SZCZEBLE DRABINY DOSTAJĄ WEJŚCIE.
+// Do dziś `calibration_measurements` i `exit_mode` miały po ZERO wierszy, bo
+// żaden ekran do nich nie pisał — czytnik arbitra pytał o stan, którego nikt
+// nie umiał wywołać. Oba wchodzą jako pełnoekranowe modale, nie jako trasy:
+// powód (piąta zakładka, zakaz 10) jest w nagłówku `components/MojaDroga.tsx`.
+import Kalibracja from '../../components/Kalibracja';
+import { KALIBRACJA_ENTRY_LABEL, KALIBRACJA_ENTRY_PODPIS } from '../../lib/kalibracja';
+import SciezkaWyjscia from '../../components/SciezkaWyjscia';
+import { WYJSCIE_WEJSCIE_LABEL, WYJSCIE_WEJSCIE_PODPIS } from '../../lib/sciezkaWyjscia';
+import { otworzPunktPomocy } from '../../components/PunktPomocy';
+import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
 
 type DiagnosisSummary =
   | { state: 'loading' }
@@ -107,6 +131,14 @@ export default function JaScreen() {
   // pobiera: segmentów aktywnych Celów i wąskich gardeł z diagnozy.
   // ZERO nowych zapytań i zero nowych pytań do zawodnika.
   const [libraryCount, setLibraryCount] = useState(0);
+  // PLAN-D-E 08.2026 — Mapa drogi. Stan lokalny ekranu, ZERO zapisu:
+  // otwarcie Mapy nie jest zdarzeniem o zawodniku i nie zostawia śladu.
+  const [drogaOtwarta, setDrogaOtwarta] = useState(false);
+  // PLAN-D-H 08.2026 — stan lokalny, ZERO zapisu przy samym otwarciu.
+  // Otwarcie ekranu nie jest zdarzeniem o zawodniku i nie zostawia śladu;
+  // ścieżkę wyjścia włącza dopiero jawne potwierdzenie w środku modala.
+  const [kalibracjaOtwarta, setKalibracjaOtwarta] = useState(false);
+  const [wyjscieOtwarte, setWyjscieOtwarte] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentUser) return;
@@ -206,11 +238,16 @@ export default function JaScreen() {
       : 'Wszystko, co system Ci dotąd powiedział';
 
   const goalsHint = activeGoals > 0
-    ? `${activeGoals} ${activeGoals === 1 ? 'aktywny cel' : 'aktywne cele'} · historia i planowanie pracy`
-    : 'Załóż cel — to on napędza resztę appki';
+    // PLAN-D-A 08.2026 — `goals` to WĄSKIE GARDŁO. Słowo „cel" jest od teraz
+    // zarezerwowane dla kierunku na lata (`player_profiles.goal_direction`).
+    ? `${activeGoals} ${activeGoals === 1 ? 'aktywne wąskie gardło' : 'aktywne wąskie gardła'} · historia i planowanie pracy`
+    : 'Wskaż wąskie gardło — to ono napędza resztę appki';
 
-  const renderRow = (route: MenuRoute, label: string, hint: string, dot = false) => (
-    <TouchableOpacity key={route} style={styles.row} onPress={() => router.push(route)}>
+  // PLAN-D-E 08.2026 — jeden wygląd wiersza, dwa sposoby otwarcia. Bez tego
+  // wejście do Mapy wyglądałoby inaczej niż pozostałe i czytałoby się jak
+  // element obcy, a nie jak druga oś tego samego produktu.
+  const renderRowRaw = (key: string, label: string, hint: string, onPress: () => void, dot = false) => (
+    <TouchableOpacity key={key} style={styles.row} onPress={onPress}>
       <View style={{ flex: 1 }}>
         <View style={styles.rowLabelLine}>
           <Text style={styles.rowLabel}>{label}</Text>
@@ -221,6 +258,9 @@ export default function JaScreen() {
       <Text style={styles.chevron}>›</Text>
     </TouchableOpacity>
   );
+
+  const renderRow = (route: MenuRoute, label: string, hint: string, dot = false) =>
+    renderRowRaw(route, label, hint, () => router.push(route), dot);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -235,6 +275,8 @@ export default function JaScreen() {
             przeczytał o sobie jedno zdanie, ma chcieć przeczytać resztę, a nie
             szukać osobnego linku. */}
         <TouchableOpacity style={styles.hero} onPress={() => router.push('/diagnoza')}>
+          {/* W1: krecha 12° — ten sam motyw co hero Celu na Dziś */}
+          <View style={styles.heroStripe} />
           <Text style={styles.heroEyebrow}>Twój profil z diagnozy</Text>
 
           {summary.state === 'loading' && (
@@ -271,13 +313,45 @@ export default function JaScreen() {
             </>
           )}
 
-          <Text style={styles.heroLink}>Zobacz cały profil →</Text>
+          {/* PIERWSZE URUCHOMIENIE 10.08.2026 (zatwierdzone przez Kubę) —
+              karta mówiła „Nie masz jeszcze diagnozy", a przycisk pod nią
+              proponował obejrzenie profilu, którego nie ma. Przy braku
+              diagnozy jedyną sensowną akcją jest jej zrobienie.
+              Stan `unreadable` ZOSTAJE przy „Zobacz cały profil" świadomie:
+              tam diagnoza istnieje, tylko nie ma szczegółowych wyników —
+              jest więc co otworzyć. */}
+          <Text style={styles.heroLink}>
+            {summary.state === 'none' ? 'Zrób diagnozę →' : 'Zobacz cały profil →'}
+          </Text>
         </TouchableOpacity>
 
         {/* ── TWÓJ ROZWÓJ ──────────────────────────────────────────── */}
         <View style={{ marginTop: 28 }}>
           <Text style={styles.sectionLabel}>Twój rozwój</Text>
-          {renderRow('/diagnoza', 'Wynik diagnozy', '13 obszarów, wąskie gardła i ich przyczyny')}
+          {/* PIERWSZE URUCHOMIENIE 10.08.2026 — jako jedyny wiersz w tej sekcji
+              miał opis na sztywno. `goalsHint`, `recsHint` i `libraryEntryHint()`
+              od dawna dostosowują się do pustego stanu; ten obiecywał WYNIK
+              komuś, kto diagnozy nigdy nie wypełnił. Brzmienie zatwierdzone
+              przez Kubę. */}
+          {renderRow('/diagnoza', 'Wynik diagnozy',
+            summary.state === 'none'
+              ? 'Jeszcze nie wypełniona — od niej zaczyna się reszta'
+              : '13 obszarów, wąskie gardła i ich przyczyny')}
+          {/* PLAN-D-E 08.2026 — DRUGA OŚ. Stoi zaraz pod diagnozą, bo to jest
+              ta sama para pytań: diagnoza mówi, CO POTRAFISZ, Mapa mówi,
+              CO ROBISZ. Jedenaście z siedemnastu czynników, które w badaniach
+              podłużnych przewidują dojście do zawodowstwa, to decyzje — i do
+              11.08.2026 żaden z nich nie miał w produkcie ani jednego miejsca.
+              Podpis jest STAŁY: Mapa działa też w koncie ograniczonym, więc
+              nie ma tu liczby, która mogłaby skłamać przy braku dostępu. */}
+          {renderRowRaw('moja-droga', MAPA_ENTRY_LABEL, MAPA_ENTRY_HINT_DOSTEPNA, () => setDrogaOtwarta(true))}
+          {/* PLAN-D-H 08.2026 — KALIBRACJA. Stoi zaraz pod Mapą, bo to jest
+              ta sama para: Mapa mówi, co robić, Kalibracja mierzy, na ile
+              dobrze się znasz. Podpis jest STAŁY i nie zawiera liczby —
+              liczba przy pustym stanie musiałaby brzmieć „0 pomiarów", czyli
+              otworzyć narzędzie zdaniem „to się nie liczy" (zakaz z P3). */}
+          {renderRowRaw('kalibracja', KALIBRACJA_ENTRY_LABEL, KALIBRACJA_ENTRY_PODPIS,
+            () => setKalibracjaOtwarta(true))}
           {renderRow('/centrum-decyzji', 'Wszystkie rekomendacje', recsHint, unreadRecs > 0)}
           {renderRow('/cele', 'Cele', goalsHint)}
           {/* ZMIANA OBRAZU B5 08.08.2026 — wejście do biblioteki. Stoi jako
@@ -292,10 +366,52 @@ export default function JaScreen() {
           {renderRow('/profil', 'Profil', 'Dane, pozycja, wzrost, sprzęt, tryb kontuzji, e-mail rodzica')}
         </View>
 
+        {/* ── POMOC ────────────────────────────────────────────────
+            PLAN-D-E 12.08.2026, po obejrzeniu na telefonie. Pigułka zeszła
+            wizualnie do tła, więc punkt pomocy dostaje DRUGIE, NAZWANE wejście —
+            w miejscu, w którym zawodnik szuka rzeczy o sobie i o koncie.
+            Otwiera TEN SAM modal co pigułka, nie drugi egzemplarz. */}
+        {/* ── TWOJA SYTUACJA ───────────────────────────────────────
+            PLAN-D-H 08.2026 — ŚCIEŻKA WYJŚCIA. Osobna sekcja, nie „Ustawienia":
+            to nie jest ustawienie aplikacji, tylko zdanie o tym, co się stało
+            zawodnikowi. Stoi nisko i bez wyróżnienia świadomie — ma być
+            do znalezienia wtedy, gdy jest potrzebna, a nie podsuwana.
+            ⚠️ Ten wiersz NICZEGO NIE WŁĄCZA. Otwiera ekran, który najpierw
+            mówi, co dokładnie się zmieni, i dopiero potem pyta. */}
+        <View style={{ marginTop: 28 }}>
+          <Text style={styles.sectionLabel}>Twoja sytuacja</Text>
+          {renderRowRaw('sciezka-wyjscia', WYJSCIE_WEJSCIE_LABEL, WYJSCIE_WEJSCIE_PODPIS,
+            () => setWyjscieOtwarte(true))}
+        </View>
+
+        <View style={{ marginTop: 28 }}>
+          <Text style={styles.sectionLabel}>Pomoc</Text>
+          {renderRowRaw('punkt-pomocy', POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS, otworzPunktPomocy)}
+        </View>
+
         <TouchableOpacity style={styles.signOutBtn} onPress={signOut}>
           <Text style={styles.signOutText}>Wyloguj się</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* PLAN-D-E 08.2026 — Mapa poza ScrollView, bo to modal, nie treść.
+          Punkt pomocy montuje `app/_layout.tsx`, patrz nagłówek pliku. */}
+      <MojaDroga
+        visible={drogaOtwarta}
+        onClose={() => setDrogaOtwarta(false)}
+        userId={currentUser?.id ?? null}
+      />
+      {/* PLAN-D-H 08.2026 — oba poza ScrollView, bo to modale, nie treść. */}
+      <Kalibracja
+        visible={kalibracjaOtwarta}
+        onClose={() => setKalibracjaOtwarta(false)}
+        userId={currentUser?.id ?? null}
+      />
+      <SciezkaWyjscia
+        visible={wyjscieOtwarte}
+        onClose={() => setWyjscieOtwarte(false)}
+        userId={currentUser?.id ?? null}
+      />
     </SafeAreaView>
   );
 }
@@ -303,17 +419,26 @@ export default function JaScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 32, marginBottom: spacing.lg, color: colors.textPrimary },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 10 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 10 }, // W1: ink3
   // Hero — ten sam język wizualny co hero Celu na ekranie Dziś (lewa krecha
   // w kolorze marki), żeby zawodnik rozpoznał „to jest o mnie" bez czytania.
+  // W1: prosta krecha borderLeft → krecha ŚCIĘTA 12° (koncepcja, komponent 1);
+  // absolutna, wysokość hero bez zmian. paddingLeft 24 robi miejsce na krechę.
   hero: {
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-    borderLeftWidth: 4, borderLeftColor: colors.brand, borderRadius: radii.lg,
-    padding: 20,
+    borderRadius: radii.lg,
+    paddingVertical: 20, paddingLeft: 24, paddingRight: 20,
   },
-  heroEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 8 },
+  heroStripe: { ...skew.stripe, height: 52, top: 18, backgroundColor: colors.brand },
+  heroEyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 8 }, // W1: ink3
   heroTitle: { ...typography.display, fontSize: 24, color: colors.textPrimary, marginBottom: 8 },
-  heroSegments: { ...typography.bodySemiBold, fontSize: 14, color: colors.brand, marginBottom: 8 },
+  // WIZUAL-1 sekcja 8, decyzja Kuby 08.08.2026 — nazwy wąskich gardeł zeszły
+  // z koloru marki na ink. Powód jest wprost zasadą nadrzędną z lib/theme.ts:
+  // marka oznacza DZIAŁANIE i TOŻSAMOŚĆ, nigdy ocenę danych. A to są dane
+  // o zawodniku, w dodatku o jego słabych stronach — czerwień na trzech
+  // nazwach czytała się jak alarm („system mówi, że jesteś w tym słaby”),
+  // zamiast jak mapa, od czego zacząć. Hierarchię niesie tu rozmiar i grubość.
+  heroSegments: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, marginBottom: 8 },
   heroBody: { ...typography.body, fontSize: 14, color: colors.textSecondary, lineHeight: 20, marginBottom: 12 },
   heroLink: { ...typography.bodyMedium, fontSize: 13, color: colors.brand },
   row: {

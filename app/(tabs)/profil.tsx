@@ -79,6 +79,12 @@ import { toLocalDateStr } from '../../lib/date-utils';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
 // JEDNA DROGA B2 08.08.2026 — jedno źródło nazw lokalizacji bólu.
 import { BODY_LOCATIONS, BODY_LOCATION_LABELS, NON_LATERAL_LOCATIONS } from '../../lib/labels';
+// PLAN-D-F 08.2026 (12.08.2026) — walidacja pomiaru wzrostu i opis stanu.
+// ⚠️ Ten moduł NIE liczy tempa wzrostu i nie zna progu 7,2 cm/rok. Klasyfikację
+// robi wyłącznie backend (gamechange-app/lib/arbiter-glosu.js), a jej wynik
+// wraca do appki wierszem `weekly_voice`. Druga implementacja progu po tej
+// stronie to gwarantowany cichy rozjazd.
+import { sprawdzPomiar, opiszPomiary, naDateLokalna, type PomiarWzrostu } from '../../lib/wzrost';
 import {
   isBiometricHardwareAvailable,
   isBiometricLockEnabled,
@@ -160,7 +166,18 @@ export default function ProfilScreen() {
   // (get_parent_report / wątek 9 biblioteki trenerskiej).
   const [heightInput, setHeightInput] = useState('');
   const [savingHeight, setSavingHeight] = useState(false);
-  const [lastHeight, setLastHeight] = useState<{ height_cm: number; measured_at: string } | null>(null);
+  // PLAN-D-F 08.2026 — CAŁA historia pomiarów, nie tylko ostatni.
+  // Powód jest mechaniczny, nie estetyczny: Osłona (szczebel 2 drabiny arbitra)
+  // potrzebuje DWÓCH pomiarów oddalonych o co najmniej pół roku. Zawodnik, który
+  // widzi wyłącznie ostatni wpis, nie ma jak stwierdzić, czy już je ma.
+  const [heightRows, setHeightRows] = useState<PomiarWzrostu[]>([]);
+  // Data pomiaru. DOMYŚLNIE DZISIAJ, ale zmienialna — to jest cała ta zmiana.
+  // Do 12.08.2026 `measured_at` ustawiała baza (DEFAULT CURRENT_DATE), więc
+  // każdy pomiar był z dnia wpisania i pierwsze okno ≥ pół roku mogło powstać
+  // najwcześniej pół roku po założeniu konta. Wzrost sprzed roku zna prawie
+  // każdy zawodnik — z bilansu albo z pomiaru w klubie — i nie było jak go podać.
+  const [heightDate, setHeightDate] = useState<Date>(new Date());
+  const [showHeightPicker, setShowHeightPicker] = useState(false);
 
   // Sekcja 2c — Raport dla rodzica (Pakiet 9, 03.08.2026 noc). INSERT do
   // parent_report_subscriptions, formularz NIEZALEŻNY od zapisu etapu, ten
@@ -232,8 +249,10 @@ export default function ProfilScreen() {
         supabase.from('users').select('full_name,birth_year').eq('id', currentUser.id).limit(1),
         supabase.from('player_profiles').select('*').eq('user_id', currentUser.id).limit(1),
         supabase.from('injury_history').select('*').eq('user_id', currentUser.id).order('created_at', { ascending: false }),
+        // PLAN-D-F 08.2026 — bez `.limit(1)`: potrzebna jest cała historia,
+        // żeby dało się pokazać, ile pomiarów zawodnik ma i co je dzieli.
         supabase.from('height_logs').select('height_cm,measured_at').eq('user_id', currentUser.id)
-          .order('measured_at', { ascending: false }).order('created_at', { ascending: false }).limit(1),
+          .order('measured_at', { ascending: false }).order('created_at', { ascending: false }),
       ]);
 
       const u = userRes.data?.[0];
@@ -254,7 +273,13 @@ export default function ProfilScreen() {
       setInjuryModeCategory(p?.injury_mode_category ?? '');
 
       setInjuryHistory(injuryRes.data ?? []);
-      setLastHeight(heightRes.data?.[0] ?? null);
+      // Błąd odczytu NIE udaje pustej historii: pusta lista przy błędzie
+      // znaczyłaby „nie masz żadnego pomiaru" komuś, kto ma ich pięć (reguła R5).
+      if (heightRes.error) {
+        console.error('profil: nie odczytałem height_logs:', heightRes.error.message);
+      } else {
+        setHeightRows((heightRes.data ?? []) as PomiarWzrostu[]);
+      }
 
       // Tor 7 Krok 3 — "wróć później": ustaw etap startowy na PIERWSZYM
       // niewypełnionym, nie zawsze na 0. Żadne pole w tym formularzu nie
@@ -389,35 +414,42 @@ export default function ProfilScreen() {
     if (!currentUser) return;
     setProfileError(null);
     setProfileOk(null);
-    const normalized = heightInput.trim().replace(',', '.');
-    const value = normalized !== '' ? Number(normalized) : NaN;
-    if (!normalized || Number.isNaN(value)) {
-      setProfileError('Podaj wzrost w centymetrach.');
+
+    // PLAN-D-F 08.2026 — walidacja wyprowadzona do `lib/wzrost.ts`, żeby dało
+    // się ją sprawdzić testem bez ekranu (50 asercji, cztery sprawdzone
+    // mutacyjnie). Zakres 50–250 cm jest lustrem CHECK-u w bazie; data pomiaru
+    // ma własne strażniki, bo literówka w roku („2016" zamiast „2026") NIE
+    // rzuca błędem — daje backendowi okno dziesięcioletnie, tempo bliskie zeru
+    // i cichy brak alertu u zawodnika, który rośnie 9 cm rocznie.
+    const dataIso = naDateLokalna(heightDate);
+    const wynik = sprawdzPomiar(heightInput, dataIso, naDateLokalna(new Date()), heightRows);
+    if (!wynik.ok) {
+      setProfileError(wynik.blad);
       return;
     }
-    // Ten sam zakres co CHECK height_cm BETWEEN 50 AND 250 w tabeli height_logs
-    // (asystent_sportowca_21_narzedzie_trenera.sql) — walidacja klient-side to
-    // tylko szybszy komunikat, baza i tak pilnuje tego ostatecznie.
-    if (value < 50 || value > 250) {
-      setProfileError('Wzrost musi być w zakresie 50–250 cm.');
-      return;
-    }
+
     setSavingHeight(true);
     try {
-      // INSERT, nie UPDATE — height_logs to log pomiarów w czasie, measured_at
-      // ustawia baza (DEFAULT CURRENT_DATE), appka go nie wysyła.
+      // INSERT, nie UPDATE — height_logs to log pomiarów w czasie.
+      // `measured_at` idzie TERAZ z appki (dotąd ustawiała je baza przez
+      // DEFAULT CURRENT_DATE), żeby dało się dopisać pomiar sprzed roku.
       const { data, error } = await supabase
         .from('height_logs')
-        .insert({ user_id: currentUser.id, height_cm: value })
+        .insert({ user_id: currentUser.id, height_cm: wynik.wartosc, measured_at: wynik.data })
         .select('height_cm,measured_at')
         .limit(1);
       if (error) throw error;
 
       if (data && data[0]) {
-        setLastHeight(data[0] as { height_cm: number; measured_at: string });
+        const nowy = data[0] as PomiarWzrostu;
+        setHeightRows((poprzednie) => [nowy, ...poprzednie]
+          .sort((a, b) => (a.measured_at < b.measured_at ? 1 : a.measured_at > b.measured_at ? -1 : 0)));
       }
       setHeightInput('');
-      setProfileOk('Wzrost zapisany.');
+      setHeightDate(new Date());
+      // Ostrzeżenie NIE jest błędem — zapis się udał i trzeba to powiedzieć
+      // razem z zastrzeżeniem, a nie zamiast niego.
+      setProfileOk(wynik.ostrzezenie ? `Wzrost zapisany. ${wynik.ostrzezenie}` : 'Wzrost zapisany.');
     } catch (e: any) {
       setProfileError('Nie udało się zapisać wzrostu: ' + e.message);
     } finally {
@@ -570,16 +602,42 @@ export default function ProfilScreen() {
               od zapisu etapu, ten sam wzorzec co historia kontuzji w etapie 4. */}
           <View style={styles.block}>
             <Text style={styles.blockLabel}>Wzrost</Text>
-            {lastHeight && (
-              <Text style={styles.hint}>
-                Ostatni zapisany pomiar: {lastHeight.height_cm} cm ({formatDatePl(lastHeight.measured_at)})
-              </Text>
-            )}
+
+            {/* PLAN-D-F 08.2026 — zdanie o stanie pomiarów. Mówi, CO ZROBIĆ,
+                nie tylko czego brakuje: „nie mam dość danych" bez wskazania
+                ruchu jest komunikatem o systemie, nie o zawodniku.
+                ⚠️ Nie zawiera ŻADNEJ oceny ani progu — ocena („rośniesz teraz
+                szybko") przychodzi z arbitra przez `weekly_voice` i pokazuje ją
+                ekran „Dziś". Tu są wyłącznie fakty: ile pomiarów, co je dzieli.
+                ⚠️ I żadnej liczby o dojrzałości biologicznej (zakaz spec 3.3) —
+                pilnowane asercjami w lib/wzrost.selftest.ts. */}
+            <Text style={styles.hint}>{opiszPomiary(heightRows).zdanie}</Text>
+
             <Text style={styles.label}>Wzrost (cm) — opcjonalnie</Text>
             <TextInput
               style={styles.input} placeholderTextColor={colors.textSecondary} value={heightInput} onChangeText={setHeightInput}
               keyboardType="decimal-pad" placeholder="np. 178"
             />
+
+            {/* Data pomiaru — ten sam wzorzec co daty w historii kontuzji niżej. */}
+            <Text style={styles.label}>Kiedy zmierzony</Text>
+            <TouchableOpacity style={styles.input} onPress={() => setShowHeightPicker(true)}>
+              <Text style={{ color: colors.textPrimary }}>
+                {heightDate.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </Text>
+            </TouchableOpacity>
+            {showHeightPicker && (
+              <DateTimePicker
+                value={heightDate}
+                mode="date"
+                maximumDate={new Date()}
+                onChange={(_event, selected) => {
+                  setShowHeightPicker(false);
+                  if (selected) setHeightDate(selected);
+                }}
+              />
+            )}
+
             <TouchableOpacity
               style={[styles.btnSecondary, savingHeight && styles.btnDisabled]}
               disabled={savingHeight}
@@ -587,6 +645,22 @@ export default function ProfilScreen() {
             >
               <Text style={styles.btnSecondaryText}>{savingHeight ? 'Zapisuję...' : 'Zapisz pomiar wzrostu'}</Text>
             </TouchableOpacity>
+
+            {/* Historia pomiarów. Pięć ostatnich — tyle wystarczy, żeby
+                zawodnik zobaczył, czy ma już dwa oddalone pomiary, a lista nie
+                rozpycha etapu 0 kreatora. */}
+            {heightRows.length > 0 && (
+              <View style={{ marginTop: 12 }}>
+                {heightRows.slice(0, 5).map((h) => (
+                  <Text key={`${h.measured_at}-${h.height_cm}`} style={styles.hint}>
+                    {h.height_cm} cm · {formatDatePl(h.measured_at)}
+                  </Text>
+                ))}
+                {heightRows.length > 5 && (
+                  <Text style={styles.hint}>…i jeszcze {heightRows.length - 5}</Text>
+                )}
+              </View>
+            )}
           </View>
 
           {/* Raport dla rodzica — Pakiet 9 (03.08.2026 noc). Formularz
@@ -682,10 +756,14 @@ export default function ProfilScreen() {
       {/* Etap 2 — Cel kierunkowy (logika roli tego pola bez zmian, patrz nagłówek pliku) */}
       {step === 2 && (
         <View style={styles.block}>
-          <Text style={styles.blockLabel}>Cel kierunkowy</Text>
+          {/* PLAN-D-A 08.2026 — TO jest CEL w słowniku trzech poziomów:
+              kierunek na lata, jeden. Przymiotnik „kierunkowy" był potrzebny
+              tylko po to, żeby odróżnić go od `goals` — a te nazywają się
+              teraz wąskimi gardłami. */}
+          <Text style={styles.blockLabel}>Twój Cel</Text>
           <Text style={styles.hint}>
-            To ogólny kierunek, nie konkretny, śledzony cel — przy zakładaniu Twojego
-            pierwszego celu w zakładce Cele przypomnimy Ci o nim, żebyś mógł wybrać
+            To kierunek na lata, nie konkretne zadanie — przy wskazywaniu Twojego
+            pierwszego wąskiego gardła przypomnimy Ci o nim, żebyś mógł wybrać
             konkretny segment, którego dotyczy.
           </Text>
           <Text style={styles.label}>Co jest dla Ciebie teraz najważniejsze?</Text>
@@ -901,9 +979,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
   block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.md, marginBottom: spacing.md },
-  blockLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: spacing.md },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: spacing.md },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 4 },
+  blockLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: spacing.md }, // W1: ink3
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: spacing.md }, // W1: ink3
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 }, // W1: ink3
   hint: { ...typography.body, fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md },
   staticValue: { ...typography.body, fontSize: 14, color: colors.textPrimary, marginBottom: 10 },
   input: {
@@ -929,7 +1007,7 @@ const styles = StyleSheet.create({
   historyDetail: { ...typography.body, fontSize: 13, color: colors.textSecondary },
   // Tor 7 Krok 3 — wskaźnik postępu i nawigacja między etapami
   stepHeader: { marginBottom: spacing.md, alignItems: 'center' },
-  stepLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 8 },
+  stepLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 8 }, // W1: ink3
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.border },
   dotActive: { backgroundColor: colors.brand, width: 18 },

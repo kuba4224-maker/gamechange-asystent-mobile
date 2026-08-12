@@ -44,10 +44,17 @@ const STEPS = [
     body:
       'To narzędzie pomoże Ci świadomie zarządzać swoim rozwojem. Nie poprowadzi za Ciebie treningu i nie zastąpi trenera — pokaże Ci, na czym się dziś skupić i dlaczego.\n\nNarzędzie jest nawigatorem, nie trenerem.',
   },
+  // PLAN-D-A 08.2026 — SŁOWNIK TRZECH POZIOMÓW. Poprzednie brzmienie
+  // („Masz jeden aktywny Cel — zobaczysz go na samej górze ekranu Dziś")
+  // stało się NIEPRAWDZIWE w dniu wprowadzenia słownika: na górze Dziś stoi
+  // wąskie gardło, a Cel jest kierunkiem na lata i mieszka w Profilu.
+  // Onboarding jest pierwszym zdaniem, jakie zawodnik czyta — jeśli uczy go
+  // złego słownika, każdy kolejny ekran wygląda jak niespójność.
+  // ⚠️ To jest głos Kuby — brzmienie do przejrzenia (raport PLAN-D-A, sekcja 8).
   {
-    title: 'Wszystko kręci się wokół Twojego Celu',
+    title: 'Cel, wąskie gardło, Blok',
     body:
-      'Masz jeden aktywny Cel — zobaczysz go na samej górze ekranu Dziś, za każdym razem gdy otworzysz appkę. To on decyduje, co system Ci podpowiada i co warto zaplanować.\n\nZaczynasz od zapisania, jak się dziś czujesz. Reszta buduje się na tym.',
+      'Twój Cel to kierunek na lata — jeden. Wąskie gardło to ta jedna rzecz, która ogranicza Cię teraz, przez najbliższe miesiące. Blok to 4–8 tygodni skupionej pracy nad nią.\n\nNa górze ekranu Dziś zobaczysz swoje wąskie gardło i to, ile sesji masz już za sobą.\n\nZaczynasz od zapisania, jak się dziś czujesz. Reszta buduje się na tym.',
   },
   {
     title: 'Włącz powiadomienia',

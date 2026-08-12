@@ -1,3 +1,8 @@
+// ⚠️ PLAN-D-A 08.2026 — dla zawodnika ta rzecz nazywa się od teraz po prostu
+// BLOK (4–8 tygodni skupionej pracy). Nazwa pliku, komponentu i tabeli
+// (`focus_blocks`) zostaje bez zmian — to kod, nie głos produktu. Komentarze
+// niżej pisane wcześniej mówią „Blok Skupienia"; zostawione jako zapis.
+//
 // TOR 7 KROK 5b (31.07.2026 noc — 01.08.2026) — Blok Skupienia, Fazy 2-4
 // "Praca / Zamknięcie / Utrzymanie". Kontynuacja po Kroku 5a
 // (components/FocusBlockPlanner.tsx, Faza 1 "Start" — NIE dotknięty przez
@@ -514,7 +519,8 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
             user_id: currentUserId,
             event_type: 'micro_session',
             source: 'system',
-            title: `Blok Skupienia: ${elementLabel}`,
+            // PLAN-D-A 08.2026 — tytuł widoczny w Kalendarzu.
+            title: `Blok: ${elementLabel}`,
             status: 'scheduled',
             scheduled_date: d,
             goal_id: goalIdFromHistory,
@@ -530,12 +536,39 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
           .eq('id', focusBlock.id);
         if (err) throw err;
       } else {
+        // PLAN-D-A 08.2026 — `closed_at` JEST OBOWIĄZKOWE na każdej ścieżce
+        // zamykającej Blok. ⚠️ Kolumna nazywa się `closed_at`, NIE `ended_at`
+        // (`ended_at` jest w `goals`). Asymetria jest celowa i potwierdzona
+        // odczytem schematu 10.08.2026 — pierwsza wersja migracji A1 wywróciła
+        // się właśnie na tym założeniu.
+        // Bez `closed_at` Blok znika z widoku (bo `status <> 'active'`), ale
+        // nie wiadomo KIEDY został zamknięty — a to jest jedyne źródło długości
+        // Bloku w podsumowaniach i w rediagnozie.
         const { error: err } = await supabase
           .from('focus_blocks')
           .update({ status: action === 'new_element' ? 'completed' : 'abandoned', closed_at: new Date().toISOString() })
           .eq('id', focusBlock.id);
         if (err) throw err;
       }
+      // ════════════════════════════════════════════════════════
+      // NAPRAWA A4a — 10.08.2026
+      //
+      // `setReviewOpen` był w tym pliku wołany DOKŁADNIE RAZ, z wartością
+      // `true`. Po zatwierdzeniu „Kontynuuj" Blok zostawał `active`, więc
+      // rodzic renderował ten sam, wciąż zamontowany komponent z
+      // `reviewOpen === true` — zawodnik widział to samo podsumowanie i te
+      // same trzy przyciski, bez jednego słowa o tym, że cokolwiek się
+      // zapisało. Naturalną reakcją było kliknięcie jeszcze raz, a każde
+      // kolejne kliknięcie dokładało następne dwa tygodnie sesji: insert
+      // idzie PRZED podniesieniem `target_weeks`, a dni tygodnia liczą się
+      // z historii zawierającej już świeżo wstawione daty. Mianownik paska
+      // „N z M" puchł, więc wskaźnik pracy COFAŁ SIĘ mimo pracy zawodnika.
+      //
+      // Zamykamy przegląd PRZED `onBlockClosed()`, żeby nie ustawiać stanu
+      // komponentu, który rodzic może w tej samej chwili odmontować.
+      // ════════════════════════════════════════════════════════
+      setReviewOpen(false);
+      setClosingAction(null);
       onBlockClosed();
     } catch (e: any) {
       setClosingSaveError('Nie udało się zapisać decyzji: ' + e.message);
@@ -639,7 +672,7 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
   if (reviewOpen) {
     return (
       <View style={styles.wrap}>
-        <Text style={styles.sectionLabel}>Przegląd Bloku Skupienia — {elementLabel}</Text>
+        <Text style={styles.sectionLabel}>Przegląd Bloku — {elementLabel}</Text>
         {reviewLoading && <ActivityIndicator size="small" color={colors.textSecondary} style={{ marginVertical: 12 }} />}
         {reviewError && <Text style={styles.error}>{reviewError}</Text>}
         {reviewSummary && <Text style={styles.reasoningText}>{reviewSummary}</Text>}
@@ -676,12 +709,26 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
               disabled={closingSaving}
               onPress={() => confirmClosingAction('close')}
             >
-              <Text style={styles.btnSecondaryText}>{closingAction === 'close' && closingSaving ? 'Zapisuję...' : 'Zamknij wątek'}</Text>
+              <Text style={styles.btnSecondaryText}>{closingAction === 'close' && closingSaving ? 'Zapisuję...' : 'Zamknij Blok'}</Text>
             </TouchableOpacity>
             {closingSaveError && <Text style={styles.error}>{closingSaveError}</Text>}
             {renderStripeCta()}
           </View>
         )}
+
+        {/* NAPRAWA A4a — 10.08.2026. Ekran przeglądu nie miał ŻADNEGO wyjścia:
+            gdy rediagnoza nie rozstrzygnęła (patrz A4c w
+            components/BlockClosingRediagnosis.tsx), trzy przyciski „Co dalej?"
+            się nie pokazywały i zawodnik zostawał uwięziony na podsumowaniu.
+            Ten link istnieje także po to, żeby dało się wyjść bez podejmowania
+            decyzji — przegląd nie jest zobowiązaniem. */}
+        <TouchableOpacity
+          style={[styles.linkRow, closingSaving && styles.btnDisabled]}
+          disabled={closingSaving}
+          onPress={() => { setReviewOpen(false); setClosingAction(null); }}
+        >
+          <Text style={styles.linkTextMuted}>Wróć do Bloku</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -689,7 +736,7 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
   return (
     <View style={styles.wrap}>
       <Text style={styles.sectionLabel}>
-        {focusBlock.status === 'completed' ? 'Utrzymanie — ' : 'Blok Skupienia — '}{elementLabel}
+        {focusBlock.status === 'completed' ? 'Utrzymanie — ' : 'Blok — '}{elementLabel}
       </Text>
       {focusBlock.stage && focusBlock.status === 'active' && (
         <Text style={styles.stageText}>Etap: {focusBlock.stage}</Text>
@@ -697,7 +744,7 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
 
       {reviewDue && (
         <TouchableOpacity style={styles.reviewBanner} onPress={openReview}>
-          <Text style={styles.reviewBannerText}>Ten Blok Skupienia dobiega końca zaplanowanego okresu — zobacz podsumowanie i zdecyduj, co dalej →</Text>
+          <Text style={styles.reviewBannerText}>Ten Blok dobiega końca zaplanowanego okresu — zobacz podsumowanie i zdecyduj, co dalej →</Text>
         </TouchableOpacity>
       )}
 
@@ -732,7 +779,7 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
       )}
 
       {!checkinLoading && !checkin && (
-        <Text style={styles.hintText}>Brak jeszcze żadnego pytania kontrolnego dla tego bloku.</Text>
+        <Text style={styles.hintText}>Brak jeszcze żadnego pytania kontrolnego dla tego Bloku.</Text>
       )}
 
       {/* PRAKTYKA-EKRAN B6 08.08.2026 — dawka z bazy. Stoi PRZED ulotną, bo to
@@ -768,13 +815,14 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
 }
 
 const styles = StyleSheet.create({
-  wrap: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: 'rgba(232,67,45,0.06)', padding: 14, marginTop: 10 },
+  wrap: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: colors.brandSofter, padding: 14, marginTop: 10 }, // W1: token
   checkinErrorText: { ...typography.body, fontSize: 13, color: colors.textSecondary, marginTop: 10, lineHeight: 19 },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6 },
+  // W1: nadtytuły na ink3 (koncepcja: ink3 = podpisy, nadtytuły)
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6 },
   stageText: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary, marginBottom: 10 },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 8 },
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 8 },
   reasoningText: { ...typography.body, fontSize: 13, color: colors.textSecondary, marginBottom: 12, lineHeight: 18 },
-  reviewBanner: { backgroundColor: 'rgba(232,67,45,0.15)', borderRadius: radii.md, padding: 10, marginBottom: 10 },
+  reviewBanner: { backgroundColor: colors.brandTint, borderRadius: radii.md, padding: 10, marginBottom: 10 }, // W1: token
   reviewBannerText: { ...typography.bodyMedium, fontSize: 13, color: colors.textPrimary },
   checkinBox: { marginTop: 6, marginBottom: 6 },
   questionText: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, marginBottom: 8 },
@@ -784,7 +832,7 @@ const styles = StyleSheet.create({
   contentDoseBox: { borderTopWidth: 1, borderTopColor: colors.border, marginTop: 10, paddingTop: 10 },
   contentDoseLabel: { ...typography.bodySemiBold, fontSize: 12, color: colors.textPrimary, marginBottom: 2 },
   // PRAKTYKA-EKRAN B6 08.08.2026 — dawka treści z bazy.
-  doseSectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 8 },
+  doseSectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 8 }, // W1: ink3
   doseCard: { marginBottom: 4 },
   doseDate: { ...typography.body, fontSize: 11, color: colors.textSecondary, marginBottom: 6 },
   doseSourceBox: { borderLeftWidth: 2, borderLeftColor: colors.border, paddingLeft: 10, marginTop: 2, marginBottom: 6 },
@@ -801,6 +849,9 @@ const styles = StyleSheet.create({
   btnSecondaryText: { ...typography.bodySemiBold, color: colors.textPrimary, fontSize: 15 },
   cancelLink: { marginTop: 12, alignItems: 'center' },
   linkTextMuted: { color: colors.textSecondary, fontSize: 13, ...typography.bodyMedium },
+  // NAPRAWA A4a 10.08.2026 — wiersz wyjścia z przeglądu. `minTouchHeight`,
+  // bo to jedyne wyjście z tego ekranu i musi być trafialne kciukiem.
+  linkRow: { minHeight: minTouchHeight, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
   stripeCta: { marginTop: 14, borderWidth: 1, borderColor: colors.special, borderRadius: radii.md, padding: 12, alignItems: 'center' },
   stripeCtaLabel: { fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 2 },
   stripeCtaName: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },

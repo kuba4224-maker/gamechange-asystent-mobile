@@ -144,7 +144,7 @@ export default function LivingDiagnosisPulseCard() {
 const styles = StyleSheet.create({
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 16, marginBottom: 10 },
   cardMuted: { opacity: 0.7 },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 8 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 8 }, // W1: ink3
   questionText: { ...typography.bodySemiBold, fontSize: 15, color: colors.textPrimary, marginBottom: 6, lineHeight: 21 },
   ctxText: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 18, marginBottom: spacing.md },
   cardBody: { ...typography.body, fontSize: 14, color: colors.textSecondary },

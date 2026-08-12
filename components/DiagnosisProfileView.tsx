@@ -44,10 +44,14 @@ type Props = {
   fallback: ReactNode;
 };
 
+// W1: 08.2026 — kolory grup wg koncepcji identyfikacji (komponent 4):
+// PRIORYTET = karmazyn (bad), WYKORZYSTAJ = zieleń (ok), ROZWIJAJ = żółć (mid),
+// W TLE = neutralny. Do tej rundy g1 świeciło KOLOREM MARKI — a zasada
+// nadrzędna koncepcji brzmi: marka nigdy nie ocenia danych.
 const GROUP_COLOR: Record<GroupKey, string> = {
-  g1: colors.brand,
+  g1: colors.error,
   g2: colors.success,
-  g3: colors.warning,
+  g3: colors.caution,
   g4: colors.textSecondary,
 };
 
@@ -68,6 +72,9 @@ function SegmentRow({ entry, color, showTier }: { entry: GroupedSegment; color: 
         {/* Rzutowanie na `${number}%` — RN 0.81 typuje `width` jako
             DimensionValue, a szablon z liczbą zmiennej daje zwykły `string`. */}
         <View style={[styles.barFill, { width: `${entry.barW}%` as `${number}%`, backgroundColor: color }]} />
+        {/* W1: znacznik środka — 50% paska to własna mediana zawodnika
+            (relativeBarWidth), zawodnik widzi punkt odniesienia bez liczb */}
+        <View style={styles.barMid} />
       </View>
     </View>
   );
@@ -102,7 +109,9 @@ export default function DiagnosisProfileView({
       {/* NAGŁÓWEK SCENARIUSZOWY — zamiast wyniku ogólnego. */}
       <View style={styles.headlineBlock}>
         <Text style={styles.eyebrow}>Twój profil z diagnozy</Text>
-        <Text style={[styles.headline, { color: scenario === 1 ? colors.brand : colors.warning }]}>{headline}</Text>
+        {/* W1: nagłówek scenariusza to OCENA DANYCH — karmazyn/pomarańcz,
+            nigdy kolor marki (zasada nadrzędna koncepcji) */}
+        <Text style={[styles.headline, { color: scenario === 1 ? colors.error : colors.warning }]}>{headline}</Text>
         <Text style={styles.headlineDesc}>{desc}</Text>
         {scenario === 3 ? (
           <TouchableOpacity onPress={onOpenProfile}>
@@ -184,28 +193,29 @@ export default function DiagnosisProfileView({
       })}
 
       {/* POWIĄZANIE Z CELEM — domyka pętlę "skąd się to wzięło". */}
-      <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>Twój Cel a ten profil</Text>
+      {/* PLAN-D-A 08.2026 — ta sekcja czyta `goals`, czyli WĄSKIE GARDŁO. */}
+      <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>Twoje wąskie gardło a ten profil</Text>
       {!goalSegmentId ? (
         <View style={styles.card}>
           <Text style={styles.cardBody}>
-            Nie masz jeszcze aktywnego Celu. To ten profil decyduje, co system Ci podpowiada — najwięcej zmieni Cel
-            w obszarze z pierwszej grupy powyżej.
+            Nie masz jeszcze wąskiego gardła. To ten profil decyduje, co system Ci podpowiada — najwięcej zmieni
+            praca w obszarze z pierwszej grupy powyżej.
           </Text>
           <TouchableOpacity onPress={onOpenGoals}>
-            <Text style={styles.link}>Załóż pierwszy Cel →</Text>
+            <Text style={styles.link}>Wskaż pierwsze wąskie gardło →</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <View style={[styles.card, goalInGroup === 'g1' && styles.cardHighlighted]}>
           <Text style={styles.cardBody}>
             {goalInGroup === 'g1'
-              ? `Twój aktywny Cel to ${segmentLabel(goalSegmentId)} — obszar z grupy „${headings.g1.title}". Stąd biorą się cele i rekomendacje, które dostajesz.`
+              ? `Twoje wąskie gardło to ${segmentLabel(goalSegmentId)} — obszar z grupy „${headings.g1.title}". Stąd biorą się zadania i rekomendacje, które dostajesz.`
               : goalInGroup
-                ? `Twój aktywny Cel to ${segmentLabel(goalSegmentId)} — obszar z grupy „${headings[goalInGroup].title}". Twoim najmocniejszym punktem zaczepienia jest dziś grupa „${headings.g1.title}" powyżej.`
-                : `Twój aktywny Cel to ${segmentLabel(goalSegmentId)}. Ten obszar nie ma jeszcze wyniku w Twojej ostatniej diagnozie.`}
+                ? `Twoje wąskie gardło to ${segmentLabel(goalSegmentId)} — obszar z grupy „${headings[goalInGroup].title}". Twoim najmocniejszym punktem zaczepienia jest dziś grupa „${headings.g1.title}" powyżej.`
+                : `Twoje wąskie gardło to ${segmentLabel(goalSegmentId)}. Ten obszar nie ma jeszcze wyniku w Twojej ostatniej diagnozie.`}
           </Text>
           <TouchableOpacity onPress={onOpenGoals}>
-            <Text style={styles.link}>Zobacz Cele →</Text>
+            <Text style={styles.link}>Zobacz wąskie gardła →</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -218,12 +228,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, borderRadius: radii.lg,
     backgroundColor: colors.surface, padding: 20, marginBottom: spacing.lg,
   },
-  eyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 8 },
+  eyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 8 }, // W1: ink3
   headline: { ...typography.displayExtraBold, fontSize: 28, lineHeight: 32, marginBottom: 8 },
   headlineDesc: { ...typography.body, fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
   link: { ...typography.bodyMedium, fontSize: 13, color: colors.brand, marginTop: 10 },
 
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 2 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 2 }, // W1: ink3
   sectionHint: { ...typography.body, fontSize: 12, color: colors.textSecondary, marginBottom: 12, opacity: 0.8 },
 
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 16, marginBottom: 10 },
@@ -232,7 +242,7 @@ const styles = StyleSheet.create({
 
   deficitRow: { flexDirection: 'row', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 16, marginBottom: 10 },
   deficitRank: { ...typography.displayExtraBold, fontSize: 20, color: colors.textSecondary, width: 28 },
-  deficitRankTop: { color: colors.brand },
+  deficitRankTop: { color: colors.error }, // W1: ranga deficytu = ocena danych → karmazyn, nie marka
   deficitName: { ...typography.bodySemiBold, fontSize: 15, color: colors.textPrimary, marginBottom: 6 },
   deficitCause: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 19 },
   deficitCauseStrong: { ...typography.bodySemiBold, color: colors.textPrimary },
@@ -254,6 +264,8 @@ const styles = StyleSheet.create({
   segHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   segName: { ...typography.body, fontSize: 13, color: colors.textPrimary, flexShrink: 1, paddingRight: 8 },
   segTier: { ...typography.body, fontSize: 10, color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
-  barTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(154,148,136,0.18)', overflow: 'hidden' },
+  // W1: tor z tokenu (koniec rgba na sztywno) + znacznik środka (mediana)
+  barTrack: { height: 6, borderRadius: 3, backgroundColor: colors.track, overflow: 'hidden' },
   barFill: { height: 6, borderRadius: 3 },
+  barMid: { position: 'absolute', left: '50%', marginLeft: -1, top: 0, bottom: 0, width: 2, backgroundColor: colors.textTertiary, opacity: 0.7 },
 });

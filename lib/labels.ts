@@ -83,6 +83,65 @@
 // ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
+// PLAN-D-A 08.2026 — SŁOWNIK TRZECH POZIOMÓW
+// (decyzja Kuby, claude/DECYZJA_SLOWNIK_I_SPEC_ZMIANY_10_08_2026.md)
+//
+// Do 10.08.2026 produkt mówił „Cel" na dwie różne rzeczy naraz: na kierunek
+// na lata (`player_profiles.goal_direction`) i na wiersz w `goals`, który
+// żyje miesiące. Trzeci poziom — `focus_blocks` — nazywał się „Blok
+// Skupienia". Zawodnik widział więc jedno słowo w dwóch znaczeniach i jedną
+// rzecz pod nazwą, której nikt nie używa w rozmowie.
+//
+//   CEL           lata           jeden          player_profiles.goal_direction
+//   WĄSKIE GARDŁO miesiące       kilka          goals
+//   BLOK          4–8 tygodni    jeden/segment  focus_blocks
+//
+// ⚠️ TO JEST WYŁĄCZNIE WARSTWA WIDOCZNA DLA CZŁOWIEKA. Nazwy tabel, kolumn,
+// kluczy, plików i komponentów zostają nietknięte — `goals`, `focus_blocks`,
+// `FocusBlockPlanner.tsx`. Zmiana schematu przy zmianie etykiety to dwa razy
+// większe ryzyko przy zerowym zysku (ten sam wzorzec co `mental` → „Odwaga
+// w grze", decyzja A1 z 07.08.2026).
+//
+// ⚠️ SŁOWO „PORZUĆ" ZNIKA Z PRODUKTU. Zawodnik nie porzuca niczego — kończy
+// Blok albo przestaje nad czymś pracować. Statusy w bazie (`abandoned`)
+// zostają, bo to klucz, nie zdanie.
+//
+// Odmiana jest tu wypisana wprost zamiast sklejana w miejscu użycia — polski
+// dopełniacz („wąskiego gardła", „wąskich gardeł") nie da się wyprowadzić
+// z mianownika bez reguły, której nikt później nie odczyta.
+
+/** Poziom 1 — kierunek na lata. Jeden. Nie ma przycisku zamknięcia. */
+export const CEL_LABEL = 'Cel';
+
+/** Poziom 2 — `goals`. To, co ogranicza zawodnika teraz. */
+export const GARDLO_LABEL = 'Wąskie gardło';
+export const GARDLO_LABEL_D = 'wąskiego gardła';
+export const GARDLO_LABEL_B = 'wąskie gardło';
+export const GARDLO_LABEL_PL = 'Wąskie gardła';
+export const GARDLO_LABEL_PL_D = 'wąskich gardeł';
+
+/** Poziom 3 — `focus_blocks`. 4–8 tygodni intensyfikacji. */
+export const BLOK_LABEL = 'Blok';
+export const BLOK_LABEL_D = 'Bloku';
+export const BLOK_LABEL_PL = 'Bloki';
+
+/**
+ * Brzmienia przycisków rozdzielające odpowiedzialność (sekcja 2 decyzji).
+ * `GARDLO_STOP_LABEL` jest WYJŚCIEM AWARYJNYM, nie główną drogą — główną jest
+ * rediagnoza przy zamknięciu Bloku. Dlatego ma być wizualnie drugorzędny.
+ */
+export const BLOK_CLOSE_LABEL = 'Zamknij Blok';
+export const GARDLO_STOP_LABEL = 'Już nad tym nie pracuję';
+export const GARDLO_DONE_LABEL = 'Ukończone';
+
+/** Odznaki w historii. „Porzucony" musiał zniknąć — patrz nagłówek sekcji. */
+export const GARDLO_BADGE_DONE = 'Ukończone';
+export const GARDLO_BADGE_CLOSED = 'Zamknięte';
+
+/** Tytuł ekranu `app/(tabs)/cele.tsx`. Nazwa PLIKU i trasy zostaje. */
+export const GARDLA_SCREEN_TITLE = 'Wąskie gardła';
+
+// ─────────────────────────────────────────────────────────────
 // 13 SEGMENTÓW
 // ─────────────────────────────────────────────────────────────
 
@@ -164,3 +223,81 @@ export const BODY_LOCATION_LABELS: Record<string, string> = Object.fromEntries(B
 
 /** Lokalizacje, przy których pytanie o stronę (lewa/prawa) nie ma sensu. */
 export const NON_LATERAL_LOCATIONS = new Set(['plecy_kregoslup', 'brzuch_tulow', 'inne']);
+
+// ─────────────────────────────────────────────────────────────
+// PLAN-D-E 08.2026 (11.08.2026) — PUNKT POMOCY
+// ─────────────────────────────────────────────────────────────
+// Podstawa: `claude/R2a_SCIEZKA_ESKALACJI_KRYZYS_11_08_2026.md`.
+// Komponent: `components/PunktPomocy.tsx`.
+//
+// ⚠️ BRZMIENIE `POMOC_PRAWDA` JEST PRZYJĘTE PRZEZ KUBĘ 11.08.2026 I NIE WOLNO
+// GO ZMIENIAĆ ANI SKRACAĆ. Nie jest to tekst marketingowy — to jest jedyne
+// miejsce, w którym produkt mówi nastolatkowi prawdę o tym, że nikt nie czyta
+// jego wpisów na bieżąco. Produkt, który sprawia wrażenie, że ktoś patrzy,
+// tworzy fałszywe poleganie: dziecko czeka na reakcję, która nigdy nie nadejdzie.
+//
+// Te stałe siedzą tutaj, a nie w komponencie, z tego samego powodu co nazwy
+// segmentów: brzmienia widoczne dla zawodnika mają jedno źródło, żeby nie dało
+// się ich rozjechać na dwóch ekranach.
+
+/** Etykieta stałej pigułki dostępnej z ekranu. NIE jest brzmieniem przyjętym — patrz raport E, sekcja 8. */
+export const POMOC_PRZYCISK = 'Potrzebuję pomocy';
+
+export const POMOC_TYTUL = 'Kiedy potrzebujesz człowieka';
+
+/** PRZYJĘTE PRZEZ KUBĘ 11.08.2026. Co do znaku. */
+export const POMOC_PRAWDA =
+  'Nikt nie czyta tego, co tu wpisujesz, na bieżąco. Ta aplikacja nie jest pogotowiem i nie zastąpi człowieka. '
+  + 'Nikt nie zostanie o niczym automatycznie powiadomiony — ani Twój rodzic, ani trener. '
+  + 'Jeśli dzieje się coś, z czym nie chcesz być sam, tu są ludzie, którzy odbierają o każdej porze: '
+  + '116 111 · 800 12 12 12 · 112';
+
+export type KanalPomocy = {
+  numer: string;
+  opis: string;
+  /** Link `tel:` — numer ma być klikalny, nie do przepisania z ekranu o 23:00. */
+  tel: string;
+  czat: string | null;
+  czatLabel: string | null;
+};
+
+export const POMOC_KANALY: KanalPomocy[] = [
+  {
+    numer: '116 111',
+    opis: 'Telefon zaufania dla dzieci i młodzieży. Całodobowo, bezpłatnie, anonimowo. Telefon albo czat na 116111.pl.',
+    tel: 'tel:116111',
+    czat: 'https://116111.pl',
+    czatLabel: 'Czat 116111.pl',
+  },
+  {
+    numer: '800 12 12 12',
+    opis: 'Rzecznik Praw Dziecka. Całodobowo. Telefon albo czat na czat.brpd.gov.pl, bez logowania.',
+    tel: 'tel:800121212',
+    czat: 'https://czat.brpd.gov.pl',
+    czatLabel: 'Czat brpd.gov.pl',
+  },
+  {
+    numer: '112',
+    opis: 'Numer alarmowy. Wtedy, gdy komuś dzieje się krzywda teraz.',
+    tel: 'tel:112',
+    czat: null,
+    czatLabel: null,
+  },
+];
+
+/**
+ * Zdanie zamykające. Powtarza najważniejszą rzecz z ekranu prawdy w miejscu,
+ * w którym zawodnik podejmuje decyzję o dotknięciu przycisku: to nic nie
+ * uruchamia i nikogo nie wzywa.
+ */
+export const POMOC_STOPKA =
+  'Otwarcie tego ekranu i wybranie numeru nie zapisuje się nigdzie w Twoim koncie i nikogo nie powiadamia.';
+
+export const POMOC_ZAMKNIJ = 'Zamknij';
+
+/**
+ * Podpis nazwanego wejścia do punktu pomocy w zakładce „Ja" (PLAN-D-E 12.08.2026).
+ * Wymienia numery, bo wiersz w menu ma powiedzieć, co jest po drugiej stronie,
+ * zanim zawodnik go dotknie.
+ */
+export const POMOC_WIERSZ_PODPIS = '116 111 · 800 12 12 12 · 112 — całodobowo, bezpłatnie, anonimowo';

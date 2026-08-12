@@ -56,8 +56,9 @@ export function pickBlockSessionToConfirm(
 /** Pytanie przy sesji z dziś vs z poprzednich dni — inne brzmienie, ta sama decyzja. */
 export function blockSessionQuestion(session: LinkableCalendarEvent, todayStr: string): string {
   return session.scheduled_date === todayStr
-    ? 'Czy to był ten trening z Twojego Bloku Skupienia?'
-    : 'Czy to był Twój trening z Bloku Skupienia z ostatnich dni?';
+    // PLAN-D-A 08.2026 — słownik trzech poziomów: dla zawodnika to jest BLOK.
+    ? 'Czy to był ten trening z Twojego Bloku?'
+    : 'Czy to był Twój trening z Bloku z ostatnich dni?';
 }
 
 export const BLOCK_LINK_YES_LABEL = 'Tak, to ten';

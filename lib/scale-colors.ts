@@ -22,6 +22,12 @@
 //   zmiany barwy. Otwarte pytanie z planu (czy wysokie RPE+zmęczenie razem powinny
 //   się czerwienić jako ostrzeżenie przed przetrenowaniem) pozostaje nierozstrzygnięte
 //   — ta funkcja realizuje na razie ustalony, neutralny wariant domyślny.
+// W1: 08.2026 — wartości czterech barw gradientu przestroiły się razem
+// z tokenami (lib/theme.ts, koncepcja identyfikacji 08.2026): error=#DE3D5B
+// (karmazyn, NIE koral marki), warning=#F2933D, caution=#E8C33F,
+// success=#3DC97E; neutralIntensityColor używa nowego brand=#EE5342.
+// Sygnatury czterech funkcji i WSZYSTKIE progi (w tym sen 7h,
+// zsynchronizowany z silnikiem rekomendacji) — bez zmian.
 import { colors } from '../constants/theme';
 
 function hexToRgb(hex: string): [number, number, number] {

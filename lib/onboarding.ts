@@ -12,6 +12,33 @@
 // wiersz player_profiles jeszcze nie istniał (brand new user, jeszcze nigdy
 // nie zapisał Profilu).
 import { supabase } from './supabase';
+import { postOnboardingTarget, type PostOnboardingTarget } from './postOnboardingTarget';
+
+// ONBOARDING R8 08.08.2026 (przegląd całości 4.2) — dokąd prowadzi ostatni
+// ekran onboardingu: wynik diagnozy (jeśli jest), założenie Celu (jeśli nie
+// ma), ekran domowy (jeśli nie wiemy — błąd odczytu; reguła R5, uzasadnienie
+// w lib/postOnboardingTarget.ts). Filtr „ukończonej diagnozy" jest ten sam,
+// którym ekran Diagnoza rozpoznaje wynik (event=email_submitted + scores) —
+// dzięki temu nigdy nie wysyłamy zawodnika na ekran, który pokaże pustkę.
+export async function getPostOnboardingTarget(userId: string): Promise<PostOnboardingTarget> {
+  try {
+    const { data, error } = await supabase
+      .from('diagnostics')
+      .select('created_at')
+      .eq('user_id', userId)
+      .eq('event', 'email_submitted')
+      .not('scores', 'is', null)
+      .limit(1);
+    if (error) {
+      console.warn('onboarding: nie udało się sprawdzić diagnozy pod cel nawigacji (leci /dzis):', error.message);
+      return postOnboardingTarget(null);
+    }
+    return postOnboardingTarget((data?.length ?? 0) > 0);
+  } catch (e) {
+    console.warn('onboarding: nie udało się sprawdzić diagnozy pod cel nawigacji (leci /dzis):', e);
+    return postOnboardingTarget(null);
+  }
+}
 
 export async function getOnboardingSeen(userId: string): Promise<boolean> {
   try {

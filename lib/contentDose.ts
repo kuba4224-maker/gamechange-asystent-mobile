@@ -284,10 +284,10 @@ export function parseContentDoses(raw: unknown): ContentDoseParse {
 // więc zamiast ryzykować — dwanaście napisów. Skutek uboczny jest pożądany:
 // selftest sprawdza tę datę deterministycznie, niezależnie od tego, jakie ICU
 // ma piaskownica.
-const MONTHS_GENITIVE = [
-  'stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca',
-  'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia',
-];
+// PORZADEK R9 08.08.2026 (M26/B37) — lista przeniesiona do lib/date-utils.ts
+// (MONTHS_GENITIVE_PL), żeby słownik miesięcy istniał w JEDNYM miejscu; tu
+// zostaje alias, więc zachowanie i selftest są bajt w bajt te same.
+import { MONTHS_GENITIVE_PL as MONTHS_GENITIVE } from './date-utils';
 
 /** „z 8 sierpnia" albo `null`, gdy daty nie ma / jest nieczytelna. */
 export function contentDoseDateLabel(iso: string | null | undefined): string | null {

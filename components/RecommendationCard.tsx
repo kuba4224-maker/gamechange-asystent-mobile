@@ -195,15 +195,20 @@ export default function RecommendationCard({
         </Text>
       ) : (
         <>
+          {/* W1: 08.2026 — hierarchia przycisków z koncepcji (komponent 2):
+              „Wykonałem" = primary (jedyny primary na ekranie),
+              „Nie wykonałem" = ghost — RÓWNORZĘDNY, uczciwa odpowiedź bez kary,
+              „Nie miało to sensu" = quiet. Wysokości identyczne (minTouchHeight),
+              więc rachunek zgięcia z rundy 3 bez zmian. */}
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.secondaryBtn} disabled={submitting} onPress={() => submit(primaryLabels.firstValue)}>
-              <Text style={styles.secondaryBtnText}>{primaryLabels.first}</Text>
+            <TouchableOpacity style={styles.primaryBtn} disabled={submitting} onPress={() => submit(primaryLabels.firstValue)}>
+              <Text style={styles.primaryBtnText}>{primaryLabels.first}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryBtn} disabled={submitting} onPress={() => submit(primaryLabels.secondValue)}>
               <Text style={styles.secondaryBtnText}>{primaryLabels.second}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.secondaryBtn, commentVisible && styles.secondaryBtnActive]} onPress={toggleComment}>
-              <Text style={styles.secondaryBtnText}>Nie miało to sensu</Text>
+            <TouchableOpacity style={[styles.quietBtn, commentVisible && styles.secondaryBtnActive]} onPress={toggleComment}>
+              <Text style={styles.quietBtnText}>Nie miało to sensu</Text>
             </TouchableOpacity>
           </View>
           {commentVisible && (
@@ -257,7 +262,15 @@ const styles = StyleSheet.create({
   dateLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 10, marginTop: 6 },
   feedbackGiven: { fontSize: 13, color: colors.textSecondary, fontStyle: 'italic' },
   actionsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  secondaryBtn: { paddingVertical: 10, paddingHorizontal: 18, minHeight: minTouchHeight, justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md },
+  // W1: 08.2026 — trzy rangi przycisków z koncepcji. Primary = wypełniony
+  // kolorem marki (marka to DZIAŁANIE); ghost = obrys, ta sama godność;
+  // quiet = sam tekst. Wysokości identyczne — zero wpływu na progi zgięcia.
+  primaryBtn: { paddingVertical: 10, paddingHorizontal: 18, minHeight: minTouchHeight, justifyContent: 'center', backgroundColor: colors.brand, borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md },
+  primaryBtnText: { ...typography.bodySemiBold, fontSize: 13, color: colors.white, letterSpacing: 0.5 },
+  quietBtn: { paddingVertical: 10, paddingHorizontal: 10, minHeight: minTouchHeight, justifyContent: 'center', borderWidth: 1, borderColor: 'transparent', borderRadius: radii.md },
+  quietBtnText: { ...typography.bodyMedium, fontSize: 13, color: colors.textSecondary, letterSpacing: 0.5 },
+  // W1: ghost — obrys czytelny na karcie (ink3, ≥3:1), tło przezroczyste
+  secondaryBtn: { paddingVertical: 10, paddingHorizontal: 18, minHeight: minTouchHeight, justifyContent: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.textTertiary, borderRadius: radii.md },
   // JEDNA DROGA B2 08.08.2026 — widoczny stan wciśnięcia „Nie miało to sensu",
   // skoro przycisk jest teraz przełącznikiem, a nie akcją jednokierunkową.
   secondaryBtnActive: { borderColor: colors.brand },

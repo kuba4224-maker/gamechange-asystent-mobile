@@ -32,6 +32,22 @@ import {
   BODY_LOCATIONS,
   BODY_LOCATION_LABELS,
   NON_LATERAL_LOCATIONS,
+  // PLAN-D-A 08.2026 — słownik trzech poziomów (asercje na końcu pliku).
+  CEL_LABEL,
+  GARDLO_LABEL,
+  GARDLO_LABEL_D,
+  GARDLO_LABEL_B,
+  GARDLO_LABEL_PL,
+  GARDLO_LABEL_PL_D,
+  BLOK_LABEL,
+  BLOK_LABEL_D,
+  BLOK_LABEL_PL,
+  BLOK_CLOSE_LABEL,
+  GARDLO_STOP_LABEL,
+  GARDLO_DONE_LABEL,
+  GARDLO_BADGE_DONE,
+  GARDLO_BADGE_CLOSED,
+  GARDLA_SCREEN_TITLE,
 } from './labels';
 
 let passed = 0;
@@ -40,6 +56,18 @@ function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
 }
+
+// PLAN-D-E 08.2026 — porównanie dwóch brzmień, celowo przez parametry typu
+// `string`. Stałe z `lib/labels.ts` mają typy LITERAŁOWE, więc `A !== B`
+// pisane wprost jest dla TypeScriptu porównaniem dwóch różnych literałów
+// i `npx tsc --noEmit` zgłaszał tu osiem razy TS2367 („comparison appears to
+// be unintentional").
+//
+// ⚠️ TA ASERCJA NIE JEST BEZCELOWA, mimo co mówi TypeScript. Pilnuje sytuacji,
+// w której ktoś zrobi dwa brzmienia IDENTYCZNYMI — a wtedy typy się pokryją,
+// TS2367 zniknie sam i jedyną rzeczą, która to złapie, będzie ten test.
+// Przepuszczenie przez `string` zdejmuje szum, nie zdejmując sprawdzenia.
+function rozne(a: string, b: string): boolean { return a !== b; }
 
 // ─── 13 segmentów ───
 check('13 segmentów w SEGMENT_ORDER', SEGMENT_ORDER.length === 13, String(SEGMENT_ORDER.length));
@@ -103,7 +131,10 @@ check('Każdy segment ma filar',
   SEGMENT_ORDER.filter((id) => !SEGMENT_PILLAR[id]).join(', '));
 check('Picker pokazuje nową nazwę w Filarze 4',
   SEGMENTS_BY_PILLAR.find(([p]) => p.startsWith('Filar 4'))?.[1]
-    .some(([id, name]) => id === 'mental' && name === 'Odwaga w grze'),
+    // PLAN-D-E 08.2026 — `=== true` dopisane: `?.` daje `boolean | undefined`,
+    // a `check` bierze `boolean` (TS2345). Brak Filaru 4 to `undefined`,
+    // czyli od teraz jawnie FAIL — i tak być powinno.
+    .some(([id, name]) => id === 'mental' && name === 'Odwaga w grze') === true,
   JSON.stringify(SEGMENTS_BY_PILLAR.find(([p]) => p.startsWith('Filar 4'))));
 
 // ─── Odwrót na surowe id ───
@@ -119,6 +150,105 @@ check('BODY_LOCATION_LABELS zgodne z BODY_LOCATIONS',
 check('Każda lokalizacja bez strony (lewa/prawa) istnieje na liście lokalizacji',
   Array.from(NON_LATERAL_LOCATIONS).every((id) => BODY_LOCATIONS.some(([bid]) => bid === id)),
   Array.from(NON_LATERAL_LOCATIONS).join(', '));
+
+// ═══════════════════════════════════════════════════════════════
+// PLAN-D-A 08.2026 (11.08.2026) — SŁOWNIK TRZECH POZIOMÓW
+//
+// Decyzja Kuby z 10.08.2026: CEL (lata, jeden) · WĄSKIE GARDŁO (miesiące) ·
+// BLOK (4–8 tygodni). Do tej daty produkt mówił „Cel" na dwie różne rzeczy
+// naraz, a trzecia nazywała się „Blok Skupienia".
+//
+// PO CO TE ASERCJE. Zmiana nazw wygląda na najbezpieczniejszą rzecz w całym
+// projekcie i właśnie dlatego jest groźna: nikt jej nie testuje, a cofnąć ją
+// można jedną literą przy okazji zupełnie innej pracy. Trzy rzeczy, które
+// muszą zostać prawdziwe:
+//   1. słowo „Porzuć" NIE WRACA — zawodnik nie porzuca niczego;
+//   2. „Blok Skupienia" NIE WRACA — to nazwa, której nikt nie używa w rozmowie;
+//   3. słowo „Cel" zostaje WYŁĄCZNIE dla poziomu 1 — moment, w którym wróci
+//      do `goals`, jest momentem, w którym cały słownik przestaje działać.
+// ═══════════════════════════════════════════════════════════════
+
+const POZIOMY: [string, string][] = [
+  ['CEL_LABEL', CEL_LABEL],
+  ['GARDLO_LABEL', GARDLO_LABEL],
+  ['GARDLO_LABEL_D', GARDLO_LABEL_D],
+  ['GARDLO_LABEL_B', GARDLO_LABEL_B],
+  ['GARDLO_LABEL_PL', GARDLO_LABEL_PL],
+  ['GARDLO_LABEL_PL_D', GARDLO_LABEL_PL_D],
+  ['BLOK_LABEL', BLOK_LABEL],
+  ['BLOK_LABEL_D', BLOK_LABEL_D],
+  ['BLOK_LABEL_PL', BLOK_LABEL_PL],
+  ['BLOK_CLOSE_LABEL', BLOK_CLOSE_LABEL],
+  ['GARDLO_STOP_LABEL', GARDLO_STOP_LABEL],
+  ['GARDLO_DONE_LABEL', GARDLO_DONE_LABEL],
+  ['GARDLO_BADGE_DONE', GARDLO_BADGE_DONE],
+  ['GARDLO_BADGE_CLOSED', GARDLO_BADGE_CLOSED],
+  ['GARDLA_SCREEN_TITLE', GARDLA_SCREEN_TITLE],
+];
+
+// ─── Nic nie jest puste ───
+check('żadne brzmienie słownika nie jest puste',
+  POZIOMY.every(([, v]) => typeof v === 'string' && v.trim().length > 0),
+  POZIOMY.filter(([, v]) => !v || !v.trim()).map(([k]) => k).join(', ') || 'ok');
+
+// ─── Zakaz 1: „Porzuć" znika z produktu ───
+check('ani jedno brzmienie nie zawiera „Porzuć"/„Porzucony"',
+  POZIOMY.every(([, v]) => !/porzu/i.test(v)),
+  POZIOMY.filter(([, v]) => /porzu/i.test(v)).map(([k, v]) => `${k}="${v}"`).join(', ') || 'ok');
+check('odznaka statusu abandoned NIE brzmi „Porzucony"',
+  rozne(GARDLO_BADGE_CLOSED, 'Porzucony'), GARDLO_BADGE_CLOSED);
+
+// ─── Zakaz 2: „Blok Skupienia" znika z produktu ───
+check('ani jedno brzmienie nie zawiera „Blok Skupienia"',
+  POZIOMY.every(([, v]) => !/Blok\w*\s+Skupienia/i.test(v)),
+  POZIOMY.filter(([, v]) => /Skupienia/i.test(v)).map(([k]) => k).join(', ') || 'ok');
+
+// ─── Zakaz 3: słowo „Cel" należy WYŁĄCZNIE do poziomu 1 ───
+// To jest najważniejsza asercja w tej sekcji. Jeśli „Cel" wróci do brzmień
+// opisujących `goals` albo `focus_blocks`, zawodnik znowu zobaczy jedno słowo
+// w dwóch znaczeniach — czyli dokładnie to, co ta decyzja miała usunąć.
+check('„Cel" pada TYLKO w CEL_LABEL, w żadnym brzmieniu wąskiego gardła ani Bloku',
+  POZIOMY.filter(([k]) => k !== 'CEL_LABEL').every(([, v]) => !/\bcel/i.test(v)),
+  POZIOMY.filter(([k, v]) => k !== 'CEL_LABEL' && /\bcel/i.test(v)).map(([k, v]) => `${k}="${v}"`).join(', ') || 'ok');
+check('CEL_LABEL to dokładnie „Cel" — kierunek na lata, jeden',
+  CEL_LABEL === 'Cel', CEL_LABEL);
+
+// ─── Trzy poziomy są od siebie odróżnialne ───
+check('CEL, WĄSKIE GARDŁO i BLOK to trzy RÓŻNE słowa',
+  new Set([CEL_LABEL, GARDLO_LABEL, BLOK_LABEL]).size === 3,
+  [CEL_LABEL, GARDLO_LABEL, BLOK_LABEL].join(' / '));
+check('WĄSKIE GARDŁO to „Wąskie gardło"', GARDLO_LABEL === 'Wąskie gardło', GARDLO_LABEL);
+check('BLOK to „Blok" — bez przymiotnika', BLOK_LABEL === 'Blok', BLOK_LABEL);
+
+// ─── Odmiana jest wypisana, nie sklejana ───
+// Polskiego dopełniacza nie da się wyprowadzić z mianownika regułą, której ktoś
+// później nie odczyta — dlatego formy stoją w pliku osobno. Ta asercja łapie
+// najczęstszą pomyłkę przy dopisywaniu: skopiowanie mianownika w miejsce odmiany.
+check('dopełniacz liczby pojedynczej różni się od mianownika',
+  rozne(GARDLO_LABEL_D, GARDLO_LABEL), `${GARDLO_LABEL} / ${GARDLO_LABEL_D}`);
+check('liczba mnoga różni się od pojedynczej',
+  rozne(GARDLO_LABEL_PL, GARDLO_LABEL), `${GARDLO_LABEL} / ${GARDLO_LABEL_PL}`);
+check('dopełniacz liczby mnogiej różni się od mianownika mnogiego',
+  rozne(GARDLO_LABEL_PL_D, GARDLO_LABEL_PL), `${GARDLO_LABEL_PL} / ${GARDLO_LABEL_PL_D}`);
+check('dopełniacz Bloku różni się od mianownika',
+  rozne(BLOK_LABEL_D, BLOK_LABEL), `${BLOK_LABEL} / ${BLOK_LABEL_D}`);
+check('wszystkie formy wąskiego gardła mówią o gardle',
+  [GARDLO_LABEL, GARDLO_LABEL_D, GARDLO_LABEL_B, GARDLO_LABEL_PL, GARDLO_LABEL_PL_D]
+    .every((v) => /gard/i.test(v)), 'rozjazd form');
+
+// ─── Przyciski rozdzielają odpowiedzialność (sekcja 2 decyzji) ───
+check('przycisk zamknięcia Bloku mówi o Bloku', /blok/i.test(BLOK_CLOSE_LABEL), BLOK_CLOSE_LABEL);
+check('wyjście awaryjne z wąskiego gardła NIE mówi o Bloku (to inny poziom)',
+  !/blok/i.test(GARDLO_STOP_LABEL), GARDLO_STOP_LABEL);
+check('dwa wyjścia z wąskiego gardła to dwa RÓŻNE brzmienia',
+  rozne(GARDLO_DONE_LABEL, GARDLO_STOP_LABEL), `${GARDLO_DONE_LABEL} / ${GARDLO_STOP_LABEL}`);
+check('odznaki w historii są rozróżnialne',
+  rozne(GARDLO_BADGE_DONE, GARDLO_BADGE_CLOSED), `${GARDLO_BADGE_DONE} / ${GARDLO_BADGE_CLOSED}`);
+
+// ─── Tytuł ekranu ───
+check('tytuł ekranu to liczba mnoga wąskich gardeł',
+  GARDLA_SCREEN_TITLE === GARDLO_LABEL_PL, `${GARDLA_SCREEN_TITLE} / ${GARDLO_LABEL_PL}`);
+check('tytuł ekranu NIE brzmi już „Cele"', rozne(GARDLA_SCREEN_TITLE, 'Cele'), GARDLA_SCREEN_TITLE);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 // Celowo `throw`, a nie `process.exit(1)`: `process` wymaga `@types/node`,

@@ -28,6 +28,10 @@ import {
   minimumPossibleAge,
   passesAgeGate,
   isForPlayer,
+  ADULT_MIN_AGE,
+  isAdultLowerBound,
+  isParentReferralRow,
+  audienceAllowsPlayer,
   formatHintSource,
   selectHintsForPlayer,
   pickHintOfDay,
@@ -170,6 +174,29 @@ check('Odbiorca: „rodzic" nie trafia do zawodnika',
 check('Odbiorca: „zawodnik" i „oba" trafiają',
   isForPlayer({ odbiorca: 'zawodnik' }) && isForPlayer({ odbiorca: 'oba' }), 'nie trafiają');
 
+// ─── DOROSŁY R11 — „18+ = własny rodzic" ───
+check('R11: dolna granica 18 dowodzi pełnoletności, 17 nie, null nie (fail-closed)',
+  isAdultLowerBound(18) && isAdultLowerBound(25) && !isAdultLowerBound(17) && !isAdultLowerBound(null),
+  `${isAdultLowerBound(18)}/${isAdultLowerBound(17)}/${isAdultLowerBound(null)}`);
+check('R11: ADULT_MIN_AGE = 18 (pełnoletność, nie inna liczba)',
+  ADULT_MIN_AGE === 18, String(ADULT_MIN_AGE));
+check('R11: rocznik 2008 w 2026 → dolna granica 17 → warstwa rodzica JESZCZE nie wchodzi '
+  + '(ten sam konserwatyzm co bramka A9)',
+  !isAdultLowerBound(minimumPossibleAge(2008, NOW)), String(minimumPossibleAge(2008, NOW)));
+check('R11: rocznik 2007 w 2026 → dolna granica 18 → pełnoletność PEWNA',
+  isAdultLowerBound(minimumPossibleAge(2007, NOW)), String(minimumPossibleAge(2007, NOW)));
+check('R11: `rodzic` u dorosłego przechodzi filtr odbiorcy, u 17-latka i przy nieznanym wieku NIE',
+  audienceAllowsPlayer({ odbiorca: 'rodzic' }, 18)
+  && !audienceAllowsPlayer({ odbiorca: 'rodzic' }, 17)
+  && !audienceAllowsPlayer({ odbiorca: 'rodzic' }, null), 'routing dorosłego przecieka');
+check('R11: `zawodnik` i `oba` przechodzą niezależnie od wieku (nic nie zabrano)',
+  audienceAllowsPlayer({ odbiorca: 'zawodnik' }, null) && audienceAllowsPlayer({ odbiorca: 'oba' }, 13),
+  'dawny odbiorca przestał przechodzić');
+check('R11: tekst systemowy A9 („ustal z rodzicem") jest rozpoznawany po `zrodlo`',
+  isParentReferralRow({ zrodlo: 'decyzja A9 (tekst systemowy — nie z materiału)' })
+  && !isParentReferralRow({ zrodlo: 'Moc — System Gamechange (pełny)' })
+  && !isParentReferralRow({ zrodlo: null }), 'rozpoznanie odesłania nie działa');
+
 // ═════════════════════════════════════════════════════════════
 // 3. ŹRÓDŁO — to, co odróżnia podpowiedź od tekstu dowolnego modelu
 // ═════════════════════════════════════════════════════════════
@@ -214,6 +241,20 @@ check('Źródło: brak `zrodlo` → null',
   check('Pula przy NIEZNANYM wieku = ta sama co u 14-latka (bramka zamknięta)',
     JSON.stringify(unknownAge.map((r) => r.klucz)) === JSON.stringify(forFourteen.map((r) => r.klucz)),
     JSON.stringify(unknownAge.map((r) => r.klucz)));
+
+  // ─── DOROSŁY R11 na pełnej puli ───
+  const forAdult = selectHintsForPlayer({ rows, age: 18, componentId: null });
+  check('R11: pula DOROSŁEGO zawiera dawkę z warstwy rodzica (regeneracja-segment-08)',
+    forAdult.some((r) => r.klucz === 'regeneracja-segment-08'), JSON.stringify(forAdult.map((r) => r.klucz)));
+  check('R11: pula dorosłego NIE zawiera odesłania „ustal z rodzicem" (regeneracja-segment-07) '
+    + '— u dorosłego to zdanie fałszywe i stałoby obok właściwej dawki',
+    !forAdult.some((r) => r.klucz === 'regeneracja-segment-07'), JSON.stringify(forAdult.map((r) => r.klucz)));
+  check('R11: pula dorosłego = oddech + dawka zawodnika 16+ + dawka z warstwy rodzica (3 wiersze)',
+    forAdult.length === 3, JSON.stringify(forAdult.map((r) => r.klucz)));
+  check('R11: u 17-latka (dolna granica) NIC się nie zmieniło — rodzic nie wchodzi, odesłanie zostaje',
+    JSON.stringify(selectHintsForPlayer({ rows, age: 17, componentId: null }).map((r) => r.klucz))
+    === JSON.stringify(selectHintsForPlayer({ rows, age: 16, componentId: null }).map((r) => r.klucz)),
+    'pula 17-latka rozjechała się z pulą 16-latka');
 }
 
 {
@@ -350,9 +391,13 @@ check('Etykieta rodzaju: „zrobic" → „Do zrobienia", „zrozumiec" → „W
   check('B6/A9: ta sama dawka U 16-LATKA przechodzi — bramka działa w obie strony, nie blokuje wszystkiego',
     buildHintState({ hasGoal: true, error: null, rows: [ALWAYS_WITH_AGE_GATE], age: 16, day: 0 })
       .alwaysVisible.length === 1, 'zablokowana');
-  check('B6: `zawsze_widoczna` NIE OMIJA filtru odbiorcy — treść dla rodzica nie trafia do zawodnika',
-    buildHintState({ hasGoal: true, error: null, rows: [ALWAYS_FOR_PARENT], age: 20, day: 0 })
+  check('B6: `zawsze_widoczna` NIE OMIJA filtru odbiorcy — treść dla rodzica nie trafia do NIELETNIEGO '
+    + '(R11: u dorosłego wejście warstwy rodzica jest CELOWE, więc własność sprawdzamy na 15-latku)',
+    buildHintState({ hasGoal: true, error: null, rows: [ALWAYS_FOR_PARENT], age: 15, day: 0 })
       .alwaysVisible.length === 0, 'przeszła');
+  check('B6/R11: ta sama treść dla rodzica U DOROSŁEGO wchodzi — przez zwykły filtr, nie przez obejście',
+    buildHintState({ hasGoal: true, error: null, rows: [ALWAYS_FOR_PARENT], age: 20, day: 0 })
+      .alwaysVisible.length === 1, 'nie weszła');
   check('B6: `zawsze_widoczna` NIE OMIJA `active=false`',
     buildHintState({ hasGoal: true, error: null, rows: [ALWAYS_INACTIVE], age: 20, day: 0 })
       .alwaysVisible.length === 0, 'przeszła');
@@ -441,6 +486,7 @@ console.log('\n─── CO ZAWODNIK REALNIE ZOBACZY (segment Celu: Regeneracja)
 for (const c of [
   { label: '14 lat (rocznik 2011), Cel: Regeneracja', age: minimumPossibleAge(2011, NOW), rows: CASE_ROWS, hasGoal: true },
   { label: '17 lat (rocznik 2008), Cel: Regeneracja', age: minimumPossibleAge(2008, NOW), rows: CASE_ROWS, hasGoal: true },
+  { label: '18 lat (rocznik 2007) — DOROSŁY, Cel: Regeneracja (R11)', age: minimumPossibleAge(2007, NOW), rows: CASE_ROWS, hasGoal: true },
   { label: 'wiek nieznany (pusty rocznik), Cel: Regeneracja', age: null, rows: CASE_ROWS, hasGoal: true },
   { label: 'bez Celu', age: 20, rows: CASE_ROWS, hasGoal: false },
 ]) {
@@ -465,6 +511,14 @@ for (const c of [
   const dawki = ['regeneracja-segment-08', 'test-dawka-dla-zawodnika-16plus'];
   check('\nA9 KONTROLA KOŃCOWA: 14-latek nie widzi ŻADNEJ dawki',
     forFourteen.every((r) => !dawki.includes(r.klucz)), JSON.stringify(forFourteen.map((r) => r.klucz)));
+}
+// I lustrzana kontrola R11: dorosły widzi obie dawki, a odesłanie do rodzica znika.
+{
+  const forAdult = selectHintsForPlayer({ rows: CASE_ROWS, age: minimumPossibleAge(2007, NOW) });
+  const klucze = forAdult.map((r) => r.klucz);
+  check('R11 KONTROLA KOŃCOWA: dorosły widzi OBIE dawki i NIE widzi „ustal z rodzicem"',
+    klucze.includes('regeneracja-segment-08') && klucze.includes('test-dawka-dla-zawodnika-16plus')
+    && !klucze.includes('regeneracja-segment-07'), JSON.stringify(klucze));
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -497,20 +551,27 @@ for (const c of [
   ];
   const GATE_14 = ['fx-01-zawodnik-bez-wieku', 'fx-06-element-celu', 'fx-07-obszar', 'fx-08-inny-element', 'fx-09-niedopasowany'];
   const GATE_16 = [...GATE_14, 'fx-02-zawodnik-16plus', 'fx-03-oba-16plus', 'fx-11-zawodnik-16plus-el'];
+  // DOROSŁY R11 (fixture v3): pełnoletni dostaje dodatkowo warstwę rodzica.
+  const GATE_18 = [...GATE_16, 'fx-04-rodzic-16plus', 'fx-05-rodzic-bez-wieku'];
   const FX_CASES: { przypadek: string; birthYear: number | null; ageLowerBound: number | null; przechodza: string[]; ukryte: number }[] = [
     { przypadek: 'rocznik 2011 (wiek 14)', birthYear: 2011, ageLowerBound: 14, przechodza: GATE_14, ukryte: 3 },
     { przypadek: 'rocznik 2009 (wiek 16)', birthYear: 2009, ageLowerBound: 16, przechodza: GATE_16, ukryte: 0 },
+    { przypadek: 'rocznik 2007 (wiek 18 — dorosły)', birthYear: 2007, ageLowerBound: 18, przechodza: GATE_18, ukryte: 0 },
     { przypadek: 'rocznik nieznany (null)', birthYear: null, ageLowerBound: null, przechodza: GATE_14, ukryte: 3 },
   ];
+  // Ta sama droga co `selectHintsForPlayer`: odbiorca Z WIEKIEM (R11) + odesłania
+  // A9 wyjęte u dorosłego + bramka A9. Wiersze fixture'u mają `zrodlo: 'M'`,
+  // więc filtr odesłań niczego tu nie zmienia — pilnuje go osobna asercja wyżej.
   const brama = (age: number | null) =>
-    FX_ROWS.filter((r) => r.active !== false && isForPlayer(r) && passesAgeGate(r, age));
+    FX_ROWS.filter((r) => r.active !== false && audienceAllowsPlayer(r, age)
+      && !(isAdultLowerBound(age) && isParentReferralRow(r)) && passesAgeGate(r, age));
   for (const c of FX_CASES) {
     const age = minimumPossibleAge(c.birthYear, FX_NOW);
     check(`A9-KONTRAKT ageLowerBound (${c.przypadek})`, age === c.ageLowerBound, String(age));
     const pass = brama(age).map((r) => r.klucz).sort();
     check(`A9-KONTRAKT zbiór przepuszczonych (${c.przypadek})`,
       JSON.stringify(pass) === JSON.stringify([...c.przechodza].sort()), JSON.stringify(pass));
-    const ukryte = FX_ROWS.filter((r) => r.active !== false && isForPlayer(r)
+    const ukryte = FX_ROWS.filter((r) => r.active !== false && audienceAllowsPlayer(r, age)
       && r.min_age != null && !passesAgeGate(r, age)).length;
     check(`A9-KONTRAKT ukryte z powodu wieku = ${c.ukryte} (${c.przypadek})`, ukryte === c.ukryte, String(ukryte));
   }
@@ -529,9 +590,22 @@ for (const c of [
       JSON.stringify(dif) === JSON.stringify(['fx-02-zawodnik-16plus', 'fx-03-oba-16plus', 'fx-11-zawodnik-16plus-el']),
       JSON.stringify(dif));
   }
+  {
+    // DOROSŁY R11 (fixture v3): różnica 18-latek vs 16-latek to DOKŁADNIE warstwa rodzica.
+    const dif = brama(18).map((r) => r.klucz).filter((k) => !brama(16).map((r) => r.klucz).includes(k)).sort();
+    check('R11-KONTRAKT: dorosły dostaje DOKŁADNIE dwa wiersze więcej niż 16-latek i są to te '
+      + 'z odbiorca=rodzic (różnica zbiorów)',
+      JSON.stringify(dif) === JSON.stringify(['fx-04-rodzic-16plus', 'fx-05-rodzic-bez-wieku']),
+      JSON.stringify(dif));
+    check('R11-KONTRAKT: 17-latek (rocznik 2008) NIE dostaje warstwy rodzica — pełnoletność musi być pewna',
+      JSON.stringify(brama(minimumPossibleAge(2008, FX_NOW)).map((r) => r.klucz).sort())
+      === JSON.stringify([...GATE_16].sort()),
+      JSON.stringify(brama(minimumPossibleAge(2008, FX_NOW)).map((r) => r.klucz)));
+  }
   // Pomiar OSOBNYM logiem, wypisywany zawsze (zasada 14 / wzorzec B32):
-  console.log(`[pomiar] A9-KONTRAKT v2: bramka przepuszcza ${brama(14).length}/11 (wiek 14 i nieznany), `
-    + `${brama(16).length}/11 (wiek 16); ukryte z powodu wieku 3/3/0; zgodne ze stroną JS (50 scenariuszy).`);
+  console.log(`[pomiar] A9-KONTRAKT v3 (R11): bramka przepuszcza ${brama(14).length}/11 (wiek 14 i nieznany), `
+    + `${brama(16).length}/11 (wiek 16), ${brama(18).length}/11 (wiek 18 — dorosły); `
+    + 'ukryte z powodu wieku 3/3/0/0; zgodne ze stroną JS (test-bramka-a9-kontrakt.js).');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

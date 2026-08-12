@@ -1,4 +1,13 @@
-// Ekran CELE — Krok 7 checklisty. Implementacja wg docs/KONTRAKT_CELE.md.
+// Ekran WĄSKIE GARDŁA (plik i trasa nadal `cele` — nazwy plików i tras
+// świadomie bez zmian). Krok 7 checklisty, implementacja wg docs/KONTRAKT_CELE.md.
+//
+// ⚠️ PLAN-D-A 08.2026 — SŁOWNIK TRZECH POZIOMÓW. Ten ekran pokazuje POZIOM 2:
+// `goals` = WĄSKIE GARDŁO (miesiące). Poziom 1 (CEL, lata, jeden) to blok
+// „Twój Cel" u góry, czytany z `player_profiles.goal_direction`. Poziom 3
+// (BLOK, 4–8 tygodni) renderuje się w karcie wąskiego gardła.
+// Wszystkie komentarze niżej pisane przed 11.08.2026 mówią „Cel" tam, gdzie
+// dziś jest „wąskie gardło" — zostawione jako zapis, jak było, zgodnie z zakazem
+// przepisywania historii. Kod i teksty na ekranie są już w nowym słowniku.
 //
 // AUDYT 27.07.2026: `useEffect` -> `useFocusEffect` + `RefreshControl` — patrz
 // uzasadnienie w app/(tabs)/dziennik.tsx.
@@ -58,27 +67,38 @@
 // ogólna etykieta wg `origin`) i formatuje zdanie. Karta pokazywała dotąd samo
 // `refinement_note` bez etykiety — czyli notatkę bez informacji, czyja jest.
 // Cel zasugerowany przez trenera wyglądał tak samo jak wybrany samodzielnie.
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+// SCROLL R13 08.08.2026 — parametry trasy z deep-linku dawki (pushDeepLink.ts).
+import { useLocalSearchParams } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import Checkbox from 'expo-checkbox';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { toLocalDateStr, formatDatePl } from '../../lib/date-utils';
-import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
+import { colors, typography, spacing, radii, minTouchHeight, skew } from '../../constants/theme';
 // JEDNA DROGA B2 08.08.2026 — jedno źródło nazw segmentów i filarów.
 import {
   SEGMENT_LABELS,
   SEGMENT_PILLAR,
   SEGMENTS_BY_PILLAR as SEGMENTS_BY_PILLAR_SHARED,
+  // PLAN-D-A 08.2026 — słownik trzech poziomów (CEL / WĄSKIE GARDŁO / BLOK).
+  GARDLA_SCREEN_TITLE,
+  GARDLO_BADGE_DONE,
+  GARDLO_BADGE_CLOSED,
+  GARDLO_DONE_LABEL,
+  GARDLO_STOP_LABEL,
 } from '../../lib/labels';
 import FocusBlockPlanner from '../../components/FocusBlockPlanner';
 import FocusBlockActiveView from '../../components/FocusBlockActiveView';
 // WIEDZA B4 08.08.2026 — dług N1: `goal-prominence.ts` odzyskuje konsumenta
 // produkcyjnego. Patrz nagłówek pliku.
 import { goalOriginContext } from '../../lib/goal-prominence';
+// SCROLL R13 08.08.2026 — czysta decyzja „czy i dokąd przewinąć" po wejściu
+// z pusha o nowej dawce ('/cele?dawka=1&fb=…'); selftest: lib/doseScroll.selftest.ts.
+import { doseScrollY, firstParam } from '../../lib/doseScroll';
 
 // JEDNA DROGA B2 08.08.2026 — lokalne kopie nazw segmentów i podziału na filary
 // usunięte; jedno źródło to lib/labels.ts. Aliasy poniżej zachowują dotychczasowe
@@ -161,10 +181,61 @@ export default function CeleScreen() {
   const [directionContext, setDirectionContext] = useState<{ label: string; note: string | null } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
-  // --- Tor 7 Krok 5a: Blok Skupienia — który cel jest właśnie planowany +
-  // filary z już aktywnym Blokiem (egzekwowanie limitu w UI, patrz nagłówek pliku) ---
+  // --- Tor 7 Krok 5a: Blok — które wąskie gardło jest właśnie planowane +
+  // otwarte Bloki zawodnika ---
+  //
+  // PLAN-D-A 08.2026 — MAPA KLUCZOWANA PO SEGMENCIE, NIE PO FILARZE.
+  // Do 10.08.2026 baza miała `one_active_focus_block_per_pillar`, więc jeden
+  // filar = najwyżej jeden Blok i mapa po filarze była wierna. Migracja A2
+  // z 10.08.2026 usunęła ten indeks i założyła
+  // `one_active_focus_block_per_segment` — od tej chwili zawodnik MOŻE mieć
+  // dwa Bloki w jednym filarze (np. „Koncentracja" i „Odwaga w grze").
+  // Mapa po filarze cicho gubiłaby jeden z nich (`Map.set` nadpisuje) i mogła
+  // pokazać Blok z segmentu A pod wąskim gardłem z segmentu B — czyli
+  // zawodnik widziałby CUDZĄ pracę pod swoim tematem, bez żadnego błędu.
+  // Klucz po `segment_id` jest też zgodny z `lib/focusBlockProgress.ts`,
+  // które wiąże Blok z Celem po segmencie od początku.
   const [planningGoalId, setPlanningGoalId] = useState<number | null>(null);
-  const [activeBlocksByPillar, setActiveBlocksByPillar] = useState<Map<string, ActiveFocusBlock>>(new Map());
+  const [activeBlocksBySegment, setActiveBlocksBySegment] = useState<Map<string, ActiveFocusBlock>>(new Map());
+
+  // ── SCROLL R13 08.08.2026 — auto-scroll do karty Bloku z nową dawką ──
+  // Push z dawką prowadzi na '/cele?dawka=1&fb=<id Bloku>' (lib/pushDeepLink.ts).
+  // Ekran mierzy pozycje kart z aktywnym Blokiem (onLayout) i sekcji „Aktywne
+  // cele", a czysta funkcja doseScrollY() rozstrzyga, czy i dokąd przewinąć —
+  // w tym przypadki „karta jeszcze niezmierzona" i „fb nieznany" (wtedy NIE
+  // ruszamy ekranu; scroll do złej karty jest gorszy niż brak scrolla).
+  // Jeden skok na jedno wejście (klucz dawka|fb w doseScrollDoneRef).
+  const doseParams = useLocalSearchParams<{ dawka?: string | string[]; fb?: string | string[] }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const [activeSectionY, setActiveSectionY] = useState(0);
+  const [blockCardYs, setBlockCardYs] = useState<Map<string, number>>(new Map());
+  const doseScrollDoneRef = useRef<string | null>(null);
+
+  const registerBlockCardY = useCallback((blockId: string, y: number) => {
+    setBlockCardYs((prev) => {
+      if (prev.get(blockId) === y) return prev; // bez pętli renderów
+      const next = new Map(prev);
+      next.set(blockId, y);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const dawka = firstParam(doseParams.dawka);
+    const fb = firstParam(doseParams.fb);
+    if (dawka !== '1') return;
+    const key = `${dawka}|${fb ?? ''}`;
+    if (doseScrollDoneRef.current === key) return;
+    // Pozycje kart są względem sekcji „Aktywne cele" — do współrzędnych
+    // ScrollView dodajemy y samej sekcji. Dokładność co do kilku pikseli
+    // wystarcza: chodzi o to, żeby karta z dawką była na ekranie.
+    const absolute = new Map<string, number>();
+    for (const [id, y] of blockCardYs) absolute.set(id, activeSectionY + y);
+    const target = doseScrollY({ dawka, fb, cardYByBlockId: absolute });
+    if (target === null) return; // np. layout jeszcze nie spłynął — spróbujemy po kolejnym pomiarze
+    doseScrollDoneRef.current = key;
+    scrollRef.current?.scrollTo({ y: target, animated: true });
+  }, [doseParams.dawka, doseParams.fb, blockCardYs, activeSectionY]);
 
   // --- Baza Składowych Segmentów: Obszar → Element → "opisz sam" (Tor 7 Krok 4) ---
   const [obszary, setObszary] = useState<SegmentComponent[]>([]);
@@ -279,7 +350,7 @@ export default function CeleScreen() {
     } catch (e: any) {
       // Miękka bramka w duchu całego mechanizmu: brak możliwości sprawdzenia
       // NIE blokuje zapisania celu — appka po prostu nie pokaże podpowiedzi.
-      setValidationError('Nie udało się sprawdzić opisu teraz — możesz mimo to zapisać cel.');
+      setValidationError('Nie udało się sprawdzić opisu teraz — możesz mimo to zapisać.');
       setValidation(null);
     } finally {
       setValidating(false);
@@ -346,9 +417,10 @@ export default function CeleScreen() {
     await loadGoalDirectionContext(rows);
   }, [currentUser, loadGoalDirectionContext]);
 
-  // Tor 7 Krok 5a — filary, w których zawodnik ma już aktywny Blok Skupienia
-  // (patrz nagłówek pliku). Ładowane obok celów, tym samym rytmem odświeżania.
-  const loadActiveBlockPillars = useCallback(async () => {
+  // Tor 7 Krok 5a — otwarte Bloki zawodnika, kluczowane po SEGMENCIE
+  // (PLAN-D-A 08.2026, uzasadnienie przy `activeBlocksBySegment` wyżej).
+  // Ładowane obok wąskich gardeł, tym samym rytmem odświeżania.
+  const loadActiveBlocks = useCallback(async () => {
     if (!currentUser) return;
     // Tor 7 Krok 5b: pełne wiersze (nie tylko `pillar`), żeby móc pokazać
     // żywy FocusBlockActiveView zamiast samego tekstu blokady. Embedding
@@ -360,11 +432,20 @@ export default function CeleScreen() {
       .select('id, user_id, segment_id, component_id, custom_description, pillar, status, stage, sessions_per_week, target_weeks, started_at, closed_at, segment_components(name)')
       .eq('user_id', currentUser.id)
       .eq('status', 'active');
-    if (err) return; // cichy fallback — w najgorszym razie UI nie pokaże blokady wcześnie, baza i tak wymusi limit
+    // PLAN-D-A 08.2026 — reguła R5 („pustka wymaga jawnego stanu «nie wiem»").
+    // Dotychczas błąd odczytu dawał pustą mapę, nieodróżnialną od „zawodnik
+    // nie ma żadnego Bloku" — a wtedy ekran POKAZUJE przycisk „Zaplanuj Blok"
+    // i zawodnik dociera do końca przepływu, żeby dostać błąd zapisu. Nie
+    // pokazujemy tego zawodnikowi (to nie jest jego problem), ale mówimy
+    // wprost w logu i NIE czyścimy poprzedniego stanu mapy.
+    if (err) {
+      console.warn('[gardla] Nie udało się odczytać otwartych Bloków — ekran pokazuje stan sprzed odświeżenia:', err.message);
+      return;
+    }
     const rows = (data ?? []) as any[];
-    const byPillar = new Map<string, ActiveFocusBlock>();
+    const bySegment = new Map<string, ActiveFocusBlock>();
     rows.forEach((r) => {
-      byPillar.set(r.pillar, {
+      bySegment.set(r.segment_id, {
         id: r.id, user_id: r.user_id, segment_id: r.segment_id, component_id: r.component_id,
         custom_description: r.custom_description, pillar: r.pillar, status: r.status, stage: r.stage,
         sessions_per_week: r.sessions_per_week, target_weeks: r.target_weeks,
@@ -372,18 +453,18 @@ export default function CeleScreen() {
         elementLabel: r.custom_description ?? r.segment_components?.name ?? (SEG_LABELS[r.segment_id] ?? r.segment_id),
       });
     });
-    setActiveBlocksByPillar(byPillar);
+    setActiveBlocksBySegment(bySegment);
   }, [currentUser]);
 
   const [refreshing, setRefreshing] = useState(false);
 
-  useFocusEffect(useCallback(() => { loadGoals(); loadActiveBlockPillars(); }, [loadGoals, loadActiveBlockPillars]));
+  useFocusEffect(useCallback(() => { loadGoals(); loadActiveBlocks(); }, [loadGoals, loadActiveBlocks]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadGoals(), loadActiveBlockPillars()]);
+    await Promise.all([loadGoals(), loadActiveBlocks()]);
     setRefreshing(false);
-  }, [loadGoals, loadActiveBlockPillars]);
+  }, [loadGoals, loadActiveBlocks]);
 
   const patchGoal = async (id: number, fields: Record<string, any>) => {
     const { error: err } = await supabase.from('goals').update(fields).eq('id', id);
@@ -468,23 +549,24 @@ export default function CeleScreen() {
 
       if (insErr) {
         if ((insErr as any).code === '23505' || insErr.message?.includes('idx_goals_one_active_per_segment')) {
-          throw new Error('Masz już aktywny cel w tym segmencie — najpierw go zakończ (ukończony/porzucony), zanim dodasz nowy.');
+          // PLAN-D-A 08.2026 — bez słowa „porzucony".
+          throw new Error('Masz już aktywne wąskie gardło w tym segmencie — najpierw je zamknij, zanim dodasz nowe.');
         }
         throw insErr;
       }
 
-      setOk('Cel dodany.');
+      setOk('Wąskie gardło dodane.');
       resetRefinementFlow();
       loadObszary(segmentId);
       setHorizon(''); setIsPriority(false);
       await loadGoals();
     } catch (e: any) {
-      let message = 'Nie udało się dodać celu: ' + e.message;
+      let message = 'Nie udało się dodać wąskiego gardła: ' + e.message;
       if (prevPriority) {
         try {
           await patchGoal(prevPriority.id, { is_priority: true, priority_changed_at: new Date().toISOString() });
         } catch {
-          message += ' Dodatkowo nie udało się przywrócić poprzedniego priorytetu — sprawdź zakładkę Cele.';
+          message += ' Dodatkowo nie udało się przywrócić poprzedniego priorytetu — sprawdź listę wąskich gardeł.';
         }
       }
       setError(message);
@@ -516,16 +598,148 @@ export default function CeleScreen() {
     }
   };
 
-  const endGoal = async (goalId: number, status: 'completed' | 'abandoned') => {
-    setError(null);
+  // ════════════════════════════════════════════════════════════
+  // PLAN-D-A 08.2026 — ZAMKNIĘCIE IDZIE PRZEZ RPC `close_goal_with_blocks`
+  //
+  // CO SIĘ ZMIENIŁO WZGLĘDEM WERSJI Z 10.08.2026 (opis niżej zostaje jako
+  // zapis, co było zepsute i dlaczego). Poprzednia wersja robiła naprawę A1
+  // po stronie appki: `update goals` + osobne `update focus_blocks` po
+  // `segment_id`. Miała trzy wady, których nie da się naprawić w kliencie:
+  //
+  //  1. NIE BYŁA TRANSAKCJĄ. Między jednym a drugim zapytaniem zawodnik mógł
+  //     stracić sieć — i zostawał z zamkniętym wąskim gardłem i otwartym
+  //     Blokiem, czyli dokładnie w stanie A1.
+  //  2. WIĄZAŁA PO `segment_id`. Odczyt produkcyjny z 10.08.2026 pokazał, że
+  //     `focus_blocks` NIE MA kolumny `goal_id`, a jedyne prawdziwe wiązanie
+  //     idzie przez `calendar_events` (12 z 12 wierszy ma oba klucze).
+  //     Wiązanie po segmencie trafia w większość przypadków i cicho pudłuje
+  //     w reszcie.
+  //  3. NIE ANULOWAŁA PRZYSZŁYCH WYDARZEŃ. Zawodnik dalej dostawał pushe
+  //     o pracy, którą zamknął.
+  //
+  // Funkcja `public.close_goal_with_blocks(goal, status)` wdrożona na
+  // produkcji 10.08.2026 (`security invoker`, `grant execute` dla
+  // `authenticated`) robi wszystkie trzy rzeczy w jednej transakcji i sama
+  // ustawia `focus_blocks.closed_at` (kolumna nazywa się `closed_at`, NIE
+  // `ended_at` — asymetria wobec `goals.ended_at` jest celowa i potwierdzona
+  // odczytem schematu).
+  //
+  // ⛔ ZAKAZ ŚCIEŻKI ODZYSKU. Gdy RPC nie istnieje (42883 / PGRST202), NIE
+  // wracamy po cichu do `update goals` — to odtworzyłoby defekt A1 i zrobiło
+  // go niewidocznym po raz drugi. Mówimy zawodnikowi, że się nie udało,
+  // i zostawiamy w logu zdanie, po którym da się rozpoznać brak migracji.
+  //
+  // ⚠️ `p_goal_id` PRZEKAZUJEMY BEZ KONWERSJI — dokładnie tę wartość, którą
+  // zwróciła baza w `goals.id`. Typ w tym pliku mówi `number`, a podpis
+  // funkcji spisany 10.08.2026 mówi `uuid`; jedno z tych dwóch jest nieaktualne
+  // i tej sesji nie wolno wykonywać SQL, żeby rozstrzygnąć które. Przekazanie
+  // wartości bez dotykania jej jest jedynym wariantem poprawnym w OBU
+  // przypadkach. Sprawdzenie dla Kuby: raport PLAN-D-A, sekcja 8.
+  //
+  // ── zapis stanu sprzed tej zmiany ──
+  // NAPRAWA A1 — 10.08.2026
+  //
+  // CO BYŁO ZŁE. Ta funkcja zmieniała WYŁĄCZNIE wiersz w `goals` i nie
+  // dotykała `focus_blocks` ani razu. Zawodnik klikał „Ukończony", a jego
+  // Blok Skupienia zostawał w bazie ze statusem `active` — i jednocześnie
+  // ZNIKAŁ z ekranu, bo karta renderuje Blok tylko przy Celu
+  // `status === 'active'` (patrz `hostedBlock` w `renderGoalCard`).
+  // Skutki, wszystkie nieodwracalne z poziomu appki:
+  //   • `loadActiveBlockPillars()` dalej ładował ten Blok, więc filar
+  //     zostawał ZAJĘTY — nowy Cel w tej samej kategorii nigdy nie dostawał
+  //     przycisku „Zaplanuj pracę nad tym celem";
+  //   • pod nowym Celem wyświetlał się osierocony Blok od poprzedniego;
+  //   • `api/cron-send-notifications.js` bierze wszystkie bloki `active`
+  //     bez wiedzy o Celu i dalej wysyłał pushe o pracy, którą zawodnik
+  //     już zamknął.
+  // Jedno dotknięcie przycisku stojącego wprost na karcie Celu, obok
+  // „Ustaw priorytet", wyłączało pracę w całym filarze — bez słowa
+  // komunikatu. Najpoważniejsze znalezisko audytu ścieżki z 09.08.2026
+  // (pozycja A1) i prawdopodobna przyczyna incydentu z rotacją celu z 08.08.
+  //
+  // DLACZEGO PO `segment_id`, A NIE PO `pillar`. Mapa `activeBlocksByPillar`
+  // kluczuje Bloki po FILARZE, ale `lib/focusBlockProgress.ts` wiąże je po
+  // SEGMENCIE — i to drugie jest właściwe (wiązanie po filarze jest osobną
+  // wadą, znalezisko A2 tego samego audytu). Zamykamy więc wyłącznie Blok
+  // TEGO segmentu, żeby nie zamknąć cudzego Bloku z tego samego filaru.
+  //
+  // STATUS BLOKU jest lustrem statusu Celu — ten sam słownik, którego używa
+  // `components/FocusBlockActiveView.tsx` przy ręcznym zamykaniu.
+  // ════════════════════════════════════════════════════════════
+  // Liczba z odpowiedzi RPC, która NIE UDAJE zera. Funkcja może zwrócić liczbę
+  // albo tablicę identyfikatorów (kontrakt spisany słownie, nie sprawdzony
+  // odczytem) — oba kształty czytamy, a wszystko inne daje `null`, czyli
+  // „nie wiem", i wtedy po prostu nie mówimy zawodnikowi zdania o Blokach.
+  const liczbaZOdpowiedzi = (v: unknown): number | null => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (Array.isArray(v)) return v.length;
+    return null;
+  };
+
+  const endGoal = async (goalId: Goal['id'], status: 'completed' | 'abandoned') => {
+    if (!currentUser) return;
+    setError(null); setOk(null);
     try {
-      const goal = goals.find((g) => g.id === goalId);
-      const fields: Record<string, any> = { status, ended_at: new Date().toISOString() };
-      if (goal?.is_priority) fields.is_priority = false;
-      await patchGoal(goalId, fields);
+      const { data, error: rpcErr } = await supabase.rpc('close_goal_with_blocks', {
+        p_goal_id: goalId,          // bez konwersji — patrz nagłówek funkcji
+        p_new_status: status,       // 'completed' albo 'abandoned'
+      });
+
+      if (rpcErr || !(data as any)?.ok) {
+        const code = (rpcErr as any)?.code;
+
+        // PLAN-D-A 08.2026 — ODMOWA Z POWODEM TO NIE AWARIA.
+        // Funkcja zwraca `{ok:false, powod:'…'}`, gdy wąskie gardło już nie
+        // jest aktywne (np. zawodnik zamknął je na drugim urządzeniu albo
+        // dotknął przycisku dwa razy). To NIE jest błąd i nie ma sensu kazać
+        // mu „spróbować ponownie" — druga próba da dokładnie to samo.
+        // ⚠️ `powod` jest napisany dla programisty i mówi „cel"; na ekran idzie
+        // zdanie w słowniku produktu, surowy tekst z bazy zostaje w logu.
+        if (!rpcErr && (data as any)?.powod) {
+          console.warn('[gardla] close_goal_with_blocks odmówiło z powodem:', (data as any).powod);
+          await loadGoals();
+          await loadActiveBlocks();
+          setError('To wąskie gardło jest już zamknięte — odświeżyłem listę.');
+          return;
+        }
+
+        if (code === '42883' || code === 'PGRST202') {
+          // Brak migracji, nie awaria sieci. To jest jedyne miejsce, w którym
+          // ta różnica jest widoczna — bez tego logu wygląda jak losowy błąd.
+          console.error(
+            '[gardla] Funkcja close_goal_with_blocks nie istnieje w bazie (kod ' + code + '). '
+            + 'Migracja A1 z 10.08.2026 NIE weszła albo ma inny typ parametru p_goal_id. '
+            + 'ŚWIADOMIE nie wracamy do zapisu po stronie appki — to odtworzyłoby defekt A1 '
+            + '(zamknięte wąskie gardło, otwarty Blok, zajęty segment).'
+          );
+        } else {
+          console.error('[gardla] close_goal_with_blocks zwróciło błąd:', rpcErr?.message ?? JSON.stringify(data));
+        }
+        setError('Nie udało się zamknąć. Spróbuj ponownie.');
+        return;
+      }
+
       await loadGoals();
+      // BEZ TEJ LINII mapa Bloków zostaje nieaktualna do następnego wejścia
+      // na ekran i przycisk planowania nadal się nie pokazuje — czyli objaw
+      // A1 przeżywa własną naprawę.
+      await loadActiveBlocks();
+
+      // Zawodnik ma wiedzieć, że zamknął nie tylko wąskie gardło. Zdanie
+      // powstaje TYLKO z liczb, które faktycznie przyszły — brak liczby nie
+      // zamienia się w „0", bo „0 Bloków" i „nie wiadomo ile" to dwie różne
+      // informacje, a pierwsza bywa nieprawdą.
+      const bloki = liczbaZOdpowiedzi((data as any).bloki);
+      const wydarzenia = liczbaZOdpowiedzi((data as any).anulowane_wydarzenia);
+      const czesci: string[] = [];
+      if (bloki && bloki > 0) czesci.push(bloki === 1 ? 'zamknięty 1 Blok' : `zamknięte Bloki: ${bloki}`);
+      if (wydarzenia && wydarzenia > 0) czesci.push(`anulowane zaplanowane sesje: ${wydarzenia}`);
+      setOk(czesci.length > 0
+        ? `Zamknięte. Razem z nim: ${czesci.join(' · ')}.`
+        : 'Zamknięte.');
     } catch (e: any) {
-      setError('Nie udało się zaktualizować celu: ' + e.message);
+      console.error('[gardla] Wyjątek przy zamykaniu wąskiego gardła:', e?.message);
+      setError('Nie udało się zamknąć. Spróbuj ponownie.');
     }
   };
 
@@ -535,6 +749,10 @@ export default function CeleScreen() {
   const renderGoalCard = (g: Goal) => {
     const label = SEG_LABELS[g.segment_id] ?? g.segment_id;
     const pillar = SEG_PILLAR[g.segment_id] ?? '';
+    // SCROLL R13 — karta, która renderuje otwarty Blok tego SEGMENTU, melduje
+    // swoją pozycję (cel auto-scrolla po deep-linku dawki).
+    // PLAN-D-A 08.2026 — po segmencie, nie po filarze (patrz `activeBlocksBySegment`).
+    const hostedBlock = g.status === 'active' ? activeBlocksBySegment.get(g.segment_id) : undefined;
     // WIEDZA B4 08.08.2026 — dług N1, patrz nagłówek pliku.
     const originContext = goalOriginContext(g);
     const meta: string[] = [];
@@ -543,12 +761,20 @@ export default function CeleScreen() {
     if (g.ended_at) meta.push('zakończono: ' + formatDatePl(g.ended_at));
 
     return (
-      <View key={g.id} style={styles.card}>
+      <View
+        key={g.id}
+        style={[styles.card, g.status === 'active' && styles.cardActive]}
+        onLayout={hostedBlock ? (e) => registerBlockCardY(hostedBlock.id, e.nativeEvent.layout.y) : undefined}
+      >
+        {/* W1: krecha 12° na karcie AKTYWNEGO Celu (karta „to jest o Tobie");
+            historia bez krechy — zakończony Cel nie jest bieżącą tożsamością */}
+        {g.status === 'active' ? <View style={styles.cardStripe} /> : null}
         <View style={styles.cardTop}>
           <Text style={styles.cardSegment}>{label}</Text>
           {g.is_priority && g.status === 'active' && <Text style={styles.badgePriority}>Priorytet</Text>}
-          {g.status === 'completed' && <Text style={styles.badgeCompleted}>Ukończony</Text>}
-          {g.status === 'abandoned' && <Text style={styles.badgeAbandoned}>Porzucony</Text>}
+          {/* PLAN-D-A 08.2026 — „Porzucony" znika z produktu (decyzja Kuby). */}
+          {g.status === 'completed' && <Text style={styles.badgeCompleted}>{GARDLO_BADGE_DONE}</Text>}
+          {g.status === 'abandoned' && <Text style={styles.badgeAbandoned}>{GARDLO_BADGE_CLOSED}</Text>}
         </View>
         <Text style={styles.cardPillar}>{pillar}</Text>
         {/* WIEDZA B4 08.08.2026 — dług N1: kontekst „skąd się wziął ten Cel".
@@ -566,11 +792,18 @@ export default function CeleScreen() {
             <TouchableOpacity style={styles.actionBtn} onPress={() => togglePriority(g.id, !g.is_priority)}>
               <Text style={styles.actionBtnText}>{g.is_priority ? 'Zdejmij priorytet' : 'Ustaw priorytet'}</Text>
             </TouchableOpacity>
+            {/* PLAN-D-A 08.2026 — rozdzielenie odpowiedzialności (sekcja 2
+                decyzji o słowniku). „Porzuć" znika. Zostają dwa wyjścia
+                z wąskiego gardła i OBA są drugorzędne wizualnie: główną drogą
+                jest rediagnoza przy zamknięciu Bloku, nie ten przycisk.
+                Karta CELU (kierunek na lata) nie ma i nie dostaje żadnego
+                przycisku zamknięcia — Cel zmienia się tylko przez świadomą
+                rewizję kierunku. */}
             <TouchableOpacity style={styles.actionBtn} onPress={() => endGoal(g.id, 'completed')}>
-              <Text style={styles.actionBtnText}>Ukończony</Text>
+              <Text style={styles.actionBtnText}>{GARDLO_DONE_LABEL}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionBtn} onPress={() => endGoal(g.id, 'abandoned')}>
-              <Text style={styles.actionBtnText}>Porzuć</Text>
+              <Text style={styles.actionBtnText}>{GARDLO_STOP_LABEL}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -584,20 +817,20 @@ export default function CeleScreen() {
               onClose={() => setPlanningGoalId(null)}
               onCreated={() => {
                 setPlanningGoalId(null);
-                setOk('Blok Skupienia zaplanowany — sesje zobaczysz w Kalendarzu.');
-                loadActiveBlockPillars();
+                setOk('Blok zaplanowany — sesje zobaczysz w Kalendarzu.');
+                loadActiveBlocks();
               }}
             />
-          ) : activeBlocksByPillar.has(pillar) ? (
+          ) : hostedBlock ? (
             <FocusBlockActiveView
-              focusBlock={activeBlocksByPillar.get(pillar)!}
-              elementLabel={activeBlocksByPillar.get(pillar)!.elementLabel}
+              focusBlock={hostedBlock}
+              elementLabel={hostedBlock.elementLabel}
               currentUserId={currentUser.id}
-              onBlockClosed={loadActiveBlockPillars}
+              onBlockClosed={loadActiveBlocks}
             />
           ) : (
             <TouchableOpacity style={styles.focusBlockBtn} onPress={() => setPlanningGoalId(g.id)}>
-              <Text style={styles.focusBlockBtnText}>Zaplanuj pracę nad tym celem</Text>
+              <Text style={styles.focusBlockBtnText}>Zaplanuj Blok</Text>
             </TouchableOpacity>
           )
         )}
@@ -626,7 +859,7 @@ export default function CeleScreen() {
     }
     return (
       <View style={[styles.validationBox, styles.validationBoxHint]}>
-        <Text style={styles.validationHintText}>💡 {validation.hint ?? 'Spróbuj doprecyzować ten cel.'}</Text>
+        <Text style={styles.validationHintText}>💡 {validation.hint ?? 'Spróbuj to doprecyzować.'}</Text>
       </View>
     );
   };
@@ -731,21 +964,25 @@ export default function CeleScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
     <ScrollView
+      ref={scrollRef}
       contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
     >
-      <Text style={styles.title}>Cele</Text>
+      <Text style={styles.title}>{GARDLA_SCREEN_TITLE}</Text>
       {error && <Text style={styles.error}>{error}</Text>}
       {ok && <Text style={styles.ok}>{ok}</Text>}
 
       {directionContext && (
         <View style={styles.directionBlock}>
-          <Text style={styles.blockLabel}>Twój ogólny cel z Profilu</Text>
+          {/* PLAN-D-A 08.2026 — to jest CEL w nowym słowniku: kierunek na lata,
+              jeden, bez przycisku zamknięcia. Jedyne miejsce w tym ekranie,
+              w którym pada słowo „Cel". */}
+          <Text style={styles.blockLabel}>Twój Cel</Text>
           <Text style={styles.directionText}>
             {directionContext.label}{directionContext.note ? ` — „${directionContext.note}”` : ''}
           </Text>
           <Text style={styles.directionHint}>
-            Wybierz poniżej konkretny segment, którego to dotyczy — to on będzie śledzony jako Twój cel.
+            Wybierz niżej obszar, który najbardziej Cię dziś ogranicza — to będzie Twoje wąskie gardło.
           </Text>
         </View>
       )}
@@ -759,33 +996,33 @@ export default function CeleScreen() {
             ))}
           </Picker>
         </View>
-        <Text style={styles.label}>Doprecyzowanie celu (opcjonalnie)</Text>
+        <Text style={styles.label}>Doprecyzowanie (opcjonalnie)</Text>
         {renderRefinementFlow()}
         <Text style={[styles.label, { marginTop: 12 }]}>Horyzont (tygodnie, opcjonalnie)</Text>
         <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={horizon} onChangeText={setHorizon} placeholder="np. 8" />
         <TouchableOpacity style={styles.checkboxRow} onPress={() => setIsPriority((v) => !v)}>
           <Checkbox value={isPriority} onValueChange={setIsPriority} />
-          <Text style={styles.checkboxLabel}>Ustaw jako cel priorytetowy</Text>
+          <Text style={styles.checkboxLabel}>To jest teraz najważniejsze</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={createGoal}>
-          <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Dodaj cel'}</Text>
+          <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Dodaj wąskie gardło'}</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={{ marginTop: 24 }}>
-        <Text style={styles.sectionLabel}>Aktywne cele</Text>
-        {active.length === 0 && <Text style={styles.empty}>Brak aktywnych celów — dodaj pierwszy powyżej.</Text>}
+      <View style={{ marginTop: 24 }} onLayout={(e) => setActiveSectionY(e.nativeEvent.layout.y)}>
+        <Text style={styles.sectionLabel}>Nad czym pracujesz</Text>
+        {active.length === 0 && <Text style={styles.empty}>Nie masz teraz żadnego wąskiego gardła — dodaj pierwsze powyżej.</Text>}
         {active.map(renderGoalCard)}
       </View>
 
       <TouchableOpacity style={{ marginTop: 24 }} onPress={() => setShowHistory((v) => !v)}>
         <Text style={styles.sectionLabel}>
-          {showHistory ? '▾' : '▸'} Historia celów (ukończone / porzucone)
+          {showHistory ? '▾' : '▸'} Historia (ukończone / zamknięte)
         </Text>
       </TouchableOpacity>
       {showHistory && (
         <View style={{ marginTop: 4 }}>
-          {history.length === 0 && <Text style={styles.empty}>Brak zakończonych celów.</Text>}
+          {history.length === 0 && <Text style={styles.empty}>Nic tu jeszcze nie ma.</Text>}
           {history.map(renderGoalCard)}
         </View>
       )}
@@ -797,9 +1034,10 @@ export default function CeleScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 4 },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 12 },
-  blockLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 8 },
+  // W1: nadtytuły na ink3 (koncepcja: ink3 = podpisy, nadtytuły)
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 12 },
+  blockLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 8 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary },
   textarea: { minHeight: 60, textAlignVertical: 'top' },
   pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: 8 },
@@ -812,10 +1050,13 @@ const styles = StyleSheet.create({
   error: { color: colors.error, fontSize: 13, marginBottom: 12 },
   ok: { color: colors.success, fontSize: 13, marginBottom: 12 },
   empty: { textAlign: 'center', padding: 24, color: colors.textSecondary, fontSize: 14 },
-  directionBlock: { borderLeftWidth: 3, borderLeftColor: colors.brand, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 16, marginBottom: 16 },
+  directionBlock: { borderLeftWidth: 3, borderLeftColor: colors.brand, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 16, marginBottom: 16 }, // W1: świadomie prosta krecha — kontekst, nie hero
   directionText: { ...typography.body, fontSize: 14, color: colors.textPrimary },
   directionHint: { fontSize: 12, color: colors.textSecondary, marginTop: 8 },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 14, marginBottom: 10 },
+  // W1: wariant aktywnego Celu — miejsce na krechę 12°, wysokość bez zmian
+  cardActive: { paddingLeft: 22 },
+  cardStripe: { ...skew.stripe, left: 8, top: 14, height: 32, backgroundColor: colors.brand },
   cardTop: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 2 },
   cardSegment: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
   cardPillar: { fontSize: 11, color: colors.textSecondary, marginBottom: 8 },
@@ -825,8 +1066,9 @@ const styles = StyleSheet.create({
   // drugorzędny, bo to kontekst, a nie treść Celu.
   cardOrigin: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginBottom: 8 },
   cardMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 10 },
-  badgePriority: { fontSize: 11, backgroundColor: 'rgba(240,149,75,0.15)', color: colors.warning, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
-  badgeCompleted: { fontSize: 11, backgroundColor: 'rgba(76,175,107,0.15)', color: colors.success, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
+  // W1: tła odznak z tokenów (koniec rgba na sztywno)
+  badgePriority: { fontSize: 11, backgroundColor: colors.warnSoft, color: colors.warning, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
+  badgeCompleted: { fontSize: 11, backgroundColor: colors.okSoft, color: colors.success, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
   badgeAbandoned: { fontSize: 11, backgroundColor: colors.surfaceElevated, color: colors.textSecondary, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
   cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   actionBtn: { paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm },
@@ -835,14 +1077,14 @@ const styles = StyleSheet.create({
   listRow: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 8 },
   rowText: { ...typography.body, fontSize: 14, color: colors.textPrimary },
   rowEvidence: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  selectedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: 'rgba(232,67,45,0.08)', paddingVertical: 10, paddingHorizontal: 12, marginBottom: 4 },
+  selectedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: colors.brandSoft, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 4 }, // W1: token
   rowTextSelected: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, flexShrink: 1, marginRight: 8 },
   linkText: { color: colors.brand, fontSize: 13, ...typography.bodyMedium },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   hintText: { fontSize: 12, color: colors.textSecondary, marginBottom: 8 },
   validationBox: { marginTop: 8, padding: 10, borderRadius: radii.md, alignItems: 'flex-start' },
-  validationBoxOk: { backgroundColor: 'rgba(76,175,107,0.12)' },
-  validationBoxHint: { backgroundColor: 'rgba(240,149,75,0.12)' },
+  validationBoxOk: { backgroundColor: colors.okSoft }, // W1: token
+  validationBoxHint: { backgroundColor: colors.warnSoft }, // W1: token
   validationOkText: { fontSize: 13, color: colors.success },
   validationHintText: { fontSize: 13, color: colors.warning },
   validationErrorText: { fontSize: 12, color: colors.textSecondary, marginTop: 6 },

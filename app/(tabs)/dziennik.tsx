@@ -237,9 +237,66 @@ export default function DziennikScreen() {
         insertBody.calendar_event_id = Number(calendarLinkId);
       }
 
-      const { data: inserted, error: insErr } = await supabase.from('daily_logs').insert(insertBody).select();
-      if (insErr) throw insErr;
-      const dailyLogId = inserted?.[0]?.id;
+      // ════════════════════════════════════════════════════════════
+      // KONIEC DUBLOWANIA WPISU PORANNEGO — 10.08.2026
+      //
+      // Znalezione przy przejściu ścieżki na świeżym koncie (Kuba, 10.08.2026:
+      // dwa wpisy „Poranny" tego samego dnia, 15:46 i 15:47, oba zapisane).
+      // Do dziś ten ekran ZAWSZE robił `insert`, bez żadnego zabezpieczenia.
+      //
+      // Dlaczego to nie jest kosmetyka: `computeReadinessSignals()` w silniku
+      // rekomendacji oraz `api/generate-focus-block-dosing.js` liczą sygnały
+      // Gotowości właśnie z tych wierszy. Zdublowany poranek przekrzywia wynik,
+      // a zawodnik nie ma nawet jak zauważyć, że zdublował — formularz czyści
+      // się po zapisie i nigdy nie wczytuje dzisiejszego wpisu.
+      //
+      // DLACZEGO TYLKO PORANNY. Wpisów potreningowych w jednym dniu może być
+      // więcej niż jeden i to jest POPRAWNE — dwa treningi, dwa wpisy. Poranek
+      // z definicji jest jeden. Deduplikacja obejmuje więc wyłącznie
+      // `entry_type = 'morning'`.
+      //
+      // Baza na to pozwala: polityka `daily_logs_update_own` istnieje
+      // (potwierdzone odczytem `pg_policies` 09.08.2026).
+      // ════════════════════════════════════════════════════════════
+      let dailyLogId: number | undefined;
+      let updatedExisting = false;
+
+      if (entryType === 'morning') {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const { data: existing, error: exErr } = await supabase
+          .from('daily_logs')
+          .select('id')
+          .eq('user_id', currentUser.id)
+          .eq('entry_type', 'morning')
+          .gte('created_at', startOfDay.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1);
+        // Błąd samego SPRAWDZENIA nie blokuje zapisu — w najgorszym razie
+        // powstanie drugi wpis, czyli dokładnie to, co działo się dotąd.
+        // Cisza zamiast wpisu byłaby dla zawodnika gorsza niż duplikat.
+        if (!exErr && existing && existing.length > 0) {
+          dailyLogId = existing[0].id;
+          updatedExisting = true;
+        }
+      }
+
+      if (updatedExisting) {
+        const { error: updErr } = await supabase
+          .from('daily_logs')
+          .update({ payload })
+          .eq('id', dailyLogId);
+        if (updErr) throw updErr;
+        // Wpisy bólowe wiszą na `daily_log_id`, więc przy poprawianiu trzeba
+        // usunąć poprzedni, zanim wstawimy aktualny — inaczej zawodnik, który
+        // odznaczył ból, zostawiłby go w bazie na zawsze.
+        const { error: delErr } = await supabase.from('pain_entries').delete().eq('daily_log_id', dailyLogId);
+        if (delErr) throw new Error('Wpis zaktualizowany, ale nie udało się odświeżyć wpisu bólowego: ' + delErr.message);
+      } else {
+        const { data: inserted, error: insErr } = await supabase.from('daily_logs').insert(insertBody).select();
+        if (insErr) throw insErr;
+        dailyLogId = inserted?.[0]?.id;
+      }
 
       if (hasPain && dailyLogId) {
         const side = NON_LATERAL_LOCATIONS.has(painLocation) ? null : (painSide || null);
@@ -259,7 +316,11 @@ export default function DziennikScreen() {
       // wydarzenie ma `focus_block_id`, obojętnie czy przez pytanie, czy picker.
       const linkedToBlock = entryType === 'post_training' && !!calendarLinkId
         && !!calendarLinkOptions.find((o) => String(o.id) === calendarLinkId && o.focusBlockId);
-      setOk(journalSavedMessage(linkedToBlock));
+      // 10.08.2026 — gdy poprawiliśmy dzisiejszy wpis zamiast tworzyć nowy,
+      // mówimy to wprost. Brzmienie zatwierdzone przez Kubę. Wpis poranny nigdy
+      // nie zalicza sesji Bloku (to robi wyłącznie wpis potreningowy), więc ta
+      // gałąź nie potrzebuje wariantu z paskiem Celu.
+      setOk(updatedExisting ? 'Wpis zaktualizowany.' : journalSavedMessage(linkedToBlock));
       resetForm();
       await loadHistory();
     } catch (e: any) {
@@ -507,20 +568,22 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   toggleTxt: { ...typography.bodyMedium, fontSize: 14, color: colors.textPrimary },
   toggleTxtActive: { color: colors.white },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 4 },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: spacing.md },
+  // W1: nadtytuły na ink3 (koncepcja: ink3 = podpisy, nadtytuły)
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 },
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: spacing.md },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: spacing.sm, color: colors.textPrimary },
   textarea: { minHeight: 72, textAlignVertical: 'top' },
   pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: spacing.sm },
   // ZAPIS B7 08.08.2026 — pytanie o sesję Bloku (sedno rundy 7).
-  blockPromptBox: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: 'rgba(232,67,45,0.06)', padding: 12, marginBottom: spacing.sm },
+  // W1: tło z tokenu brandSofter zamiast rgba na sztywno (stary koral #E8432D)
+  blockPromptBox: { borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md, backgroundColor: colors.brandSofter, padding: 12, marginBottom: spacing.sm },
   blockPromptQuestion: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary, marginBottom: 4 },
   blockPromptSession: { ...typography.body, fontSize: 12, color: colors.textSecondary, marginBottom: 10 },
   blockPromptRow: { flexDirection: 'row', gap: 8 },
   blockPromptBtn: { flex: 1, minHeight: minTouchHeight, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface },
   blockPromptBtnTxt: { ...typography.bodyMedium, fontSize: 14, color: colors.textPrimary },
   blockPromptBtnYes: { backgroundColor: colors.brand, borderColor: colors.brand },
-  blockPromptBtnYesTxt: { ...typography.bodyMedium, fontSize: 14, color: '#fff' },
+  blockPromptBtnYesTxt: { ...typography.bodyMedium, fontSize: 14, color: colors.white }, // W1: token
   block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.md, marginVertical: spacing.md },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 10 },
   checkboxLabel: { ...typography.body, fontSize: 14, color: colors.textPrimary, flexShrink: 1 },

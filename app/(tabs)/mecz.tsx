@@ -664,8 +664,8 @@ export default function MeczScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 4 },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 14 },
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 }, // W1: ink3
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 14 }, // W1: ink3
   hint: { ...typography.body, fontSize: 12, color: colors.textSecondary, marginBottom: 10, lineHeight: 17 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary },
   textarea: { minHeight: 72, textAlignVertical: 'top' },
@@ -692,7 +692,11 @@ const styles = StyleSheet.create({
   historyDate: { fontSize: 12, color: colors.textSecondary },
   historyDetail: { ...typography.body, fontSize: 13, color: colors.textSecondary },
   segmentCard: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 16, marginBottom: 14 },
-  segmentLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.brand, marginBottom: 10 },
+  // WIZUAL-1 sekcja 8, decyzja Kuby 08.08.2026 — nadtytuł segmentu zszedł
+  // z koloru marki na ink3, czyli na to samo, czym są WSZYSTKIE pozostałe
+  // nadtytuły w tym pliku (`label`, `sectionLabel`). Nazwa segmentu to opis
+  // danych, nie akcja; marka zostaje przy tym, co da się nacisnąć.
+  segmentLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 10 },
   segmentQuestionText: { ...typography.bodyMedium, fontSize: 15, color: colors.textPrimary, marginBottom: 6, lineHeight: 21 },
   segmentCtxText: { ...typography.body, fontSize: 12, color: colors.textSecondary, marginBottom: 12, lineHeight: 17 },
   answerList: { gap: 8 },

@@ -229,7 +229,8 @@ export default function KalendarzScreen() {
       meta.push(new Date(e.scheduled_date + 'T00:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short', weekday: 'short' }));
     }
     if (e.recurrence_rule) meta.push(formatRecurrence(e.recurrence_rule));
-    if (goal) meta.push('cel: ' + (SEG_LABELS[goal.segment_id] || goal.segment_id));
+    // PLAN-D-A 08.2026 — `goals` to wąskie gardło, nie Cel.
+    if (goal) meta.push('wąskie gardło: ' + (SEG_LABELS[goal.segment_id] || goal.segment_id));
 
     return (
       <View key={e.id} style={styles.card}>
@@ -320,7 +321,7 @@ export default function KalendarzScreen() {
           </>
         )}
 
-        <Text style={styles.label}>Powiąż z celem (opcjonalnie)</Text>
+        <Text style={styles.label}>Powiąż z wąskim gardłem (opcjonalnie)</Text>
         <View style={styles.pickerWrap}>
           <Picker selectedValue={goalId} onValueChange={setGoalId}>
             <Picker.Item label="— nie dotyczy —" value="" />
@@ -378,8 +379,8 @@ export default function KalendarzScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 6, marginTop: 4 },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 12 },
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 }, // W1: ink3
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 12 }, // W1: ink3
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary, minHeight: minTouchHeight, justifyContent: 'center' },
   textarea: { minHeight: 72, textAlignVertical: 'top' },
   pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: 8 },
@@ -405,8 +406,9 @@ const styles = StyleSheet.create({
   cardNote: { ...typography.body, fontSize: 13, color: colors.textPrimary, marginBottom: 8 },
   cardMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 10 },
   badge: { fontSize: 11, letterSpacing: 0.5, marginLeft: 8, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
-  badgePriority: { backgroundColor: 'rgba(240,149,75,0.15)', color: colors.warning },
-  badgeCompleted: { backgroundColor: 'rgba(76,175,107,0.15)', color: colors.success },
+  // W1: tła odznak z tokenów (koniec rgba na sztywno; lib/theme.ts)
+  badgePriority: { backgroundColor: colors.warnSoft, color: colors.warning },
+  badgeCompleted: { backgroundColor: colors.okSoft, color: colors.success },
   badgeMuted: { backgroundColor: colors.surfaceElevated, color: colors.textSecondary },
   actionsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   secondaryBtn: { paddingVertical: 10, paddingHorizontal: 18, minHeight: minTouchHeight, justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, alignSelf: 'flex-start' },

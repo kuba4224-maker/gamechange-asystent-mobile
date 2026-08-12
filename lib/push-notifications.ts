@@ -18,7 +18,11 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Notifications from 'expo-notifications';
+// DEEPLINK R8 08.08.2026 — router do nawigacji po dotknięciu pusha z dawką;
+// decyzja dokąd (i czy w ogóle) mieszka w lib/pushDeepLink.ts (czysta funkcja).
+import { router } from 'expo-router';
 import { supabase } from './supabase';
+import { routeForPushData } from './pushDeepLink';
 import type { CurrentUser } from './auth-context';
 
 const PRIMING_DISMISSED_KEY = 'gc_push_priming_dismissed';
@@ -199,4 +203,41 @@ export function usePushRegistration(currentUser: CurrentUser | null) {
   }, []);
 
   return { showPriming, requestPermission, dismissPriming };
+}
+
+// DEEPLINK R8 08.08.2026 — dotknięcie pusha z NOWĄ dawką otwiera ekran Cele
+// (tam FocusBlockActiveView renderuje sekcję „Z materiałów do tego Bloku").
+// Kontrakt: raport C rundy 6, sekcja 12 — dyspozytor dokłada `contentDose`
+// do `data` od rundy 8, ten hook je czyta. Zwykłe pushe (bez dawki) NIE
+// nawigują — zachowanie systemowe bez zmian; decyzja per push w
+// lib/pushDeepLink.ts (czysta funkcja z selftestem).
+//
+// `enabled` MUSI być prawdziwe dopiero, gdy <Slot /> jest zamontowany
+// (sesja + profil + onboarding za nami) — router.push przed montażem
+// nawigatora zostałby zignorowany albo rzucił. Zimny start (push, który
+// OTWORZYŁ appkę) obsługuje getLastNotificationResponseAsync, z modułową
+// flagą, żeby ta sama odpowiedź nie nawigowała drugi raz po wylogowaniu
+// i zalogowaniu w tej samej sesji procesu.
+let coldStartHandled = false;
+
+export function usePushDeepLink(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled || isExpoGo) return;
+    let cancelled = false;
+
+    if (!coldStartHandled) {
+      coldStartHandled = true;
+      Notifications.getLastNotificationResponseAsync().then((resp) => {
+        if (cancelled || !resp) return;
+        const route = routeForPushData(resp.notification.request.content.data);
+        if (route) router.push(route);
+      }).catch(() => {});
+    }
+
+    const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
+      const route = routeForPushData(resp.notification.request.content.data);
+      if (route) router.push(route);
+    });
+    return () => { cancelled = true; sub.remove(); };
+  }, [enabled]);
 }

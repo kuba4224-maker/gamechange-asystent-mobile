@@ -1,6 +1,13 @@
 // ZMIANA OBRAZU B5 08.08.2026 — NOWY PLIK.
 // Stacja „Zmiana obrazu" — jedyna pusta stacja pętli od początku projektu.
-// Renderowana wewnątrz przeglądu zamknięcia Bloku Skupienia
+// ⚠️ PLAN-D-A 08.2026 — dla zawodnika ta rzecz nazywa się od teraz BLOK.
+// UWAGA: ten plik NIE zawiera ani jednego zdania widocznego dla zawodnika —
+// cała treść pochodzi z `lib/rediagnosis.ts` (`buildRediagnosisView`), który
+// leży POZA pasem tej sesji. Jeśli tam padają słowa „Blok Skupienia" albo
+// „Cel" w znaczeniu `goals`, zmiana nazw jest w tym miejscu NIEDOKOŃCZONA —
+// patrz raport PLAN-D-A, sekcja 4.
+//
+// Renderowana wewnątrz przeglądu zamknięcia Bloku
 // (components/FocusBlockActiveView.tsx), między podsumowaniem a pytaniem
 // „Co dalej?".
 //
@@ -30,7 +37,7 @@
 // przeglądzie, byłaby gorsza niż brak stacji.
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { colors, typography, spacing, radii, minTouchHeight } from '../constants/theme';
+import { colors, typography, spacing, radii, minTouchHeight, skew } from '../constants/theme';
 import { getPositionWordingKey } from '../lib/positionProfiles';
 import {
   buildRediagnosisView,
@@ -131,11 +138,37 @@ export default function BlockClosingRediagnosis({ userId, segmentId, blockStarte
     segmentId, baseline, answerValue: answer, skipped, saved, wordingKey, weeks, loading,
   });
 
+  // ════════════════════════════════════════════════════════════
+  // NAPRAWA A4c — 10.08.2026
+  //
+  // Nagłówek tego pliku obiecuje wprost, że `onResolved()` leci TAKŻE wtedy,
+  // gdy segment jest spoza banku pytań. Kod tej obietnicy nie realizował:
+  // `buildRediagnosisView` zwraca `{kind:'absent', reason:'unknown_segment'}`
+  // ZANIM w ogóle sprawdzi baseline, więc efekt wyżej nie wołał `resolve()`
+  // (bo `baseline.state` bywa wtedy `ready`), a render kończył się cichym
+  // `return null`.
+  //
+  // Skutek był poważny i całkowicie niewidoczny: `rediagnosisResolved`
+  // w `FocusBlockActiveView` zostawało `false`, więc trzy przyciski
+  // „Co dalej?" NIE POJAWIAŁY SIĘ NIGDY — a ekran przeglądu nie ma innego
+  // wyjścia. Zawodnik zostawał uwięziony na podsumowaniu własnego Bloku.
+  // Wystarczał jeden segment albo wariant pozycyjny bez wpisu w banku.
+  //
+  // Efekt, a nie wywołanie wprost w renderze — `resolve()` ustawia stan
+  // rodzica, więc w renderze byłaby to aktualizacja stanu podczas
+  // renderowania (ostrzeżenie Reacta i realne ryzyko pętli).
+  // ════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (view.kind === 'absent') resolve();
+  }, [view.kind, resolve]);
+
   if (view.kind === 'absent') return null;
 
   if (view.kind === 'question') {
     return (
       <View style={styles.wrap}>
+        {/* W1: krecha 12° */}
+        <View style={styles.wrapStripe} />
         <Text style={styles.eyebrow}>{view.eyebrow}  ·  {view.segmentName}</Text>
         <Text style={styles.lead}>{view.lead}</Text>
         <Text style={styles.question}>{view.question}</Text>
@@ -171,6 +204,8 @@ export default function BlockClosingRediagnosis({ userId, segmentId, blockStarte
   // punktacji i tu obowiązuje to samo. Zawodnik ma zobaczyć RUCH, nie wynik.
   return (
     <View style={styles.wrap}>
+      {/* W1: krecha 12° */}
+      <View style={styles.wrapStripe} />
       <Text style={styles.eyebrow}>{view.eyebrow}  ·  {view.segmentName}</Text>
 
       <View style={styles.barRow}>
@@ -196,12 +231,16 @@ export default function BlockClosingRediagnosis({ userId, segmentId, blockStarte
 const styles = StyleSheet.create({
   // Ta sama rodzina co karta rekomendacji i karta pulsu — zawodnik nie ma
   // rozpoznawać nowego rodzaju kafelka w momencie, w którym czyta o sobie.
+  // W1: prosta krecha borderLeft → krecha ŚCIĘTA 12° (karta „to jest o Tobie");
+  // absolutna, wysokość karty bez zmian. Paski przed/dziś ZOSTAJĄ w przygaszonej
+  // marce (wzorzec „bez oceny", jak RPE) i BEZ ścięcia — to dane, nie postęp.
   wrap: {
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-    borderLeftWidth: 4, borderLeftColor: colors.brand,
-    borderRadius: radii.md, padding: 16, marginTop: 12, marginBottom: 4,
+    borderRadius: radii.md, paddingVertical: 16, paddingLeft: 22, paddingRight: 16,
+    marginTop: 12, marginBottom: 4,
   },
-  eyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textSecondary, marginBottom: 10 },
+  wrapStripe: { ...skew.stripe, left: 8, top: 16, height: 36, backgroundColor: colors.brand },
+  eyebrow: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 10 }, // W1: ink3
   lead: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginBottom: 12 },
   question: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary, marginBottom: 6 },
   ctx: { ...typography.body, fontSize: 13, lineHeight: 18, color: colors.textSecondary, marginBottom: spacing.md },
