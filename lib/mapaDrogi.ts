@@ -35,6 +35,11 @@ import { isMissingTableError, minimumPossibleAge } from './componentHints';
 // 1. KSZTAŁT DANYCH — jeden do jednego z migracją osi decyzji
 // ─────────────────────────────────────────────────────────────────────
 
+// PLAN-D-J 08.2026 — stan nałożony przez arbitra (`mapaTylkoWTwoichRekach`,
+// `pokazacLiczbeSystemowa`). Mapa nigdy nie zabiera głosu, ale OBOWIĄZUJE ją
+// stan — to jest dokładnie rozróżnienie A1 ze specyfikacji.
+import { obowiazuje, type StanOgraniczen } from './ograniczenia';
+
 export type Wariant = 'base' | 'after_deselection' | 'witness';
 
 export type SilaDowodu = 'najwyzsza' | 'wysoka' | 'srednia' | 'posrednia' | 'brak';
@@ -216,6 +221,10 @@ export type OdcinekWidok =
     naJutro: RoadFactor;
     wTwoichRekach: RoadFactor[];
     tlo: RoadFactor[];
+    /** (J1/J2) Sekcja „Co jest tłem" zdjęta przez `mapaTylkoWTwoichRekach`, a nie pusta z braku treści. */
+    tloUkryte: boolean;
+    /** (J1/J2) Liczba systemowa dołożona przez `pokazacLiczbeSystemowa`; `null` = ograniczenie nie obowiązuje. */
+    liczbaSystemowa: string | null;
   }
   | {
     /**
@@ -229,8 +238,21 @@ export type OdcinekWidok =
     powod: string;
     wTwoichRekach: RoadFactor[];
     tlo: RoadFactor[];
+    tloUkryte: boolean;
+    liczbaSystemowa: string | null;
   }
   | { stan: 'brak_tresci'; odcinek: RoadSegment; wariant: Wariant; powod: string };
+
+/**
+ * (J2) Liczba systemowa dla stanu „czekam na decyzję" (spec 6.4: „pojawia się
+ * liczba systemowa — ŻEBY W DNIU DECYZJI NIE BYŁA NOWĄ INFORMACJĄ").
+ * Ta sama liczba, co w `lib/sciezkaWyjscia.ts` (`WYJSCIE_LICZBY`, pozycja
+ * pierwsza) — świadomie jedno brzmienie w dwóch stanach, bo to jest ten sam
+ * fakt, a nie dwie różne pociechy.
+ * ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ (nowe 12.08.2026).
+ */
+export const LICZBA_SYSTEMOWA_ROTACJI =
+  'Co roku z akademii odchodzi od 24,5% do 41% zawodników. To jest liczba o systemie, nie o Tobie.';
 
 export const BRAK_TRESCI_ODCINKA =
   'Treść tego odcinka nie jest jeszcze wgrana do bazy. To nie znaczy, że nic tu nie ma — znaczy, że jeszcze nie została wklejona.';
@@ -250,10 +272,23 @@ export function zbudujOdcinek(
   odcinek: RoadSegment,
   wariant: Wariant,
   wszystkie: RoadFactor[],
+  // PLAN-D-J 08.2026 (12.08.2026) — MAPA JEST KONSUMENTEM DWÓCH OGRANICZEŃ
+  // reguły P5 (spec 6.4): `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`.
+  // Parametr opcjonalny: bez niego Mapa zachowuje się co do znaku tak jak
+  // przed tą rundą, a stan `nie_wiem` niczego nie zmienia.
+  stanOgraniczen: StanOgraniczen | null = null,
 ): OdcinekWidok {
   const moje = wszystkie
     .filter((f) => f.segment_id === odcinek.id && f.variant === wariant)
     .sort((a, b) => a.sort_order - b.sort_order);
+
+  // ⚠️ „Nie wiem" NIE ukrywa tła i NIE dokłada liczby. Ukrycie sekcji na
+  // domyśle zabrałoby zawodnikowi treść, która ma go odciążać atrybucyjnie
+  // (spec 2.2, punkt 3) — a to jest strata, nie ostrożność.
+  const tylkoWRekach = stanOgraniczen !== null
+    && obowiazuje(stanOgraniczen, 'mapaTylkoWTwoichRekach') === 'tak';
+  const zLiczbaSystemowa = stanOgraniczen !== null
+    && obowiazuje(stanOgraniczen, 'pokazacLiczbeSystemowa') === 'tak';
 
   if (moje.length === 0) {
     return { stan: 'brak_tresci', odcinek, wariant, powod: BRAK_TRESCI_ODCINKA };
@@ -262,10 +297,14 @@ export function zbudujOdcinek(
   const juter = moje.filter((f) => f.is_tomorrow);
   const reszta = moje.filter((f) => !f.is_tomorrow);
   const wTwoichRekach = reszta.filter((f) => f.is_controllable);
-  const tlo = reszta.filter((f) => !f.is_controllable);
+  const tlo = tylkoWRekach ? [] : reszta.filter((f) => !f.is_controllable);
+  const liczbaSystemowa = zLiczbaSystemowa ? LICZBA_SYSTEMOWA_ROTACJI : null;
 
   if (juter.length === 1) {
-    return { stan: 'gotowy', odcinek, wariant, naJutro: juter[0], wTwoichRekach, tlo };
+    return {
+      stan: 'gotowy', odcinek, wariant, naJutro: juter[0], wTwoichRekach, tlo,
+      tloUkryte: tylkoWRekach, liczbaSystemowa,
+    };
   }
   return {
     stan: 'wadliwy',
@@ -274,6 +313,8 @@ export function zbudujOdcinek(
     powod: juter.length === 0 ? WADLIWY_BEZ_JUTRA : WADLIWY_WIELE_JUTER,
     wTwoichRekach,
     tlo,
+    tloUkryte: tylkoWRekach,
+    liczbaSystemowa,
   };
 }
 
@@ -314,6 +355,8 @@ export function zbudujStanMapy(params: {
   exitAktywny: boolean | null;
   swiadekDeselekcji: boolean | null;
   teraz?: Date;
+  /** (J2) Stan nałożony przez arbitra. `null` = ekran go nie podał; wtedy Mapa wygląda jak przed rundą J. */
+  ograniczenia?: StanOgraniczen | null;
 }): StanMapy {
   if (params.laduje) return { stan: 'ladowanie' };
 
@@ -352,7 +395,7 @@ export function zbudujStanMapy(params: {
 
   return {
     stan: 'gotowa',
-    widok: zbudujOdcinek(wybor.odcinek, wariant, czynniki),
+    widok: zbudujOdcinek(wybor.odcinek, wariant, czynniki, params.ograniczenia ?? null),
     odcinki,
     przyblizenie: wybor.stan === 'przyblizony' ? wybor.powod : null,
   };

@@ -37,6 +37,10 @@
 //
 // Protokół i liczby: `claude/POMIAR_KALIBRACJI_10_08_2026.html`.
 
+// PLAN-D-J 08.2026 — stan nałożony przez arbitra. Kalibracja jest KONSUMENTEM
+// ograniczenia `kalibracjaPrzeramowujeSpadek` (spec 3.2), patrz `stanZmiany`.
+import { obowiazuje, type StanOgraniczen } from './ograniczenia';
+
 // ─────────────────────────────────────────────────────────────────────
 // 1. KSZTAŁT DANYCH — jeden do jednego z tabelą `calibration_measurements`
 // ─────────────────────────────────────────────────────────────────────
@@ -200,8 +204,25 @@ export type StanZmiany = { stan: 1 | 2 | 3; tytul: string; tresc: string };
  * Funkcja nie ma gałęzi, która przy zmianie poniżej progu milczy albo
  * zaokrągla w górę; pilnuje tego selftest, który przemiata cały zakres.
  */
-export function stanZmiany(roznica: number, prog: number): StanZmiany {
+export function stanZmiany(
+  roznica: number,
+  prog: number,
+  // PLAN-D-J 08.2026 (12.08.2026) — KONSUMENT OGRANICZENIA
+  // `kalibracjaPrzeramowujeSpadek`. Spec 3.2 mówi wprost: w stanie Osłony
+  // „KALIBRACJA nie nazywa spadku spadkiem". Do 12.08.2026 nie miała jak —
+  // ograniczenia arbitra nie docierały do appki, więc zawodnik w szczycie
+  // wzrastania dostawał zdanie warunkowe („JEŚLI akurat szybko rośniesz"),
+  // choć produkt WIEDZIAŁ, że rośnie. Warunek postawiony komuś, o kim znamy
+  // odpowiedź, jest gorszy niż jego brak: brzmi jak wymówka.
+  //
+  // Parametr jest opcjonalny świadomie — wywołania sprzed tej rundy zachowują
+  // się co do znaku tak jak dotąd, a brak stanu daje `nie_wiem`, czyli
+  // brzmienie ostrożne, nie przeramowane.
+  stanOgraniczen: StanOgraniczen | null = null,
+): StanZmiany {
   const r = Math.round(roznica * 10) / 10;
+  const przeramowac = stanOgraniczen !== null
+    && obowiazuje(stanOgraniczen, 'kalibracjaPrzeramowujeSpadek') === 'tak';
   if (r > prog) {
     return {
       stan: 1,
@@ -210,6 +231,18 @@ export function stanZmiany(roznica: number, prog: number): StanZmiany {
     };
   }
   if (r < -prog) {
+    // ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ (nowe 12.08.2026, PLAN-D-J).
+    // Wariant przeramowany świadomie NIE podaje żadnej liczby o dojrzałości
+    // biologicznej (zakaz bezwzględny, spec 3.3) i nie chwali — stwierdza fakt
+    // ze spec 3.4: szczyt tempa poprawy w skoku przypada na szczyt wzrastania.
+    if (przeramowac) {
+      return {
+        stan: 3,
+        tytul: 'Rośniesz — i dlatego ta liczba spadła',
+        tresc: 'To nie jest cofnięcie się. W okresie szybkiego wzrastania skok potrafi chwilowo spaść, '
+          + 'a potem wraca wyżej niż był. Nie zwiększaj teraz objętości treningu i pilnuj snu.',
+      };
+    }
     return {
       stan: 3,
       tytul: 'Wynik spadł',

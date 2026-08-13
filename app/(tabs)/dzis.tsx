@@ -211,6 +211,22 @@ import {
   type StanGlosu,
   type WierszGlosu,
 } from '../../lib/glosTygodnia';
+// PLAN-D-J 08.2026 (12.08.2026) — CO OBOWIĄZUJE W TYM TYGODNIU.
+// Do dziś ekran wiedział, KTO MÓWI (`weekly_voice.voice`), i nie miał skąd
+// wiedzieć, CO OBOWIĄZUJE: cron wyrzucał `ograniczenia` przed zapisem.
+// Skutek na TYM ekranie: zawodnik z kontuzją, o którym produkt WIEDZIAŁ, że ma
+// kontuzję, dostawał licznik „3 z 6 sesji zrobione", zaproszenie „Zaplanuj
+// Blok →" i rekomendację treningową — czyli dokładnie to, o czym spec 1.2 mówi
+// „system milczy o celach". Decyzja, co zdjąć z ekranu, siedzi jako CZYSTA
+// FUNKCJA w `lib/ograniczenia.ts`; ten ekran ją WYKONUJE, nie podejmuje.
+import {
+  czytajOgraniczenia,
+  coPokazacNaDzis,
+  opisOgraniczenDoLogu,
+  isMissingOgraniczeniaColumnError,
+  KOLUMNA_OGRANICZEN,
+  type StanOgraniczen,
+} from '../../lib/ograniczenia';
 // ZADANIE E2 12.08.2026 — punkt pomocy wyżej w kontuzji i ścieżce wyjścia.
 // Stąd idzie WYŁĄCZNIE prośba o otwarcie tego samego, jedynego modala
 // zamontowanego w app/_layout.tsx. Zero drugiego egzemplarza.
@@ -282,6 +298,14 @@ export default function DzisScreen() {
   // `cisza`: przed odczytem nie wiadomo, czy arbiter policzył ten tydzień, a
   // cisza jest DECYZJĄ arbitra i nie wolno jej udawać. Patrz lib/glosTygodnia.ts.
   const [glos, setGlos] = useState<StanGlosu>({ rodzaj: 'brak_wiersza' });
+
+  // PLAN-D-J 08.2026 — stan nałożony przez arbitra. Stan początkowy to
+  // `nie_odczytane`, a NIE „nic nie obowiązuje": przed odczytem nie wiadomo,
+  // czy zawodnik jest w Osłonie albo po urazie, a udawanie, że nie jest, to
+  // dokładnie ten defekt, który ta runda likwiduje.
+  const [ograniczenia, setOgraniczenia] = useState<StanOgraniczen>(
+    { rodzaj: 'nie_odczytane', powod: 'jeszcze nie odczytano' },
+  );
 
   // Migawka „co było nieprzeczytane w chwili wejścia na ekran" — ten sam wzorzec
   // co w centrum-decyzji.tsx: kropka „Nowe" nie może zniknąć w trakcie tej samej
@@ -437,7 +461,12 @@ export default function DzisScreen() {
       // ⚠️ `weekly_voice` ma politykę `select_own` — to zapytanie idzie tokenem
       // zawodnika i zobaczy WYŁĄCZNIE jego wiersz. Zapis robi cron rolą
       // service_role, appka nigdy tu nie pisze.
-      supabase.from('weekly_voice').select('week_start, voice, reason, spoke_at')
+      // PLAN-D-J 08.2026 — doszła kolumna `ograniczenia`. ⚠️ PostgREST przy
+      // nieznanej kolumnie odrzuca CAŁE zapytanie, więc dopóki migracja J1 nie
+      // jest wykonana, ten select by się wywrócił i karta głosu ZNIKNĘŁABY
+      // z ekranu. Dlatego niżej stoi jawne ponowienie bez tej kolumny — patrz
+      // `isMissingOgraniczeniaColumnError`.
+      supabase.from('weekly_voice').select(`week_start, voice, reason, spoke_at, ${KOLUMNA_OGRANICZEN}`)
         .eq('user_id', currentUser.id).eq('week_start', poniedzialekGlosu(new Date())).limit(1),
     ]);
 
@@ -445,13 +474,43 @@ export default function DzisScreen() {
     // błąd odczytu / arbiter jeszcze nie policzył / arbiter policzył CISZĘ.
     // `stanGlosu` je rozdziela, a `opisDoLogu` mówi który zaszedł — bez tego
     // „Dziś nic nie pokazuje" jest nie do zdiagnozowania.
+    // PLAN-D-J 08.2026 — gdy migracja J1 nie jest jeszcze wykonana, PostgREST
+    // odrzuca CAŁE zapytanie z powodu jednej nieznanej kolumny. Ponawiamy bez
+    // niej: głos tygodnia ma się pokazać, a ograniczenia zostają jawnym
+    // „nie wiem". Kolejność wdrożenia nie może gasić ekranu.
+    // ⚠️ TYP JAWNY, NIE WYWNIOSKOWANY (poprawka 13.08.2026, błąd TS2322).
+    // Bez tego `glosData` bierze typ z pierwszego zapytania — czyli Z kolumną
+    // `ograniczenia` — i przypisanie wyniku ponowienia, które tej kolumny nie
+    // pobiera, nie kompiluje się. Wąski typ mówi wprost, na czym od tego miejsca
+    // POLEGAMY: na czterech kolumnach głosu. Ograniczenia jadą osobną drogą,
+    // przez `ograniczeniaSurowe`, i nikt ich stąd nie czyta.
+    type WierszGlosuSurowy = { week_start: unknown; voice: unknown; reason: unknown; spoke_at: unknown };
+    let glosData: WierszGlosuSurowy[] | null = glosRes.data;
+    let glosError: { message: string } | null = glosRes.error;
+    let ograniczeniaSurowe: unknown = ((glosRes.data ?? [])[0] as Record<string, unknown> | undefined)?.[KOLUMNA_OGRANICZEN];
+    let bladOgraniczen: string | null = glosRes.error ? glosRes.error.message : null;
+    if (glosRes.error && isMissingOgraniczeniaColumnError(glosRes.error)) {
+      console.warn(`dzis: kolumny „${KOLUMNA_OGRANICZEN}" nie ma w bazie — migracja J1 niewykonana. `
+        + 'Czytam głos tygodnia bez niej; ograniczenia zostają jawnym „nie wiem".');
+      const drugi = await supabase.from('weekly_voice').select('week_start, voice, reason, spoke_at')
+        .eq('user_id', currentUser.id).eq('week_start', poniedzialekGlosu(new Date())).limit(1);
+      glosData = drugi.data;
+      glosError = drugi.error;
+      ograniczeniaSurowe = undefined;
+      bladOgraniczen = `kolumny „${KOLUMNA_OGRANICZEN}" nie ma jeszcze w bazie`;
+    }
+
     const stanTygodnia = stanGlosu(
-      ((glosRes.data ?? [])[0] as WierszGlosu | undefined) ?? null,
-      glosRes.error ? glosRes.error.message : null,
+      ((glosData ?? [])[0] as WierszGlosu | undefined) ?? null,
+      glosError ? glosError.message : null,
     );
     setGlos(stanTygodnia);
     if (stanTygodnia.rodzaj === 'nie_wiem') console.error(`dzis: ${opisDoLogu(stanTygodnia)}`);
     else console.log(`dzis: ${opisDoLogu(stanTygodnia)}`);
+
+    const stanOgraniczen = czytajOgraniczenia(ograniczeniaSurowe, bladOgraniczen);
+    setOgraniczenia(stanOgraniczen);
+    console.log(`dzis: ${opisOgraniczenDoLogu(stanOgraniczen)}`);
 
     const goals = (goalsRes.data ?? []) as Goal[];
     const goal = goals.find((g) => g.is_priority) ?? goals[0] ?? null;
@@ -543,6 +602,11 @@ export default function DzisScreen() {
   // pusty wynik i brak tabeli to dwie różne rzeczy i zawodnik ma je rozróżniać
   // po tekście, nie zgadywać z ciszy.
   const renderHint = () => {
+    // PLAN-D-J 08.2026 — podpowiedź z materiałów jest treścią O PRACY NAD CELEM,
+    // więc przy `systemMilczyOCelach` i `wszystkoMilczy` znika razem z resztą.
+    // Świadomie sprawdzane TU, a nie tylko w miejscu wywołania: `renderHint`
+    // jest wołane z dwóch miejsc i drugie łatwo przeoczyć.
+    if (!widokDzis.pokazacPodpowiedz) return null;
     if (hintState.state === 'no_goal') return null;
     if (hintState.state === 'loading') return null; // nic nie migocze pod przyciskami
 
@@ -593,6 +657,14 @@ export default function DzisScreen() {
       </View>
     );
   };
+
+  // PLAN-D-J 08.2026 — CO OBOWIĄZUJE. Decyzja jest czystą funkcją
+  // (`lib/ograniczenia.ts`), tu zostaje wyłącznie jej wykonanie.
+  // ⚠️ TO NIE DODAJE NA EKRAN ANI JEDNEGO SŁOWA. Karta głosu tygodnia
+  // („Wracasz po urazie" / „Zmieniła się Twoja sytuacja") już mówi zawodnikowi,
+  // co się dzieje. To ZDEJMUJE z ekranu to, co w tych stanach jest wyrzutem:
+  // licznik zrobionych sesji, zaproszenie do planowania i rekomendację.
+  const widokDzis = coPokazacNaDzis(ograniczenia);
 
   const allRecsLinkLabel = otherUnreadCount > 0
     ? `Wszystkie rekomendacje (${otherUnreadCount} nowe) →`
@@ -655,7 +727,7 @@ export default function DzisScreen() {
                   „3 z 6 sesji zrobione". Słowa „Bloku Skupienia" zeszły razem
                   z resztą kontekstu do szczegółów Celu; pod nazwą Celu nie ma
                   wątpliwości, o jakich sesjach mowa. */}
-              {workProgress ? (
+              {workProgress && widokDzis.pokazacPostepPracy ? (
                 <>
                   <Text style={styles.workText}>
                     {workProgress.done} z {workProgress.total} sesji zrobione
@@ -667,16 +739,19 @@ export default function DzisScreen() {
                       kliknięciami i nic na Dziś o niej nie mówiło. Jedna linia,
                       tylko gdy najnowsza dawka jest NIEOTWARTA; cały kafelek
                       i tak prowadzi do Celu, więc zero nowych tras. */}
-                  {newDoseWaiting ? (
+                  {newDoseWaiting && widokDzis.pokazacWezwanieDoPracy ? (
                     <Text style={styles.heroAction}>Nowa porcja w Twoim Bloku →</Text>
                   ) : null}
                 </>
-              ) : (
+              ) : widokDzis.pokazacWezwanieDoPracy ? (
                 // Brak Bloku pod ten Cel → ŻADNEJ zastępczej liczby (nigdy
                 // „0 z 0"), tylko zaproszenie. Zwykły tekst, nie osobny
                 // przycisk: cały kafelek prowadzi w to samo miejsce.
+                // PLAN-D-J: przy kontuzji i ścieżce wyjścia zaproszenia NIE MA.
+                // Kafelek zostaje — zawodnik ma prawo zobaczyć, nad czym
+                // pracował. Nie ma obowiązku zobaczyć, ile z tego nie zrobił.
                 <Text style={styles.heroAction}>Zaplanuj Blok →</Text>
-              )}
+              ) : null}
             </>
           ) : (
             <>
@@ -687,7 +762,14 @@ export default function DzisScreen() {
         </TouchableOpacity>
 
         {/* Rekomendacja dnia — od 08.08.2026 PEŁNA, z przyciskami. Jedyna akcja
-            decyzyjna na ekranie domowym. */}
+            decyzyjna na ekranie domowym.
+            PLAN-D-J 08.2026 — CAŁA SEKCJA ZNIKA przy `systemMilczyOCelach`
+            (kontuzja) i `wszystkoMilczy` (ścieżka wyjścia). Spec 1.2: przy
+            kontuzji „system milczy o celach", przy ścieżce wyjścia „wszystko
+            inne milczy: zero przypomnień, zero liczników, zero porównań".
+            Nie zastępujemy jej niczym — zastępczy komunikat zamieniłby decyzję
+            o milczeniu w kolejne odezwanie. */}
+        {widokDzis.pokazacRekomendacje && (
         <View style={{ marginTop: 24 }}>
           <Text style={styles.sectionLabel}>Co dziś zrobić</Text>
           {/* WIEDZA B4 08.08.2026 — dług N2: pierwsze wejście nie udaje już, że
@@ -763,6 +845,7 @@ export default function DzisScreen() {
             </View>
           )}
         </View>
+        )}
 
         {/* PLAN-D-F 08.2026 — GŁOS TYGODNIA.
             Karta pojawia się WYŁĄCZNIE wtedy, gdy arbiter dał głos jednemu

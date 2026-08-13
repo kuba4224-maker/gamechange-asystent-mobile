@@ -48,7 +48,36 @@ export type StanGlosu =
   | { rodzaj: 'nie_wiem'; powod: string }
   | { rodzaj: 'brak_wiersza' }
   | { rodzaj: 'cisza'; powod: string }
-  | { rodzaj: 'glos'; voice: Glos; tytul: string; tresc: string; powod: string };
+  | { rodzaj: 'glos'; voice: Glos; tytul: string; tresc: string; powod: string; mowi: boolean };
+
+// ─────────────────────────────────────────────────────────────────────
+// ZADANIE N3 (13.08.2026) — `spoke_at` WRESZCIE COKOLWIEK ZNACZY
+// ─────────────────────────────────────────────────────────────────────
+// STAN ≠ GŁOS. Arbiter co tydzień rozstrzyga DWIE rzeczy naraz: KTÓRE
+// narzędzie ma pierwszeństwo (`voice`) i CZY W OGÓLE SIĘ ODZYWA (`spoke`,
+// zapisywane jako `spoke_at`: znacznik czasu, gdy mówi, `null`, gdy nie).
+// Drugie z nich to cały budżet uwagi: refrakcje (Osłona odzywa się raz na
+// kilka tygodni, kontuzja pyta o powrót po sześciu) polegają wyłącznie na tym,
+// że wiersz istnieje, stan obowiązuje, a produkt MILCZY.
+//
+// Do 13.08.2026 ekran tej kolumny NIE CZYTAŁ. `spoke_at` było w typie
+// `WierszGlosu` od pasa F, zapytanie w „Dziś" je pobierało — i nikt nigdy nie
+// spytał o jego wartość. Skutek zmierzony przez audyt pasa M: arbiter zapisywał
+// „w tym tygodniu nie mówię", a karta rysowała się mimo to, więc budżet
+// „maksymalnie jedno odezwanie na tydzień" nie obowiązywał w ogóle.
+//
+// ⚠️ ROZRÓŻNIENIE, KTÓREGO NIE WOLNO SKLEIĆ Z CISZĄ. `cisza` to „żadne
+// narzędzie nie ma nic do powiedzenia". `glos` z `mowi: false` to „narzędzie MA
+// pierwszeństwo i jego stan OBOWIĄZUJE, ale w tym tygodniu nie zabiera głosu".
+// Na ekranie obie wyglądają tak samo (nic nie widać) i właśnie dlatego muszą
+// być różne w kodzie — inaczej nie da się odpowiedzieć na pytanie, dlaczego
+// zawodnik czegoś nie zobaczył.
+//
+// ⚠️ CO SIĘ PRZEZ TO NIE ZMIENIA: `podniescPunktPomocy` NIE pyta o `mowi`.
+// Punkt pomocy nie jest odezwaniem się produktu (spec E2, zakaz 1) — jest
+// widocznością numeru w stanie, który trwa tygodniami. Gdyby znikał w tygodniu,
+// w którym arbiter milczy, znikałby dokładnie wtedy, kiedy jest najbardziej
+// potrzebny.
 
 /**
  * Poniedziałek tygodnia, w którym leży podana data — liczony z DATY LOKALNEJ,
@@ -117,11 +146,15 @@ export function stanGlosu(wiersz: WierszGlosu | null, bladOdczytu: string | null
   if (wiersz.voice === 'silence') {
     return { rodzaj: 'cisza', powod: wiersz.reason };
   }
+  // ⚠️ N3: `spoke_at` = null znaczy „arbiter policzył ten tydzień i ZDECYDOWAŁ
+  // NIE MÓWIĆ". Stan zostaje, karta nie. To nie jest brak danych — brak danych
+  // to `brak_wiersza` kilka linijek wyżej.
+  const mowi = wiersz.spoke_at !== null;
   if (wiersz.voice === 'block') {
     // Blok NIE dostaje osobnej karty: ma już cały kafelek na górze ekranu
     // („Nad czym pracujesz"). Druga karta o tej samej rzeczy byłaby drugą drogą
     // do jednego rekordu — dokładnie to, co blok B1 „jedna droga" z produktu wyciął.
-    return { rodzaj: 'glos', voice: 'block', tytul: '', tresc: '', powod: wiersz.reason };
+    return { rodzaj: 'glos', voice: 'block', tytul: '', tresc: '', powod: wiersz.reason, mowi };
   }
   const b = BRZMIENIA[wiersz.voice];
   if (!b) {
@@ -129,12 +162,18 @@ export function stanGlosu(wiersz: WierszGlosu | null, bladOdczytu: string | null
     // To NIE jest cisza i nie wolno tego pokazać jako pustki.
     return { rodzaj: 'nie_wiem', powod: `nieznany głos „${wiersz.voice}" — appka jest starsza niż baza` };
   }
-  return { rodzaj: 'glos', voice: wiersz.voice, tytul: b.tytul, tresc: b.tresc, powod: wiersz.reason };
+  return { rodzaj: 'glos', voice: wiersz.voice, tytul: b.tytul, tresc: b.tresc, powod: wiersz.reason, mowi };
 }
 
-/** Czy ekran rysuje kartę głosu tygodnia. */
+/**
+ * Czy ekran rysuje kartę głosu tygodnia.
+ *
+ * ⚠️ TRZY WARUNKI, KAŻDY Z INNEGO POWODU: to musi być głos (nie cisza i nie
+ * awaria odczytu), nie może być `block` (ma własny kafelek) i arbiter musi
+ * w tym tygodniu MÓWIĆ (`spoke_at` niepuste — patrz N3 wyżej).
+ */
 export function pokazacKarte(stan: StanGlosu): boolean {
-  return stan.rodzaj === 'glos' && stan.voice !== 'block';
+  return stan.rodzaj === 'glos' && stan.voice !== 'block' && stan.mowi;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -206,6 +245,11 @@ export function wejscieZKarty(stan: StanGlosu): WejscieZKarty | null {
  * ⚠️ To NIE jest klasyfikator ryzyka. Nie ocenia stanu psychicznego zawodnika
  * i nie wnioskuje z jego wpisów. Reaguje na DWA jawne stany, które zawodnik sam
  * włączył albo które zapisało zdarzenie — nic więcej.
+ *
+ * ⚠️ ŚWIADOMIE NIE PYTA O `mowi` (N3, 13.08.2026). Punkt pomocy reaguje na STAN,
+ * nie na GŁOS. Kontuzja i ścieżka wyjścia trwają tygodniami, a arbiter odzywa
+ * się w nich rzadko — gdyby numer znikał w każdym tygodniu milczenia, znikałby
+ * przez większość czasu, w którym jest potrzebny.
  */
 export function podniescPunktPomocy(stan: StanGlosu): boolean {
   return stan.rodzaj === 'glos' && (stan.voice === 'injury' || stan.voice === 'exit');
@@ -220,5 +264,11 @@ export function opisDoLogu(stan: StanGlosu): string {
   if (stan.rodzaj === 'nie_wiem') return `głos tygodnia: NIE WIEM — ${stan.powod}`;
   if (stan.rodzaj === 'brak_wiersza') return 'głos tygodnia: brak wiersza na ten tydzień — arbiter jeszcze nie policzył';
   if (stan.rodzaj === 'cisza') return `głos tygodnia: CISZA (decyzja, nie brak danych) — ${stan.powod}`;
+  if (!stan.mowi) {
+    // Czwarty, osobny powód, dla którego ekran nic nie pokazuje. Musi dać się
+    // odróżnić w logu od ciszy, bo to jest inna decyzja arbitra: stan OBOWIĄZUJE.
+    return `głos tygodnia: ${stan.voice}, ale STAN BEZ ODEZWANIA — arbiter w tym tygodniu `
+      + `nie mówi (spoke_at = null), stan nadal obowiązuje, karty nie ma — ${stan.powod}`;
+  }
   return `głos tygodnia: ${stan.voice} — ${stan.powod}`;
 }

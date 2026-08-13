@@ -32,7 +32,19 @@ function check(label: string, cond: boolean, detail: string) {
   else { failed++; console.log(`FAIL - ${label}\n       ${detail}`); }
 }
 
+// ⚠️ ZMIANA Z 13.08.2026 (N3). Do tej pory ten pomocnik ustawiał `spoke_at: null`
+// dla KAŻDEGO wiersza — czyli wszystkie testy niżej opisywały tydzień, w którym
+// arbiter ZDECYDOWAŁ NIE MÓWIĆ, i mimo to sprawdzały, że karta się rysuje.
+// Testy przechodziły, bo ekran tej kolumny w ogóle nie czytał. Teraz `wiersz()`
+// znaczy „arbiter w tym tygodniu mówi", a milczenie trzeba poprosić jawnie.
+const SPOKE_AT = '2026-08-10T06:00:00.000Z';
+
 function wiersz(voice: Glos, reason = 'powód z bazy'): WierszGlosu {
+  return { week_start: '2026-08-10', voice, reason, spoke_at: SPOKE_AT };
+}
+
+/** Ten sam wiersz, ale arbiter policzył tydzień i ZDECYDOWAŁ NIE ZABIERAĆ GŁOSU. */
+function wierszMilczacy(voice: Glos, reason = 'refrakcja: stan obowiązuje, ale w tym tygodniu nie mówimy'): WierszGlosu {
   return { week_start: '2026-08-10', voice, reason, spoke_at: null };
 }
 
@@ -97,6 +109,49 @@ for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]
     s.rodzaj === 'nie_wiem', JSON.stringify(s));
   check('…i mówi wprost, że appka jest starsza niż baza',
     s.rodzaj === 'nie_wiem' && s.powod.includes('starsza niż baza'), JSON.stringify(s));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 3b. ZADANIE N3 (13.08.2026) — STAN BEZ ODEZWANIA
+// ═══════════════════════════════════════════════════════════════════
+// Arbiter rozstrzyga dwie rzeczy naraz: KTO ma pierwszeństwo i CZY SIĘ ODZYWA.
+// Drugie z nich jest całym budżetem uwagi: refrakcje (Osłona co kilka tygodni,
+// kontuzja pytająca o powrót po sześciu) polegają na tym, że wiersz istnieje,
+// stan obowiązuje, a produkt MILCZY. Do 13.08.2026 ekran czytał tylko pierwsze.
+for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]) {
+  const milczy = stanGlosu(wierszMilczacy(g));
+  const mowi = stanGlosu(wiersz(g));
+
+  // Strażnik strażnika: bez tej asercji test niżej przechodziłby także wtedy,
+  // gdyby karta nie rysowała się NIGDY — czyli sprawdzałby nic.
+  check(`(N3) ${g}: gdy arbiter MÓWI, karta jest`, pokazacKarte(mowi), JSON.stringify(mowi));
+  check(`(N3) ${g}: gdy arbiter NIE mówi (spoke_at = null), karty NIE MA`,
+    !pokazacKarte(milczy), JSON.stringify(milczy));
+  check(`(N3) ${g}: …ale to NADAL jest głos, nie cisza i nie brak wiersza — stan obowiązuje`,
+    milczy.rodzaj === 'glos' && milczy.voice === g, JSON.stringify(milczy));
+  check(`(N3) ${g}: log odróżnia „stan bez odezwania" od odezwania`,
+    opisDoLogu(milczy) !== opisDoLogu(mowi) && opisDoLogu(milczy).includes('STAN BEZ ODEZWANIA'),
+    opisDoLogu(milczy));
+}
+{
+  const cisza = stanGlosu(wiersz('silence'));
+  const milczacaOslona = stanGlosu(wierszMilczacy('growth'));
+  check('(N3) CISZA i STAN BEZ ODEZWANIA to dwie różne rzeczy — nie wolno ich skleić (R5)',
+    cisza.rodzaj === 'cisza' && milczacaOslona.rodzaj === 'glos'
+    && opisDoLogu(cisza) !== opisDoLogu(milczacaOslona),
+    `${opisDoLogu(cisza)} || ${opisDoLogu(milczacaOslona)}`);
+  check('(N3) milcząca kalibracja nie ma też wejścia — nie zapraszamy do ekranu bez odezwania',
+    wejscieZKarty(stanGlosu(wierszMilczacy('calibration'))) === null, 'calibration/milczy');
+}
+{
+  // ⚠️ ŚWIADOMY WYJĄTEK. Punkt pomocy reaguje na STAN, nie na GŁOS. Kontuzja
+  // i ścieżka wyjścia trwają tygodniami, a arbiter odzywa się w nich rzadko —
+  // numer, który znika w tygodniu milczenia, znika przez większość czasu,
+  // w którym jest potrzebny.
+  check('(N3) kontuzja BEZ odezwania nadal podnosi punkt pomocy',
+    podniescPunktPomocy(stanGlosu(wierszMilczacy('injury'))), 'injury/milczy');
+  check('(N3) ścieżka wyjścia BEZ odezwania nadal podnosi punkt pomocy',
+    podniescPunktPomocy(stanGlosu(wierszMilczacy('exit'))), 'exit/milczy');
 }
 
 // ═══════════════════════════════════════════════════════════════════

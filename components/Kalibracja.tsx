@@ -28,6 +28,19 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+// PLAN-D-J 08.2026 (12.08.2026) — CO OBOWIĄZUJE W TYM TYGODNIU.
+// Spec 3.2 mówi wprost: w stanie Osłony „KALIBRACJA nie nazywa spadku spadkiem".
+// Do 12.08.2026 nie miała jak — arbiter zwracał `ograniczenia`, a cron je
+// wyrzucał, więc zawodnik w szczycie wzrastania dostawał zdanie WARUNKOWE
+// („jeśli akurat szybko rośniesz"), choć produkt znał odpowiedź.
+import {
+  czytajOgraniczenia,
+  isMissingOgraniczeniaColumnError,
+  KOLUMNA_OGRANICZEN,
+  opisOgraniczenDoLogu,
+  type StanOgraniczen,
+} from '../lib/ograniczenia';
+import { poniedzialekTygodnia as poniedzialekGlosu } from '../lib/glosTygodnia';
 import { colors, typography, radii, spacing, minTouchHeight } from '../constants/theme';
 import { toLocalDateStr } from '../lib/date-utils';
 import {
@@ -75,12 +88,27 @@ export default function Kalibracja({ visible, onClose, userId }: Props) {
   const metryka = os === OS_FIZYCZNA ? METRYKA_CMJ : METRYKA_SESJE_WLASNE;
   const jednostka = os === OS_FIZYCZNA ? 'cm' : 'razy';
 
+  // PLAN-D-J 08.2026 — stan początkowy to `nie_odczytane`, nie „nic nie
+  // obowiązuje": brzmienie przeramowane wolno pokazać dopiero wtedy, gdy
+  // WIEMY, że zawodnik jest w Osłonie.
+  const [ograniczenia, setOgraniczenia] = useState<StanOgraniczen>(
+    { rodzaj: 'nie_odczytane', powod: 'jeszcze nie odczytano' },
+  );
+
   const load = useCallback(async () => {
     if (!userId) {
       setStan({ rodzaj: 'nie_wiem', powod: 'nie wiem, kto jest zalogowany' });
       return;
     }
     setStan(null);
+    // ⚠️ KOLEJNOŚĆ MA ZNACZENIE (N2, 13.08.2026). `load()` czyści licznik śladu,
+    // bo po przeładowaniu danych stara linijka mogłaby opisywać nieaktualny okres.
+    // Dlatego KAŻDE miejsce, które chce pokazać ślad, musi wołać `setSladLinie`
+    // PO `await load()`, nigdy przed. Do 13.08.2026 zapis pomiaru osi B robił
+    // odwrotnie — ustawiał linijkę, a linijkę niżej wołał `load()`, który ją
+    // natychmiast kasował. Efekt: JEDYNE miejsce w produkcie, w którym zawodnik
+    // miał zobaczyć cztery liczniki swojego zachowania, nie pokazywało ich nigdy
+    // (znalezisko pasa M, M-N4).
     setSladLinie(null);
     // ⚠️ A-N12: jawny filtr po `user_id`.
     const res = await supabase
@@ -94,6 +122,22 @@ export default function Kalibracja({ visible, onClose, userId }: Props) {
     const w = res.error ? null : ((res.data ?? []) as unknown as WierszKalibracji[]);
     setWiersze(w);
     setStan(stanKalibracji(w, res.error ? res.error.message : null));
+
+    // PLAN-D-J 08.2026 — osobne, wąskie zapytanie o ograniczenia. Dopóki
+    // migracja J1 nie jest wykonana, brak kolumny daje jawne „nie wiem",
+    // a Kalibracja zachowuje się dokładnie jak przed tą rundą.
+    const ogrRes = await supabase
+      .from('weekly_voice')
+      .select(`week_start, ${KOLUMNA_OGRANICZEN}`)
+      .eq('user_id', userId)
+      .eq('week_start', poniedzialekGlosu(new Date()))
+      .limit(1);
+    const wierszOgr = (ogrRes.data ?? [])[0] as Record<string, unknown> | undefined;
+    const stanOgr = ogrRes.error && isMissingOgraniczeniaColumnError(ogrRes.error)
+      ? czytajOgraniczenia(undefined, `kolumny „${KOLUMNA_OGRANICZEN}" nie ma jeszcze w bazie`)
+      : czytajOgraniczenia(wierszOgr ? wierszOgr[KOLUMNA_OGRANICZEN] : null, ogrRes.error ? ogrRes.error.message : null);
+    console.log(`[kalibracja] ${opisOgraniczenDoLogu(stanOgr)}`);
+    setOgraniczenia(stanOgr);
   }, [userId, os, metryka]);
 
   useEffect(() => {
@@ -226,8 +270,10 @@ export default function Kalibracja({ visible, onClose, userId }: Props) {
       setBlad('Nie udało się zapisać pomiaru. Spróbuj jeszcze raz.');
       return;
     }
-    setSladLinie(opiszSlad(slad, okno));
+    // ⚠️ NAJPIERW `load()`, POTEM LICZNIK — patrz uwaga przy `setSladLinie(null)`
+    // w `load()`. Odwrotna kolejność kasuje linijkę, zanim ktokolwiek ją zobaczy.
     await load();
+    setSladLinie(opiszSlad(slad, okno));
   }, [userId, zapisuje, stan, wiersze, load]);
 
   const przelacznik = (
@@ -305,9 +351,14 @@ export default function Kalibracja({ visible, onClose, userId }: Props) {
                     const o = stan.ostatni;
                     const poprz = (wiersze ?? []).filter((r) => r.id !== o.id && r.measured_value !== null)[0];
                     if (!poprz || o.comparable === false) return null;
+                    // PLAN-D-J 08.2026 — trzeci parametr to STAN NAŁOŻONY
+                    // PRZEZ ARBITRA. Przy `kalibracjaPrzeramowujeSpadek` stan
+                    // trzeci przestaje nazywać spadek spadkiem (spec 3.2).
+                    // Decyzja siedzi w `lib/kalibracja.ts`, tu tylko jej użycie.
                     const s = stanZmiany(
                       Number(o.measured_value) - Number(poprz.measured_value),
                       progZmiany(1),
+                      ograniczenia,
                     );
                     return (
                       <View style={styles.inner}>

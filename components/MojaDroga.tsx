@@ -21,29 +21,38 @@
 // się pojawić nic, co planuje powiadomienie ani zapisuje zdarzenie o zawodniku.
 //
 // ── CO TEN EKRAN CZYTA I CZEGO NIE ─────────────────────────────────────
-// Czyta: `account_state(p_user)`, `users.birth_year`, `road_segments`, `road_factors`,
+// Czyta: `account_state()`, `users.birth_year`, `road_segments`, `road_factors`,
 // `exit_mode`. NIE zapisuje NICZEGO — zero `insert`, zero `update`.
 //
 // ⚠️ A-N12: każde zapytanie o dane zawodnika ma jawny filtr po `user_id`.
 // Treść Mapy (`road_segments`, `road_factors`) jest wspólna i filtru nie ma —
 // bo nie jest danymi zawodnika.
 //
-// ⚠️ PODPIS `account_state` SPRAWDZONY ODCZYTEM Z ŻYWEJ BAZY 11.08.2026:
+// ⚠️ PODPIS `account_state` — STAN Z 13.08.2026, ZMIERZONY, NIE ZAPAMIĘTANY:
 //
-//     public.account_state(p_user uuid DEFAULT auth.uid()) returns text
-//     security definer
+//     public.account_state() returns text          -- pronargs = 0, argumenty []
+//     stable security definer, set search_path = public
 //
-// Pierwsza wersja tego pliku wołała ją BEZ ARGUMENTÓW, bo dokumentacja projektu
-// pisała o niej skrótowo „account_state()". To jest dokładnie kształt znaleziska
-// A-N1: PostgREST dopasowuje funkcje po NAZWACH parametrów, więc „funkcja
-// istnieje" nie znaczy „da się ją zawołać tak, jak zakłada kod". Wykryte przed
-// pierwszym uruchomieniem, jednym zapytaniem do `pg_get_function_arguments`.
+// Funkcja bierze zawodnika z `auth.uid()` w środku i NIE PRZYJMUJE ŻADNEGO
+// ARGUMENTU. Woła się ją dokładnie tak: `supabase.rpc('account_state')`.
 //
-// **Podajemy `p_user` JAWNIE, mimo że ma wartość domyślną.** Wywołanie bez
-// argumentów opierałoby się na tym, że PostgREST uwzględnia domyślne wartości
-// przy dopasowaniu — co jest prawdopodobne i czego NIE SPRAWDZILIŚMY na żywo.
-// Wywołanie z jawnym `p_user` dopasowuje się do tej funkcji zawsze, bez
-// zakładania czegokolwiek o warstwie pośredniej.
+// ── DLACZEGO TA UWAGA JEST TAKA DŁUGA (przeczytaj przed zmianą tej linii) ──
+// 11.08.2026 w bazie stała wersja `account_state(p_user uuid DEFAULT auth.uid())`
+// i ten plik SŁUSZNIE podawał `p_user` jawnie. 12.08.2026 migracja
+// `20260812135901` skasowała wariant `(uuid)` i zostawiła bezargumentowy —
+// z uzasadnieniem „Appka woła ją bez argumentów". To zdanie było NIEPRAWDZIWE
+// i nikt go nie sprawdził `grep`em. Skutek: przez dobę `rpc('account_state',
+// { p_user })` nie dopasowywało się do niczego (PostgREST dopasowuje funkcje po
+// NAZWACH parametrów — znalezisko A-N1/O33), `accountState` schodziło na `null`,
+// `dostepMapy(null)` dawało `odcinek: false` i CAŁA MAPA BYŁA MARTWA U KAŻDEGO
+// ZAWODNIKA. Wykrył to audyt zgodności z wizją (pas M, 12.08.2026, M-N1).
+// Naprawione 13.08.2026 po stronie appki, nie bazy — bezargumentowa wersja jest
+// bezpieczniejsza (nie da się podstawić cudzego `uuid`), więc to appka miała się
+// dostosować.
+//
+// ⚠️ REGUŁA, KTÓRA Z TEGO ZOSTAJE (O44): migracja kasująca albo zmieniająca
+// funkcję musi mieć w uzasadnieniu WYNIK `grep`a po wywołaniach, a nie zdanie
+// o tym, jak appka ją rzekomo woła.
 //
 // ⚠️ ZAKAZ ŚCIEŻKI ODZYSKU: wołamy DOKŁADNIE RAZ. Gdy zwróci błąd, ekran
 // schodzi na stan „nie wiem" (mapa bez odcinka) i wypisuje `ACCOUNT_STATE_WARN`
@@ -53,6 +62,23 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+// PLAN-D-J 08.2026 (12.08.2026) — CO OBOWIĄZUJE W TYM TYGODNIU. Mapa nigdy nie
+// zabiera głosu (budżet 0 ZAWSZE), ale OBOWIĄZUJE ją stan — to jest dokładnie
+// rozróżnienie A1 ze specyfikacji. Dwa ograniczenia reguły P5 (spec 6.4)
+// dotyczą tego ekranu: `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`.
+// ⚠️ MECHANIZM DZIAŁA, ALE NIKT DZIŚ NIE USTAWIA STANU `paused_decision` —
+// nie ma dla niego wejścia w produkcie (zakaz 2.3 z noty pasa I). Ten kod jest
+// tu po to, żeby w dniu, w którym wejście powstanie, nie trzeba było ruszać Mapy.
+// 13.08.2026 (N4): i dokładnie dlatego Mapa MUSI ten stan rozróżniać JUŻ TERAZ —
+// patrz `exitAktywny` niżej. Gdyby czekała na dzień powstania wejścia, tamten
+// dzień byłby dniem, w którym zaczęłaby mówić „odpadłeś" komuś, kto nie odpadł.
+import {
+  czytajOgraniczenia,
+  isMissingOgraniczeniaColumnError,
+  KOLUMNA_OGRANICZEN,
+  opisOgraniczenDoLogu,
+} from '../lib/ograniczenia';
+import { poniedzialekTygodnia as poniedzialekGlosu } from '../lib/glosTygodnia';
 import { colors, typography, radii, spacing, minTouchHeight, skew } from '../constants/theme';
 import {
   zbudujStanMapy,
@@ -71,10 +97,16 @@ import {
 } from '../lib/mapaDrogi';
 
 export const ACCOUNT_STATE_WARN =
-  '[PLAN-D-E] rpc(account_state, {p_user}) zwróciło błąd — Mapa schodzi na stan „nie wiem" i NIE pokazuje odcinka. '
-  + 'Podpis potwierdzony 11.08.2026 jako account_state(p_user uuid DEFAULT auth.uid()) returns text. '
-  + 'Jeśli funkcja się zmieniła, sprawdź: select pg_get_function_arguments(p.oid) from pg_proc p '
+  '[PLAN-D-E] rpc(account_state) zwróciło błąd — Mapa schodzi na stan „nie wiem" i NIE pokazuje odcinka. '
+  + 'Podpis zmierzony 13.08.2026 jako account_state() returns text, BEZ ARGUMENTÓW (pronargs = 0). '
+  + 'Jeśli w błędzie jest PGRST202, funkcja znów ma inny podpis niż to wywołanie — sprawdź: '
+  + 'select pronargs, pg_get_function_identity_arguments(p.oid) from pg_proc p '
   + 'join pg_namespace n on n.oid=p.pronamespace where n.nspname=\'public\' and p.proname=\'account_state\';';
+
+export const NIEZNANY_STAN_WYJSCIA_WARN =
+  '[PLAN-D-M/N4] exit_mode ma otwarty wiersz o stanie spoza znanych (active / paused_decision). '
+  + 'Mapa NIE przełącza się na wariant po deselekcji — fail closed, bo powiedzenie komuś „odpadłeś" '
+  + 'na podstawie nieznanej wartości jest gorsze niż nieprzełączenie wariantu. Wartości:';
 
 export const NIEZNANY_STAN_KONTA_WARN =
   '[PLAN-D-E] account_state zwróciło wartość spoza czterech znanych (full / limited / suspended / unknown_age). '
@@ -137,10 +169,13 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
     setStan({ stan: 'ladowanie' });
 
     const [accRes, userRes, segRes, facRes, exitRes] = await Promise.all([
-      // Nazwa parametru MUSI brzmieć dokładnie `p_user` — PostgREST dopasowuje
-      // funkcję po nazwach argumentów. Skrót albo synonim nie rzuci błędu
-      // składni, tylko nie znajdzie funkcji.
-      supabase.rpc('account_state', { p_user: userId }),
+      // ⚠️ BEZ ARGUMENTÓW — I TO JEST ZMIERZONE, NIE ZAŁOŻONE (13.08.2026).
+      // Funkcja w bazie ma `pronargs = 0` i bierze zawodnika z `auth.uid()`.
+      // PostgREST dopasowuje po NAZWACH parametrów, więc dołożenie tu czegokolwiek
+      // (np. `{ p_user: userId }`) nie rzuci błędu składni — po prostu nie znajdzie
+      // funkcji, Mapa zejdzie na „nie wiem" i zgaśnie u WSZYSTKICH. Pełna historia
+      // tego defektu jest w nagłówku pliku. Przed zmianą tej linii: zmierz podpis.
+      supabase.rpc('account_state'),
       supabase.from('users').select('birth_year').eq('id', userId).limit(1),
       supabase.from('road_segments').select(SEGMENT_COLUMNS).order('sort_order', { ascending: true }),
       supabase.from('road_factors').select(FACTOR_COLUMNS),
@@ -178,8 +213,37 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
     if (exitRes.error) {
       console.warn(EXIT_MODE_WARN, exitRes.error);
     } else {
-      exitAktywny = (exitRes.data ?? []).length > 0;
+      // ── ZADANIE N4 (13.08.2026, ze znaleziska pasa M) ────────────────────
+      // „CZEKAM NA DECYZJĘ" TO NIE JEST „ODPADŁEM". `exit_mode.state` ma trzy
+      // wartości (CHECK w bazie): `active`, `paused_decision`, `closed`.
+      // Do 13.08.2026 stało tu `length > 0`, czyli KAŻDY otwarty wiersz —
+      // więc gdyby wejście do `paused_decision` powstało, Mapa przełączyłaby
+      // się komuś, kto tylko wstrzymał decyzję, na wariant „po deselekcji"
+      // i zaczęła mówić o odpadnięciu, które się nie wydarzyło. Backend
+      // rozróżniał te stany od pasa I (`arbiter-glosu-io.js`), appka nie.
+      // Zamknięte wiersze są już odfiltrowane w zapytaniu (`closed_at is null`).
+      const otwarte = (exitRes.data ?? []) as { state?: string | null }[];
+      const nieznane = otwarte.filter((w) => w.state !== 'active' && w.state !== 'paused_decision');
+      if (nieznane.length > 0) console.warn(NIEZNANY_STAN_WYJSCIA_WARN, nieznane.map((w) => w.state));
+      exitAktywny = otwarte.some((w) => w.state === 'active');
     }
+
+    // PLAN-D-J 08.2026 — osobne, wąskie zapytanie o ograniczenia. Świadomie
+    // POZA paczką wyżej: dopóki migracja J1 nie jest wykonana, PostgREST odrzuca
+    // CAŁE zapytanie z powodu jednej nieznanej kolumny — a Mapa ma działać
+    // niezależnie od tego, bo jest jedynym narzędziem działającym w koncie
+    // OGRANICZONYM. Brak kolumny to jawne „nie wiem", nie „nic nie obowiązuje".
+    const ogrRes = await supabase
+      .from('weekly_voice')
+      .select(`week_start, ${KOLUMNA_OGRANICZEN}`)
+      .eq('user_id', userId)
+      .eq('week_start', poniedzialekGlosu(new Date()))
+      .limit(1);
+    const wierszOgr = (ogrRes.data ?? [])[0] as Record<string, unknown> | undefined;
+    const ograniczenia = ogrRes.error && isMissingOgraniczeniaColumnError(ogrRes.error)
+      ? czytajOgraniczenia(undefined, `kolumny „${KOLUMNA_OGRANICZEN}" nie ma jeszcze w bazie`)
+      : czytajOgraniczenia(wierszOgr ? wierszOgr[KOLUMNA_OGRANICZEN] : null, ogrRes.error ? ogrRes.error.message : null);
+    console.log(`[mapa] ${opisOgraniczenDoLogu(ograniczenia)}`);
 
     setStan(zbudujStanMapy({
       laduje: false,
@@ -190,6 +254,7 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
       birthYear,
       exitAktywny,
       swiadekDeselekcji: SWIADEK_BRAK_ZRODLA,
+      ograniczenia,
     }));
   }, [userId]);
 
@@ -307,15 +372,33 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
                       czynników nie zależy od zawodnika, jest samo w sobie
                       działaniem — przenosi przyczynę niepowodzenia z niego na
                       system. Dlatego ma własny podpis, a nie samą listę. */}
-                  <View style={{ marginTop: spacing.lg }}>
-                    <Text style={styles.sectionLabel}>{SEKCJA_TLO}</Text>
-                    <Text style={styles.tloPodpis}>{SEKCJA_TLO_PODPIS}</Text>
-                    {stan.widok.tlo.length > 0
-                      ? stan.widok.tlo.map(czynnik)
-                      // Pusta trzecia sekcja to defekt treści, nie „nic tu nie ma".
-                      // Mówimy to, zamiast chować nagłówek i udawać, że tak miało być.
-                      : <Text style={styles.quiet}>Tło tego odcinka nie jest jeszcze wgrane do bazy.</Text>}
-                  </View>
+                  {/* PLAN-D-J 08.2026 — przy `mapaTylkoWTwoichRekach` (stan
+                      „czekam na decyzję", spec 6.4) CAŁA sekcja tła znika razem
+                      z nagłówkiem. To jedyny przypadek, w którym jej brak NIE
+                      jest defektem treści — i dlatego rozróżnia go osobne pole
+                      `tloUkryte`, a nie pusta lista. */}
+                  {!stan.widok.tloUkryte ? (
+                    <View style={{ marginTop: spacing.lg }}>
+                      <Text style={styles.sectionLabel}>{SEKCJA_TLO}</Text>
+                      <Text style={styles.tloPodpis}>{SEKCJA_TLO_PODPIS}</Text>
+                      {stan.widok.tlo.length > 0
+                        ? stan.widok.tlo.map(czynnik)
+                        // Pusta trzecia sekcja to defekt treści, nie „nic tu nie ma".
+                        // Mówimy to, zamiast chować nagłówek i udawać, że tak miało być.
+                        : <Text style={styles.quiet}>Tło tego odcinka nie jest jeszcze wgrane do bazy.</Text>}
+                    </View>
+                  ) : null}
+
+                  {/* PLAN-D-J 08.2026 — liczba systemowa przy `pokazacLiczbeSystemowa`.
+                      Spec 6.4: ma się pojawić, ŻEBY W DNIU DECYZJI NIE BYŁA NOWĄ
+                      INFORMACJĄ. Świadomie zamiast pocieszenia, nie obok niego.
+                      ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ — stała
+                      LICZBA_SYSTEMOWA_ROTACJI w lib/mapaDrogi.ts. */}
+                  {stan.widok.liczbaSystemowa ? (
+                    <View style={{ marginTop: spacing.lg }}>
+                      <Text style={styles.tloPodpis}>{stan.widok.liczbaSystemowa}</Text>
+                    </View>
+                  ) : null}
                 </>
               )}
 

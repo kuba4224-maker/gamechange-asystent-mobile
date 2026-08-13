@@ -26,6 +26,9 @@
 // zawodnik może mieć Bloki w dwóch segmentach jednego filaru, jeśli mieszczą
 // się w budżecie.
 
+// PLAN-D-J 08.2026 — ograniczenia arbitra (sekcja na końcu pliku).
+import { obowiazuje, type StanOgraniczen, type Obowiazuje } from './ograniczenia';
+
 /** Kształt zwracany przez `focus_budget_state()` (odczyt 10.08.2026). */
 export type BudzetStan = {
   limit_blokow: number;
@@ -127,4 +130,146 @@ export function isBudzetError(e: unknown): boolean {
   if (!err) return false;
   if (err.code === 'GC001') return true;
   return typeof err.message === 'string' && err.message.trim().startsWith('BUDZET_UWAGI:');
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PLAN-D-J 08.2026 (12.08.2026) — OGRANICZENIA ARBITRA DOCIERAJĄ DO BLOKU
+// ─────────────────────────────────────────────────────────────────────
+// Do 12.08.2026 arbiter potrafił stwierdzić, że zawodnik rośnie szybciej niż
+// 7,2 cm/rok, i włączał stan „Blok nie zwiększa objętości" (spec 3.2) —
+// a planer Bloku o tym stanie NIE WIEDZIAŁ, bo cron wyrzucał `ograniczenia`
+// przed zapisem. Zawodnik w szczycie wzrastania, czyli w okresie, w którym
+// urazy zabierają 96 zamiast 24 dni absencji na 1000 godzin, dostawał od
+// produktu dokładnie to samo zaproszenie do podbicia objętości co każdy inny.
+//
+// ⚠️ TO JEST STAN, NIE KOMUNIKAT. Funkcje niżej nie budują kartki o Osłonie —
+// zmieniają LICZBY, którymi planer się posługuje. Kartkę (kartę głosu tygodnia
+// „Rośniesz teraz szybko") produkt już ma i jej brzmienie jest zatwierdzone.
+
+
+/**
+ * Ile tygodni wolno zaplanować, gdy trwa stan „czekam na decyzję" (P5, spec 6.4:
+ * „horyzont BLOKU skraca się do daty decyzji, zamiast planować ślepo na osiem
+ * tygodni").
+ *
+ * ⚠️ DATY DECYZJI NIE MA I ŚWIADOMIE NIE BĘDZIE. Pas I rozstrzygnął to wprost:
+ * kolumna, do której nic nie pisze, jest cichym brakiem. Skrócenie jest więc
+ * logiczne, nie kalendarzowe — i musi być JAKĄŚ liczbą.
+ *
+ * ⚠️ TA LICZBA JEST DECYZJĄ PRODUKTOWĄ I CZEKA NA KUBĘ (nota przekazania J,
+ * zadanie „jedna decyzja"). Cztery tygodnie to najkrótszy horyzont, przy którym
+ * Blok nadal cokolwiek znaczy — poniżej zawodnik planuje pojedyncze sesje,
+ * a nie pracę. Osiem to wartość domyślna, której ten stan ma właśnie unikać.
+ */
+export const TYGODNI_PRZY_CZEKAM_NA_DECYZJE = 4;
+
+export type SufitObjetosci = {
+  /** Górna granica sesji w tygodniu ŁĄCZNIE. `null` = nie znam budżetu. */
+  maxJednostek: number | null;
+  /** Ile jeszcze wolno dołożyć. `null` = nie znam budżetu. */
+  wolneJednostki: number | null;
+  /** Trzy stany, nigdy dwa. */
+  ograniczenie: Obowiazuje;
+  /**
+   * Spec 3.2: „BLOK nie proponuje zwiększenia objętości; JEŚLI JUŻ ZAPLANOWAŁ —
+   * PROPONUJE REDUKCJĘ". To jest ta druga połowa zdania.
+   */
+  proponowacRedukcje: boolean;
+  /** Zdanie do konsoli i do raportu. Nigdy na ekran zawodnika. */
+  powod: string;
+};
+
+/**
+ * Sufit tygodniowy Bloku po nałożeniu ograniczenia `blokNieZwiekszaObjetosci`.
+ *
+ * REGUŁA, KTÓRA Z TEGO WYCHODZI:
+ *   • ograniczenie NIE obowiązuje → sufit to normalny limit budżetu uwagi;
+ *   • ograniczenie OBOWIĄZUJE     → sufit spada do tego, co zawodnik JUŻ robi
+ *     (minimum 1, żeby ktoś, kto nie ma jeszcze nic, mógł zacząć od jednej
+ *     sesji — produkt nie może przestać działać przez cały skok wzrostowy);
+ *   • NIE WIEM                    → sufit zostaje normalny, ale stan jest
+ *     NAZWANY. Zaciśnięcie na domyśle odcięłoby planowanie każdemu, kto nie
+ *     ma pomiarów wzrostu, czyli dziś prawie wszystkim.
+ */
+export function sufitObjetosci(budzet: BudzetView, stanOgraniczen: StanOgraniczen): SufitObjetosci {
+  const ograniczenie = obowiazuje(stanOgraniczen, 'blokNieZwiekszaObjetosci');
+
+  if (budzet.kind !== 'ready') {
+    // R5: brak budżetu to nie zero. Nie zmyślamy sufitu z niczego.
+    return {
+      maxJednostek: null,
+      wolneJednostki: null,
+      ograniczenie,
+      proponowacRedukcje: false,
+      powod: `nie znam budżetu uwagi (${budzet.kind}) — sufitu nie liczę`,
+    };
+  }
+
+  const s = budzet.stan;
+  if (ograniczenie === 'tak') {
+    const max = Math.max(1, s.uzyte_jednostki);
+    return {
+      maxJednostek: max,
+      wolneJednostki: Math.max(0, max - s.uzyte_jednostki),
+      ograniczenie,
+      // „Już zaplanował" = ma cokolwiek zajęte. Wtedy nie ma czego dołożyć
+      // i jedyne, co planer może zaproponować, to zejście niżej.
+      proponowacRedukcje: s.uzyte_jednostki > 0,
+      powod: 'blokNieZwiekszaObjetosci obowiązuje: sufit spada z '
+        + `${s.limit_jednostek} do ${max} (tyle, ile już robisz)`,
+    };
+  }
+
+  return {
+    maxJednostek: s.limit_jednostek,
+    wolneJednostki: s.wolne_jednostki,
+    ograniczenie,
+    proponowacRedukcje: false,
+    powod: ograniczenie === 'nie_wiem'
+      ? 'blokNieZwiekszaObjetosci NIEROZSTRZYGNIĘTE — sufit zostaje normalny, '
+        + 'bo zaciskanie na domyśle odcięłoby planowanie wszystkim bez pomiarów wzrostu'
+      : 'blokNieZwiekszaObjetosci nie obowiązuje — sufit normalny',
+  };
+}
+
+/**
+ * Ile dni tygodnia wolno mieć zaznaczonych. Osobno od `sufitObjetosci`, bo
+ * planer zaznacza dni PO tym, jak zawodnik zadeklarował częstotliwość, a
+ * ograniczenie musi obciąć obie liczby, nie jedną.
+ */
+export function ograniczLiczbeDni(ileZaznaczono: number, sufit: SufitObjetosci): number {
+  if (sufit.maxJednostek === null) return ileZaznaczono;
+  return Math.min(ileZaznaczono, Math.max(1, sufit.maxJednostek));
+}
+
+export type SufitTygodni = {
+  maxTygodni: number;
+  ograniczenie: Obowiazuje;
+  powod: string;
+};
+
+/**
+ * Horyzont Bloku po nałożeniu ograniczenia `blokSkracaHoryzontDoDecyzji` (P5).
+ *
+ * ⚠️ MECHANIZM DZIAŁA, ALE NIKT DZIŚ NIE USTAWIA STANU `paused_decision` —
+ * nie ma dla niego wejścia w produkcie (zakaz 2.3 z noty pasa I; budowa wejścia
+ * to osobne polecenie, bo wymaga brzmień Kuby). Ta funkcja jest tu po to, żeby
+ * w dniu, w którym wejście powstanie, nie trzeba było ruszać planera.
+ */
+export function sufitTygodni(zadanoTygodni: number, stanOgraniczen: StanOgraniczen): SufitTygodni {
+  const ograniczenie = obowiazuje(stanOgraniczen, 'blokSkracaHoryzontDoDecyzji');
+  if (ograniczenie === 'tak') {
+    return {
+      maxTygodni: Math.min(zadanoTygodni, TYGODNI_PRZY_CZEKAM_NA_DECYZJE),
+      ograniczenie,
+      powod: `blokSkracaHoryzontDoDecyzji obowiązuje: horyzont skrócony do ${TYGODNI_PRZY_CZEKAM_NA_DECYZJE} tyg.`,
+    };
+  }
+  return {
+    maxTygodni: zadanoTygodni,
+    ograniczenie,
+    powod: ograniczenie === 'nie_wiem'
+      ? 'blokSkracaHoryzontDoDecyzji NIEROZSTRZYGNIĘTE — horyzont bez zmian'
+      : 'blokSkracaHoryzontDoDecyzji nie obowiązuje — horyzont bez zmian',
+  };
 }

@@ -46,7 +46,28 @@ import {
   jednostkiSlowo,
   budzetBlokadaKomunikat,
   isBudzetError,
+  sufitObjetosci,
+  sufitTygodni,
+  ograniczLiczbeDni,
+  type SufitObjetosci,
 } from '../lib/budzetUwagi';
+// PLAN-D-J 08.2026 (12.08.2026) — CO OBOWIĄZUJE W TYM TYGODNIU.
+// Arbiter potrafił od 12.08.2026 stwierdzić, że zawodnik rośnie szybciej niż
+// 7,2 cm/rok, i włączyć stan „Blok nie zwiększa objętości" (spec 3.2) —
+// a TEN komponent o tym nie wiedział, bo cron wyrzucał `ograniczenia` przed
+// zapisem. Zawodnik w szczycie wzrastania dostawał to samo zaproszenie do
+// podbicia objętości co każdy inny.
+// ⚠️ To jest STAN, nie KOMUNIKAT: zmieniają się LICZBY, którymi planer się
+// posługuje. Kartka o Osłonie („Rośniesz teraz szybko") jest na ekranie „Dziś"
+// i jej brzmienie jest zatwierdzone — drugiej tu nie dokładamy.
+import {
+  czytajOgraniczenia,
+  isMissingOgraniczeniaColumnError,
+  KOLUMNA_OGRANICZEN,
+  opisOgraniczenDoLogu,
+  type StanOgraniczen,
+} from '../lib/ograniczenia';
+import { poniedzialekTygodnia as poniedzialekGlosu } from '../lib/glosTygodnia';
 
 const FOCUS_BLOCK_DOSING_API_URL = 'https://gamechange-app.vercel.app/api/generate-focus-block-dosing';
 
@@ -130,6 +151,12 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
   const [budzet, setBudzet] = useState<BudzetView>({ kind: 'loading' });
   const [otwarteBloki, setOtwarteBloki] = useState<OtwartyBlok[]>([]);
 
+  // PLAN-D-J 08.2026 — stan początkowy to `nie_odczytane`, nigdy „nic nie
+  // obowiązuje". Przed odczytem nie wiadomo, czy zawodnik jest w Osłonie.
+  const [ograniczenia, setOgraniczenia] = useState<StanOgraniczen>(
+    { rodzaj: 'nie_odczytane', powod: 'jeszcze nie odczytano' },
+  );
+
   const loadBudzet = useCallback(async () => {
     // `focus_budget_state()` to jedyne źródło liczb budżetu — appka NIE liczy
     // ich sama, żeby nie powstała druga definicja tego samego limitu.
@@ -168,10 +195,38 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
     })));
   }, [currentUserId]);
 
+  // PLAN-D-J 08.2026 — ograniczenia na BIEŻĄCY tydzień, tym samym poniedziałkiem
+  // co ekran „Dziś" i backend. Osobne, wąskie zapytanie: gdyby dołożyć kolumnę
+  // do któregoś z istniejących, PostgREST odrzuciłby CAŁE zapytanie, dopóki
+  // migracja J1 nie jest wykonana — i planer przestałby działać.
+  const loadOgraniczenia = useCallback(async () => {
+    const { data, error: err } = await supabase
+      .from('weekly_voice')
+      .select(`week_start, ${KOLUMNA_OGRANICZEN}`)
+      .eq('user_id', currentUserId)
+      .eq('week_start', poniedzialekGlosu(new Date()))
+      .limit(1);
+    if (err && isMissingOgraniczeniaColumnError(err)) {
+      // Migracja J1 jeszcze niewykonana. To jest „nie wiem", nie „nic nie obowiązuje".
+      const stan = czytajOgraniczenia(undefined, `kolumny „${KOLUMNA_OGRANICZEN}" nie ma jeszcze w bazie`);
+      console.warn(`[ograniczenia] ${opisOgraniczenDoLogu(stan)}`);
+      setOgraniczenia(stan);
+      return;
+    }
+    const wiersz = (data ?? [])[0] as Record<string, unknown> | undefined;
+    const stan = czytajOgraniczenia(
+      wiersz ? wiersz[KOLUMNA_OGRANICZEN] : null,
+      err ? err.message : null,
+    );
+    console.log(`[ograniczenia] ${opisOgraniczenDoLogu(stan)}`);
+    setOgraniczenia(stan);
+  }, [currentUserId]);
+
   useEffect(() => {
     loadBudzet();
     loadOtwarteBloki();
-  }, [loadBudzet, loadOtwarteBloki]);
+    loadOgraniczenia();
+  }, [loadBudzet, loadOtwarteBloki, loadOgraniczenia]);
 
   // --- Krok "co precyzyjnie" — reużywa wzorzec Obszar→Element→"opisz sam"
   // z cele.tsx (Tor 7 Krok 4), zawężony do stałego segmentu tego celu. ---
@@ -295,10 +350,23 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
           console.warn('[dozowanie] sourceHint.wersja > 1 — sprawdź kontrakt fazy 1 (raport A rundy 6, sekcja 13) zamiast zgadywać.');
         }
       }
+      // PLAN-D-J 08.2026 — ⚠️ TO JEST SEDNO ZDANIA ZE SPEC 3.2: „BLOK NIE
+      // PROPONUJE zwiększenia objętości". Endpoint dozowania nic nie wie
+      // o Osłonie i potrafi zaproponować pięć dni. Przycinamy JEGO propozycję,
+      // zamiast liczyć na to, że zawodnik sam odznaczy.
+      const dniZPropozycji: string[] = Array.from(new Set<string>(data.suggestion.days));
+      const ileWolno = ograniczLiczbeDni(dniZPropozycji.length, sufit);
+      const tygodnie = sufitTygodni(data.suggestion.weeks, ograniczenia);
+      if (ileWolno < dniZPropozycji.length) {
+        console.log(`[ograniczenia] przycinam propozycję dozowania z ${dniZPropozycji.length} do ${ileWolno} dni — ${sufit.powod}`);
+      }
+      if (tygodnie.maxTygodni < data.suggestion.weeks) {
+        console.log(`[ograniczenia] skracam horyzont z ${data.suggestion.weeks} do ${tygodnie.maxTygodni} tyg. — ${tygodnie.powod}`);
+      }
       setSuggestion({
-        days: new Set<string>(data.suggestion.days),
+        days: new Set<string>(dniZPropozycji.slice(0, ileWolno)),
         durationMinutes: data.suggestion.durationMinutes,
-        weeks: data.suggestion.weeks,
+        weeks: tygodnie.maxTygodni,
         reasoning: data.suggestion.reasoning,
         sourceHint,
       });
@@ -317,7 +385,17 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
   const toggleSuggestionDay = (code: string) => {
     if (!suggestion) return;
     const next = new Set(suggestion.days);
-    if (next.has(code)) next.delete(code); else next.add(code);
+    if (next.has(code)) next.delete(code);
+    else {
+      // PLAN-D-J 08.2026 — sufit obowiązuje także przy ręcznej edycji dni.
+      // Bez tego przycinanie propozycji byłoby ozdobą: zawodnik odklikałby
+      // z powrotem to, co system właśnie zdjął.
+      if (sufit.maxJednostek !== null && next.size >= sufit.maxJednostek) {
+        console.log(`[ograniczenia] nie dokładam dnia — sufit ${sufit.maxJednostek}: ${sufit.powod}`);
+        return;
+      }
+      next.add(code);
+    }
     setSuggestion({ ...suggestion, days: next });
   };
 
@@ -443,6 +521,19 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
               : 'Nie masz teraz miejsca na nowy Blok — zamknij jeden z otwartych na liście wąskich gardeł.'}
           </Text>
         ) : null}
+        {/* PLAN-D-J 08.2026 — ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ (nowe).
+            To jest JEDYNE zdanie, które ta runda dokłada do interfejsu, i jest
+            konieczne: bez niego zawodnik widzi, że nagle nie może dołożyć sesji,
+            i nie wie dlaczego. Świadomie ZERO liczby o dojrzałości biologicznej
+            (zakaz bezwzględny, spec 3.3) i zero zakazu — mowa o tym, czego
+            system NIE PROPONUJE, nie o tym, czego zawodnikowi nie wolno. */}
+        {objetoscZamrozona ? (
+          <Text style={styles.budzetWarn}>
+            {sufit.proponowacRedukcje
+              ? 'Rośniesz teraz szybko, więc nie podbijamy Ci objętości treningu. Zostajemy przy tym, co już robisz — a jeśli coś ma się zmienić, to raczej w dół.'
+              : 'Rośniesz teraz szybko, więc zaczynamy od jednej sesji w tygodniu. To jest okres, w którym urazy zabierają najwięcej dni.'}
+          </Text>
+        ) : null}
       </View>
     );
   };
@@ -451,9 +542,18 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
   // zawodnika, na kroku sugestii — liczba zaznaczonych dni (to ona idzie do
   // `sessions_per_week`, patrz `confirmAndSave`).
   const kosztPlanowany = step === 'suggestion' && suggestion ? suggestion.days.size : sessionsPerWeek;
+
+  // PLAN-D-J 08.2026 — SUFIT OBJĘTOŚCI. Cała reguła i całe uzasadnienie siedzą
+  // w `lib/budzetUwagi.ts` (`sufitObjetosci`), razem z selftestem. Tutaj tylko
+  // użycie. Gdy ograniczenie nie obowiązuje albo jest NIEROZSTRZYGNIĘTE, sufit
+  // jest równy zwykłemu limitowi i planer zachowuje się co do piksela jak przed
+  // tą rundą.
+  const sufit: SufitObjetosci = sufitObjetosci(budzet, ograniczenia);
+  const objetoscZamrozona = sufit.ograniczenie === 'tak';
+
   const renderKoszt = () => {
     if (budzet.kind !== 'ready' || kosztPlanowany <= 0) return null;
-    const wolne = budzet.stan.wolne_jednostki;
+    const wolne = sufit.wolneJednostki ?? budzet.stan.wolne_jednostki;
     if (kosztPlanowany <= wolne) {
       return (
         <Text style={styles.budzetOk}>
@@ -575,8 +675,12 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
     <View>
       <Text style={styles.recapText}>{confirmedText}</Text>
       <Text style={styles.label}>Ile razy w tygodniu realistycznie możesz na to poświęcić czas?</Text>
+      {/* PLAN-D-J 08.2026 — przy „Blok nie zwiększa objętości" liczby powyżej
+          sufitu W OGÓLE SIĘ NIE POJAWIAJĄ. Świadomie zniknięcie, a nie wyszarzenie:
+          budżet uwagi ma być liczbą pokazaną ZANIM zawodnik wybierze, a nie regułą,
+          o której dowiaduje się, uderzając w nią na końcu przepływu. */}
       <View style={styles.numRow}>
-        {SESSIONS_OPTIONS.map((n) => (
+        {SESSIONS_OPTIONS.filter((n) => sufit.maxJednostek === null || n <= sufit.maxJednostek).map((n) => (
           <TouchableOpacity
             key={n}
             style={[styles.numBtn, sessionsPerWeek === n && styles.numBtnActive]}
