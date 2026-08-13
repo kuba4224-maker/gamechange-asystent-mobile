@@ -12,12 +12,17 @@
 //
 // ⚠️ CZEGO TEN PLIK NIE SPRAWDZA: czy zapytanie do Supabase zwraca to, co
 // trzeba (to jest w `app/(tabs)/dzis.tsx`), ani jak karta wygląda.
+import { readFileSync } from 'node:fs';
+// ⚠️ NIE `new URL(...)` (poprawka 13.08.2026, błąd TS2769). `tsconfig.json` appki
+// ciągnie bibliotekę DOM, więc `URL` rozstrzyga się na typ DOM-owy, a `readFileSync`
+// oczekuje `URL` z `node:url`. Te dwa typy są niezgodne i kontrola typów pada —
+// mimo że w czasie działania wszystko chodzi. Wzorzec niżej jest w tym repozytorium
+// sprawdzony: tak samo czyta pliki `lib/ostatniCentymetr.selftest.ts` i `tsc` go przepuszcza.
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   stanGlosu,
   pokazacKarte,
-  wejscieZKarty,
-  OTWORZ_KALIBRACJE,
-  KARTA_WEJSCIE_LABEL,
   podniescPunktPomocy,
   opisDoLogu,
   poniedzialekTygodnia,
@@ -88,7 +93,7 @@ check('data ma dwucyfrowy miesiąc i dzień (format bazy)',
 // ═══════════════════════════════════════════════════════════════════
 // 3. GŁOSY, KTÓRE MAJĄ KARTĘ
 // ═══════════════════════════════════════════════════════════════════
-for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]) {
+for (const g of ['exit', 'injury', 'growth', 'compass'] as Glos[]) {
   const s = stanGlosu(wiersz(g));
   check(`${g}: rysuje kartę`, pokazacKarte(s), s.rodzaj);
   check(`${g}: karta ma tytuł i treść, obie niepuste`,
@@ -118,7 +123,7 @@ for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]
 // Drugie z nich jest całym budżetem uwagi: refrakcje (Osłona co kilka tygodni,
 // kontuzja pytająca o powrót po sześciu) polegają na tym, że wiersz istnieje,
 // stan obowiązuje, a produkt MILCZY. Do 13.08.2026 ekran czytał tylko pierwsze.
-for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]) {
+for (const g of ['exit', 'injury', 'growth', 'compass'] as Glos[]) {
   const milczy = stanGlosu(wierszMilczacy(g));
   const mowi = stanGlosu(wiersz(g));
 
@@ -140,8 +145,6 @@ for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]
     cisza.rodzaj === 'cisza' && milczacaOslona.rodzaj === 'glos'
     && opisDoLogu(cisza) !== opisDoLogu(milczacaOslona),
     `${opisDoLogu(cisza)} || ${opisDoLogu(milczacaOslona)}`);
-  check('(N3) milcząca kalibracja nie ma też wejścia — nie zapraszamy do ekranu bez odezwania',
-    wejscieZKarty(stanGlosu(wierszMilczacy('calibration'))) === null, 'calibration/milczy');
 }
 {
   // ⚠️ ŚWIADOMY WYJĄTEK. Punkt pomocy reaguje na STAN, nie na GŁOS. Kontuzja
@@ -155,38 +158,27 @@ for (const g of ['exit', 'injury', 'growth', 'compass', 'calibration'] as Glos[]
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 3a. PLAN-D-I 08.2026 (12.08.2026) — I1: KARTA MA DOKĄD PROWADZIĆ
+// 3a. ⚠️ TU BYŁO ZADANIE I1 („KARTA MA DOKĄD PROWADZIĆ") — 10 ASERCJI
 // ═══════════════════════════════════════════════════════════════════
+// PLAN-D-P 08.2026 (13.08.2026). Pilnowały, że karta „Czas na pomiar" prowadzi
+// do modala Kalibracji w zakładce „Ja", że parametr trasy jest JEDNĄ stałą,
+// i że pozostałe głosy NIE prowadzą nigdzie.
+//
+// Kalibracja została usunięta z produktu w całości
+// (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md), a była JEDYNYM głosem
+// z wejściem — więc `wejscieZKarty()`, `OTWORZ_KALIBRACJE`
+// i `KARTA_WEJSCIE_LABEL` odeszły razem z nią, zamiast zostać funkcją, która
+// zawsze zwraca `null`. Nie ma czego testować i nazywam to wprost, zamiast po
+// cichu skrócić plik.
+//
+// ⚠️ CO ZOSTAJE PILNOWANE: nowa asercja niżej sprawdza, że karta głosu tygodnia
+// NIE DOSTAŁA po cichu wejścia z powrotem — bo gdyby dostała, byłoby to
+// zaproszenie do ekranu, którego nie ma.
 {
-  const s = stanGlosu(wiersz('calibration'));
-  const w = wejscieZKarty(s);
-  check('(I1) karta „Czas na pomiar" PROWADZI gdzieś — do 12.08.2026 nie prowadziła nigdzie',
-    w !== null, JSON.stringify(w));
-  check('(I1) …i prowadzi do ISTNIEJĄCEGO ekranu w zakładce „Ja", nie do nowej trasy',
-    w !== null && w.trasa === '/ja', JSON.stringify(w));
-  check('(I1) …parametrem, po którym „Ja" otwiera swój JEDYNY egzemplarz modala',
-    w !== null && w.otworz === OTWORZ_KALIBRACJE && OTWORZ_KALIBRACJE === 'kalibracja', JSON.stringify(w));
-  check('(I1) …i ma niepustą etykietę wejścia', w !== null && w.etykieta === KARTA_WEJSCIE_LABEL && w.etykieta.length > 5, JSON.stringify(w));
-}
-for (const g of ['exit', 'injury', 'growth', 'compass'] as Glos[]) {
-  check(`(I1) ${g}: karta NIE prowadzi nigdzie — nie ma dokąd, a link donikąd jest gorszy niż jego brak`,
-    wejscieZKarty(stanGlosu(wiersz(g))) === null, g);
-}
-{
-  check('(I1) block nie ma karty, więc nie ma i wejścia',
-    wejscieZKarty(stanGlosu(wiersz('block'))) === null, 'block');
-  check('(I1) cisza nie ma wejścia — cisza jest decyzją, a nie zaproszeniem',
-    wejscieZKarty(stanGlosu(wiersz('silence'))) === null, 'silence');
-  check('(I1) brak wiersza nie ma wejścia', wejscieZKarty(stanGlosu(null, null)) === null, 'brak_wiersza');
-  check('(I1) błąd odczytu nie ma wejścia — nie zapraszamy do ekranu na podstawie niewiedzy',
-    wejscieZKarty(stanGlosu(null, 'network request failed')) === null, 'nie_wiem');
-}
-{
-  // Strażnik dubla: wejście z karty i wiersz w „Ja" MUSZĄ prowadzić do tego
-  // samego modala. Ten test nie umie tego udowodnić sam — pilnuje tego, żeby
-  // parametr był JEDNĄ stałą, a nie napisem powtórzonym w dwóch plikach.
-  check('(I1) parametr wejścia jest stałą eksportowaną, nie napisem wklepanym w ekranie',
-    typeof OTWORZ_KALIBRACJE === 'string' && OTWORZ_KALIBRACJE.length > 0, OTWORZ_KALIBRACJE);
+  const zrodlo = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'glosTygodnia.ts'), 'utf8');
+  check('(P) karta głosu tygodnia nie ma wejścia i nikt go nie przywrócił',
+    !/export function wejscieZKarty/.test(zrodlo) && !/OTWORZ_KALIBRACJE/.test(zrodlo.replace(/\/\/.*$/gm, '')),
+    'wróciło wejście z karty — a ekranu, do którego prowadziło, nie ma');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -220,12 +212,6 @@ for (const g of ['exit', 'injury', 'growth', 'compass'] as Glos[]) {
   check('…i nie żąda niczego od zawodnika', /Nic nie musisz/.test(tresc), tresc);
 }
 {
-  const kal = stanGlosu(wiersz('calibration'));
-  const tresc = kal.rodzaj === 'glos' ? kal.tresc : '';
-  check('kalibracja wymienia WSZYSTKIE trzy warunki standaryzacji',
-    /pora dnia/.test(tresc) && /nawierzchnia/.test(tresc) && /obuwie/.test(tresc), tresc);
-}
-{
   const kom = stanGlosu(wiersz('compass'));
   const tresc = kom.rodzaj === 'glos' ? kom.tresc : '';
   check('Kompas mówi, że nic się nie zmieni bez decyzji zawodnika (spec 6.2)',
@@ -237,7 +223,7 @@ for (const g of ['exit', 'injury', 'growth', 'compass'] as Glos[]) {
 // ═══════════════════════════════════════════════════════════════════
 check('kontuzja → punkt pomocy podniesiony', podniescPunktPomocy(stanGlosu(wiersz('injury'))), 'injury');
 check('ścieżka wyjścia → punkt pomocy podniesiony', podniescPunktPomocy(stanGlosu(wiersz('exit'))), 'exit');
-for (const g of ['growth', 'compass', 'calibration', 'block', 'silence'] as Glos[]) {
+for (const g of ['growth', 'compass', 'block', 'silence'] as Glos[]) {
   check(`${g} → punkt pomocy NIE jest podnoszony (to nie klasyfikator ryzyka)`,
     !podniescPunktPomocy(stanGlosu(wiersz(g))), g);
 }

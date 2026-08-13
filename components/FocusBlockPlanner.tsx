@@ -47,7 +47,6 @@ import {
   budzetBlokadaKomunikat,
   isBudzetError,
   sufitObjetosci,
-  sufitTygodni,
   ograniczLiczbeDni,
   type SufitObjetosci,
 } from '../lib/budzetUwagi';
@@ -356,17 +355,17 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
       // zamiast liczyć na to, że zawodnik sam odznaczy.
       const dniZPropozycji: string[] = Array.from(new Set<string>(data.suggestion.days));
       const ileWolno = ograniczLiczbeDni(dniZPropozycji.length, sufit);
-      const tygodnie = sufitTygodni(data.suggestion.weeks, ograniczenia);
       if (ileWolno < dniZPropozycji.length) {
         console.log(`[ograniczenia] przycinam propozycję dozowania z ${dniZPropozycji.length} do ${ileWolno} dni — ${sufit.powod}`);
       }
-      if (tygodnie.maxTygodni < data.suggestion.weeks) {
-        console.log(`[ograniczenia] skracam horyzont z ${data.suggestion.weeks} do ${tygodnie.maxTygodni} tyg. — ${tygodnie.powod}`);
-      }
+      // ⚠️ PLAN-D-P 08.2026 (13.08.2026) — TU STAŁO SKRÓCENIE HORYZONTU
+      // (`sufitTygodni`). Jedyną przesłanką był stan „czekam na decyzję", którego
+      // nie dało się nigdzie włączyć; cała gałąź została skasowana (zadanie P8).
+      // Liczba tygodni idzie od tej rundy prosto z propozycji dozowania.
       setSuggestion({
         days: new Set<string>(dniZPropozycji.slice(0, ileWolno)),
         durationMinutes: data.suggestion.durationMinutes,
-        weeks: tygodnie.maxTygodni,
+        weeks: data.suggestion.weeks,
         reasoning: data.suggestion.reasoning,
         sourceHint,
       });

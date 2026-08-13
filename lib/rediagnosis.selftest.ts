@@ -48,6 +48,8 @@ import {
   resolveLivingDiagnosisWording,
 } from './livingDiagnosisQuestionBank';
 import { segmentLabel } from './labels';
+// PLAN-D-P 08.2026 (13.08.2026) — reguła uratowana z Kalibracji, sekcja (P5) niżej.
+import { czytajOgraniczenia, czyOslonaAktywna } from './ograniczenia';
 
 let passed = 0;
 const failures: string[] = [];
@@ -312,6 +314,79 @@ const konc = buildRediagnosisView({
 eq('koncentracja: „prawie nigdy nie wracam do błędu" to WZROST', konc.direction, 'up');
 eq('koncentracja: pasek dziś na górze', konc.afterBarPercent, 100);
 
+// ═════════════════════════════════════════════════════════════
+// (P5) OSŁONA PRZERAMOWUJE SPADEK — reguła uratowana z Kalibracji
+// ═════════════════════════════════════════════════════════════
+// Reguła: „spadku nie nazywa się spadkiem u kogoś, kto akurat szybko rośnie".
+// Do 13.08.2026 mieszkała w `lib/kalibracja.ts` i zginęłaby razem z nią.
+//
+// ⚠️ NAJDROŻSZY BŁĄD TEJ GAŁĘZI nie jest kosmetyczny: powiedzenie „rośniesz
+// i dlatego ta liczba spadła" komuś, kto NIE rośnie (np. ma kontuzję), jest
+// podaniem prawdopodobnego jako pewnego. Dlatego asercje niżej sprawdzają
+// przede wszystkim, kiedy produkt ma MILCZEĆ o wzrastaniu.
+{
+  const koperta = (aktywne: string[], nieznane: string[] = []) => czytajOgraniczenia({
+    wersja: 1, aktywne, nieznane_ograniczenia: nieznane, nieznane: [],
+  });
+  const OSLONA = koperta(['blokNieZwiekszaObjetosci']);
+  const KONTUZJA = koperta(['blokNieZwiekszaObjetosci', 'systemMilczyOCelach']);
+  const SPOKOJ = koperta([]);
+  const NIEROZSTRZYGNIETE = koperta([], ['blokNieZwiekszaObjetosci']);
+  const widok = (answerValue: number, ograniczenia: any) => buildRediagnosisView({
+    segmentId: 'regeneracja', baseline: READY, answerValue, weeks: 6, ograniczenia,
+  }) as any;
+
+  // 1. Wyprowadzenie stanu Osłony z koperty — sedno, bo wszystko inne z niego wynika.
+  eq('(P5) blok=tak, kontuzja=nie → Osłona OBOWIĄZUJE', czyOslonaAktywna(OSLONA), 'tak');
+  eq('(P5) blok=tak, kontuzja=tak → NIE WIEM (przesłanki nierozróżnialne)',
+    czyOslonaAktywna(KONTUZJA), 'nie_wiem');
+  eq('(P5) blok=nie → Osłona NIE obowiązuje', czyOslonaAktywna(SPOKOJ), 'nie');
+  eq('(P5) blok nierozstrzygnięty → NIE WIEM', czyOslonaAktywna(NIEROZSTRZYGNIETE), 'nie_wiem');
+  eq('(P5) koperty nie odczytano → NIE WIEM, nigdy „nie"',
+    czyOslonaAktywna(czytajOgraniczenia(undefined, 'błąd sieci')), 'nie_wiem');
+
+  // 2. Spadek przy Osłonie — nie nazywa się spadkiem.
+  const spadekOslona = widok(2, OSLONA);
+  eq('(P5) spadek przy Osłonie: kierunek nadal „down" — liczby nie fałszujemy',
+    spadekOslona.direction, 'down');
+  eq('(P5) …i widok mówi wprost, że przeramował', spadekOslona.oslona, 'tak');
+  check('(P5) …nagłówek NIE nazywa tego spadkiem',
+    !/w dół/i.test(spadekOslona.headline));
+  check('(P5) …i mówi wprost, że to nie jest cofnięcie się',
+    /nie jest cofnięcie/i.test(spadekOslona.body));
+  check('(P5) …i nie podaje ANI JEDNEJ liczby o dojrzałości biologicznej',
+    !/\d/.test(spadekOslona.headline) && !/\d/.test(spadekOslona.body));
+  check('(P5) …i nadal daje jedną rzecz do zrobienia (zakaz 17 / M4)',
+    /sn(u|em)|objętoś/i.test(spadekOslona.body));
+
+  // 3. Brak zmiany przy Osłonie — to jest OSIĄGNIĘCIE (P1 z ZASADY_OBOWIAZUJACE).
+  const plaskoOslona = widok(3, OSLONA);
+  eq('(P5) bez zmiany przy Osłonie: kierunek nadal „flat"', plaskoOslona.direction, 'flat');
+  check('(P5) …a utrzymanie wyniku jest NAZWANE osiągnięciem, nie „brakiem zmian"',
+    /utrzyma/i.test(plaskoOslona.headline) && !/tak samo/i.test(plaskoOslona.headline));
+
+  // 4. Wzrost przy Osłonie — brzmienie się NIE zmienia.
+  eq('(P5) wzrost przy Osłonie mówi to samo co bez niej',
+    widok(5, OSLONA).body, widok(5, SPOKOJ).body);
+
+  // 5. ⛔ TRZY PRZYPADKI, W KTÓRYCH PRODUKT NIE MA PRAWA POWIEDZIEĆ „ROŚNIESZ".
+  for (const [nazwa, stan] of [
+    ['kontuzja (przesłanki nierozróżnialne)', KONTUZJA],
+    ['spokojny tydzień', SPOKOJ],
+    ['ograniczenie nierozstrzygnięte', NIEROZSTRZYGNIETE],
+  ] as const) {
+    const w = widok(2, stan);
+    check(`(P5) ⛔ ${nazwa}: spadek NIE jest przeramowany`,
+      w.oslona !== 'tak' && /w dół/i.test(w.headline) && !/rośniesz/i.test(w.body));
+  }
+  const bezKoperty = buildRediagnosisView({
+    segmentId: 'regeneracja', baseline: READY, answerValue: 2, weeks: 6,
+  }) as any;
+  eq('(P5) ⛔ wywołanie BEZ koperty zachowuje się co do znaku jak przed rundą P',
+    bezKoperty.body, widok(2, SPOKOJ).body);
+  eq('(P5) …i nazywa swój stan „nie_wiem", a nie „nie"', bezKoperty.oslona, 'nie_wiem');
+}
+
 // ─────────────────────────────────────────────────────────────
 // WYPIS — sekcja 11 raportu zwrotnego
 // ─────────────────────────────────────────────────────────────
@@ -374,6 +449,20 @@ printChange('Przypadek 5 — segment odwrócony (Koncentracja, odpowiedź: 1 „
   konc);
 printChange('Przypadek 6 — zapis się nie udał (odpowiedź: 5, tabela niedostępna)',
   notSaved);
+
+// ⚠️ DWA PRZYPADKI DO PRZEJRZENIA PRZEZ KUBĘ — brzmienia nowe 13.08.2026 (P5).
+{
+  const OSLONA = czytajOgraniczenia({
+    wersja: 1, aktywne: ['blokNieZwiekszaObjetosci'], nieznane_ograniczenia: [], nieznane: [],
+  });
+  console.log('\n\n⚠️  PONIŻSZE DWA — TEN SAM ZAWODNIK, ALE W SZCZYCIE SKOKU WZROSTOWEGO');
+  console.log('    (arbiter włączył Osłonę: tempo > 7,2 cm/rok, kontuzji nie ma).');
+  console.log('    Brzmienia NOWE 13.08.2026 — DO PRZEJRZENIA PRZEZ KUBĘ.');
+  printChange('Przypadek 8 — wynik w dół PRZY OSŁONIE (odpowiedź: 2 „Rzadko")',
+    buildRediagnosisView({ segmentId: 'regeneracja', baseline: READY, answerValue: 2, weeks: 6, ograniczenia: OSLONA }));
+  printChange('Przypadek 9 — bez zmiany PRZY OSŁONIE (odpowiedź: 3 „Raczej rzadko")',
+    buildRediagnosisView({ segmentId: 'regeneracja', baseline: READY, answerValue: 3, weeks: 6, ograniczenia: OSLONA }));
+}
 
 const noBase = buildRediagnosisView({ segmentId: 'regeneracja', baseline: { state: 'no_diagnosis' }, answerValue: null });
 console.log('\n### Przypadek 7 — zawodnik bez diagnozy sprzed bloku\n');

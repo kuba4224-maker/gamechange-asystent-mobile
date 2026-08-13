@@ -26,13 +26,22 @@
 // zawodnika są jego. Te są napisane tak, żeby były PRAWDZIWE i krótkie, i żeby
 // nie łamały zakazów, ale nie były przez niego zatwierdzone — patrz raport F.
 
-/** Wartości kolumny `weekly_voice.voice` — jeden do jednego z CHECK w bazie. */
+/**
+ * Wartości kolumny `weekly_voice.voice` — jeden do jednego z CHECK w bazie.
+ *
+ * ⚠️ PLAN-D-P 08.2026 (13.08.2026) — SIEDEM WARTOŚCI ZESZŁO DO SZEŚCIU.
+ * `calibration` zniknęło razem z całym narzędziem
+ * (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md). Drabina w backendzie
+ * (`gamechange-app/lib/arbiter-glosu.js`) ma od tej rundy SZEŚĆ szczebli,
+ * a CHECK w bazie sześć wartości — te trzy listy muszą się zgadzać.
+ * Wiersz z głosem spoza tego zbioru NIE jest ciszą: `stanGlosu` odpowiada
+ * `nie_wiem` („appka jest starsza niż baza"), patrz niżej.
+ */
 export type Glos =
   | 'exit'
   | 'injury'
   | 'growth'
   | 'compass'
-  | 'calibration'
   | 'block'
   | 'silence';
 
@@ -121,11 +130,6 @@ const BRZMIENIA: Record<Exclude<Glos, 'silence' | 'block'>, { tytul: string; tre
     tresc: 'Coś się zmieniło i warto zobaczyć, czy to, nad czym pracujesz, nadal jest tym właściwym. '
       + 'Nic się nie zmieni bez Twojej decyzji.',
   },
-  calibration: {
-    tytul: 'Czas na pomiar',
-    tresc: 'Zmierz to, co zapowiedziałeś — w tych samych warunkach co poprzednio: ta sama pora dnia, '
-      + 'ta sama nawierzchnia, to samo obuwie. Inaczej nie da się tych dwóch liczb porównać.',
-  },
 };
 
 /**
@@ -177,55 +181,23 @@ export function pokazacKarte(stan: StanGlosu): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I1: KARTA MA DOKĄD PROWADZIĆ
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — TU BYŁO WEJŚCIE Z KARTY GŁOSU TYGODNIA
 // ─────────────────────────────────────────────────────────────────────
-// Arbiter potrafił od 12.08.2026 powiedzieć „Czas na pomiar", ekran potrafił
-// tę kartę narysować — i na tym się kończyło. Ekran Kalibracji istniał
-// (`components/Kalibracja.tsx`, wiersz w zakładce „Ja"), ale zawodnik,
-// któremu produkt WŁAŚNIE powiedział „zmierz to, co zapowiedziałeś", musiał
-// go sobie sam znaleźć dwa dotknięcia dalej. To jest reguła R1 w czystej
-// postaci: rzecz zbudowana bez ostatnich dziesięciu procent.
+// Od 12.08.2026 (zadanie I1) karta „Czas na pomiar" prowadziła do zakładki
+// „Ja" parametrem `otworz`, a tamta otwierała modal Kalibracji. Zniknęły
+// wszystkie trzy części naraz: `wejscieZKarty()`, stała `OTWORZ_KALIBRACJE`
+// i etykieta `KARTA_WEJSCIE_LABEL`.
 //
-// ⚠️ KARTA PROWADZI DO ISTNIEJĄCEGO EKRANU, NIE OTWIERA DRUGIEGO.
-// Kalibracja jest pełnoekranowym modalem zamontowanym w `app/(tabs)/ja.tsx`
-// (świadomie, zakaz 10: żadnej piątej zakładki). Z ekranu „Dziś" nie da się
-// jej otworzyć wprost, bo modal żyje w stanie lokalnym tamtego ekranu —
-// dlatego karta NAWIGUJE do zakładki „Ja" z parametrem `otworz`, a „Ja"
-// otwiera swój jedyny egzemplarz modala. Drugi egzemplarz byłby drugą drogą
-// do jednego rekordu, czyli dokładnie tym, co blok B1 z produktu wyciął.
+// ⚠️ POWÓD, DLA KTÓREGO NIE ZOSTAŁA PUSTA FUNKCJA. Kalibracja była JEDYNYM
+// głosem z wejściem — pozostałe cztery świadomie prowadziły donikąd (exit
+// i injury mają własne wejście przez punkt pomocy, growth i compass nie mają
+// ekranu, do którego dałoby się prowadzić, block w ogóle nie dostaje karty).
+// Po jej usunięciu `wejscieZKarty()` zwracałaby `null` przy KAŻDYM wejściu.
+// Funkcja, która zawsze zwraca `null`, przy następnym czytaniu wygląda jak
+// defekt do naprawienia, a nie jak decyzja — i ktoś ją „naprawi".
 //
-// ⚠️ CELOWO TYLKO KALIBRACJA. Pozostałe głosy zostają kartami bez wejścia:
-//   • `exit` i `injury` mają już własne, świadomie osobne wejście (punkt
-//     pomocy, ZADANIE E2) i doklejenie im drugiego cofałoby decyzję Kuby;
-//   • `growth` i `compass` nie mają dziś ekranu, do którego dałoby się
-//     prowadzić — link do czegoś, czego nie ma, jest gorszy niż jego brak;
-//   • `block` w ogóle nie dostaje karty (ma kafelek na górze ekranu).
-
-/** Wartość parametru `otworz` dla zakładki „Ja". Stała, bo dopasowanie po napisie w dwóch plikach cicho przestaje trafiać. */
-export const OTWORZ_KALIBRACJE = 'kalibracja';
-
-/**
- * ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ (nowe 12.08.2026). Napis na wejściu
- * z karty. Świadomie czasownik, nie nazwa: karta już mówi „Czas na pomiar",
- * więc to zdanie ma odpowiadać na pytanie „gdzie", a nie powtarzać „co".
- */
-export const KARTA_WEJSCIE_LABEL = 'Otwórz Kalibrację';
-
-export type WejscieZKarty = { trasa: '/ja'; otworz: string; etykieta: string };
-
-/**
- * Dokąd prowadzi karta głosu tygodnia — albo `null`, gdy donikąd.
- *
- * Czysta funkcja, bo to jest DECYZJA, a nie rysowanie: ekran ma ją wykonać,
- * a nie podjąć. Dzięki temu „karta kalibracji prowadzi do Kalibracji, a karta
- * ścieżki wyjścia nie prowadzi nigdzie" da się sprawdzić testem, zamiast
- * oglądać na telefonie.
- */
-export function wejscieZKarty(stan: StanGlosu): WejscieZKarty | null {
-  if (!pokazacKarte(stan) || stan.rodzaj !== 'glos') return null;
-  if (stan.voice !== 'calibration') return null;
-  return { trasa: '/ja', otworz: OTWORZ_KALIBRACJE, etykieta: KARTA_WEJSCIE_LABEL };
-}
+// Karta głosu tygodnia jest od tej rundy tekstem bez dotknięcia, we wszystkich
+// czterech przypadkach, w których się w ogóle rysuje (exit, injury, growth, compass).
 
 /**
  * ZADANIE E2 — PODNIESIENIE WIDOCZNOŚCI PUNKTU POMOCY.

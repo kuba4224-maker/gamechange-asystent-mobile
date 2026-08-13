@@ -36,12 +36,16 @@
  * ZOSTAJE TUTAJ, bo jest kontraktem danych, nie logiką: appka musi umieć nazwać
  * to, co odczyta. Rozstrzyganie, KTÓRY z nich obowiązuje, jest w backendzie.
  */
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — SZEŚĆ WARTOŚCI, NIE SIEDEM.
+// `calibration` zniknęło razem z narzędziem
+// (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md). Ta lista, `Glos`
+// w `lib/glosTygodnia.ts`, `GLOSY` w backendzie i CHECK `weekly_voice_voice_check`
+// w bazie to CZTERY KOPIE tego samego zbioru — muszą się zgadzać co do sztuki.
 export type Voice =
   | 'exit'
   | 'injury'
   | 'growth'
   | 'compass'
-  | 'calibration'
   | 'block'
   | 'silence';
 

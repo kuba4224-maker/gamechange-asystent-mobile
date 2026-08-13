@@ -16,6 +16,14 @@
 // ⚠️ CZEGO TEN PLIK NIE SPRAWDZA: czy `rpc('account_state')` w ogóle zwraca
 // te cztery wartości (wymaga żywej bazy), ani czy treść w bazie jest zgodna
 // z dokumentem — to sprawdza zapytanie kontrolne z raportu E, sekcja 7.
+import { readFileSync } from 'node:fs';
+// ⚠️ NIE `new URL(...)` (poprawka 13.08.2026, błąd TS2769). `tsconfig.json` appki
+// ciągnie bibliotekę DOM, więc `URL` rozstrzyga się na typ DOM-owy, a `readFileSync`
+// oczekuje `URL` z `node:url`. Te dwa typy są niezgodne i kontrola typów pada —
+// mimo że w czasie działania wszystko chodzi. Wzorzec niżej jest w tym repozytorium
+// sprawdzony: tak samo czyta pliki `lib/ostatniCentymetr.selftest.ts` i `tsc` go przepuszcza.
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   dostepMapy,
   wybierzOdcinek,
@@ -153,16 +161,21 @@ check('zakres wieku pisany półpauzą, tak jak w dokumencie',
 // ═══════════════════════════════════════════════════════════════════
 // 3. WARIANT (reguła P8)
 // ═══════════════════════════════════════════════════════════════════
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — WARIANT „ŚWIADEK" SKASOWANY.
+// Były tu trzy asercje o nim (wybór wariantu, kolizja ze ścieżką wyjścia,
+// treść wariantu bez wierszy). Wariant `witness` nie miał źródła danych —
+// wejście było wyłączone na sztywno od 11.08.2026 — więc odszedł razem
+// z 16 wierszami treści. Treść jest w nocie przekazania pasa P.
 check('stan normalny → wariant base',
-  wybierzWariant({ exitAktywny: false, swiadekDeselekcji: false }) === 'base', 'base');
+  wybierzWariant({ exitAktywny: false }) === 'base', 'base');
 check('ścieżka wyjścia → wariant „odpadłem"',
-  wybierzWariant({ exitAktywny: true, swiadekDeselekcji: false }) === 'after_deselection', 'after_deselection');
-check('świadek deselekcji → wariant „świadek"',
-  wybierzWariant({ exitAktywny: false, swiadekDeselekcji: true }) === 'witness', 'witness');
-check('ścieżka wyjścia wygrywa nad świadkiem (własna sytuacja przed cudzą)',
-  wybierzWariant({ exitAktywny: true, swiadekDeselekcji: true }) === 'after_deselection', 'kolizja');
-check('nieznane wejścia → base, nie wywrotka',
-  wybierzWariant({ exitAktywny: null, swiadekDeselekcji: null }) === 'base', 'null');
+  wybierzWariant({ exitAktywny: true }) === 'after_deselection', 'after_deselection');
+check('nieznane wejście → base, nie wywrotka i NIE „odpadłem"',
+  wybierzWariant({ exitAktywny: null }) === 'base', 'null');
+check('(P) typ Wariant nie ma już wartości „witness"',
+  !/'witness'/.test(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'mapaDrogi.ts'), 'utf8')
+    .replace(/^\s*(\/\/|\*).*$/gm, '')),
+  'wariant „świadek" wrócił do kodu, a jego 16 wierszy treści nie ma w bazie');
 
 // ═══════════════════════════════════════════════════════════════════
 // 4. TRZY SEKCJE — kolejność i szczelność
@@ -195,7 +208,9 @@ check('nieznane wejścia → base, nie wywrotka',
   check('…i ma własne tło', w.stan === 'gotowy' && w.tlo.length === 1, JSON.stringify(w).slice(0, 160));
 }
 {
-  const w = zbudujOdcinek(ODCINKI[2], 'witness', CZYNNIKI);
+  // Wariant bez treści w bazie — sprawdzane na `after_deselection` w odcinku,
+  // który go nie ma (dawniej ten sam przypadek chodził na wariancie „świadek").
+  const w = zbudujOdcinek(ODCINKI[0], 'after_deselection', CZYNNIKI);
   check('wariant bez treści → „brak treści", NIE ciche zejście na base',
     w.stan === 'brak_tresci', JSON.stringify(w).slice(0, 200));
 }
@@ -223,7 +238,7 @@ const bazaOK = {
   laduje: false, error: null as unknown,
   odcinki: ODCINKI, czynniki: CZYNNIKI,
   accountState: 'full' as AccountState | null, birthYear: 2009,
-  exitAktywny: false as boolean | null, swiadekDeselekcji: false as boolean | null,
+  exitAktywny: false as boolean | null,
   teraz: TERAZ,
 };
 

@@ -147,21 +147,15 @@ export function isBudzetError(e: unknown): boolean {
 // „Rośniesz teraz szybko") produkt już ma i jej brzmienie jest zatwierdzone.
 
 
-/**
- * Ile tygodni wolno zaplanować, gdy trwa stan „czekam na decyzję" (P5, spec 6.4:
- * „horyzont BLOKU skraca się do daty decyzji, zamiast planować ślepo na osiem
- * tygodni").
- *
- * ⚠️ DATY DECYZJI NIE MA I ŚWIADOMIE NIE BĘDZIE. Pas I rozstrzygnął to wprost:
- * kolumna, do której nic nie pisze, jest cichym brakiem. Skrócenie jest więc
- * logiczne, nie kalendarzowe — i musi być JAKĄŚ liczbą.
- *
- * ⚠️ TA LICZBA JEST DECYZJĄ PRODUKTOWĄ I CZEKA NA KUBĘ (nota przekazania J,
- * zadanie „jedna decyzja"). Cztery tygodnie to najkrótszy horyzont, przy którym
- * Blok nadal cokolwiek znaczy — poniżej zawodnik planuje pojedyncze sesje,
- * a nie pracę. Osiem to wartość domyślna, której ten stan ma właśnie unikać.
- */
-export const TYGODNI_PRZY_CZEKAM_NA_DECYZJE = 4;
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — TU BYŁ SUFIT HORYZONTU BLOKU.
+// `TYGODNI_PRZY_CZEKAM_NA_DECYZJE = 4` i `sufitTygodni()` obsługiwały wyłącznie
+// stan `exit_mode.state = 'paused_decision'` przez ograniczenie
+// `blokSkracaHoryzontDoDecyzji`. Stanu nie dało się nigdzie włączyć — żaden
+// ekran go nie ustawiał — więc funkcja przycinała horyzont, który nigdy nie był
+// przycinany, a liczba 4 czekała na decyzję Kuby, której nie było po co
+// podejmować. Cała gałąź została skasowana (pas P, zadanie P8). Wraca razem
+// z wejściem do tego stanu, gdy takie powstanie; opis, czym była, stoi w nocie
+// przekazania pasa P.
 
 export type SufitObjetosci = {
   /** Górna granica sesji w tygodniu ŁĄCZNIE. `null` = nie znam budżetu. */
@@ -240,36 +234,4 @@ export function sufitObjetosci(budzet: BudzetView, stanOgraniczen: StanOgranicze
 export function ograniczLiczbeDni(ileZaznaczono: number, sufit: SufitObjetosci): number {
   if (sufit.maxJednostek === null) return ileZaznaczono;
   return Math.min(ileZaznaczono, Math.max(1, sufit.maxJednostek));
-}
-
-export type SufitTygodni = {
-  maxTygodni: number;
-  ograniczenie: Obowiazuje;
-  powod: string;
-};
-
-/**
- * Horyzont Bloku po nałożeniu ograniczenia `blokSkracaHoryzontDoDecyzji` (P5).
- *
- * ⚠️ MECHANIZM DZIAŁA, ALE NIKT DZIŚ NIE USTAWIA STANU `paused_decision` —
- * nie ma dla niego wejścia w produkcie (zakaz 2.3 z noty pasa I; budowa wejścia
- * to osobne polecenie, bo wymaga brzmień Kuby). Ta funkcja jest tu po to, żeby
- * w dniu, w którym wejście powstanie, nie trzeba było ruszać planera.
- */
-export function sufitTygodni(zadanoTygodni: number, stanOgraniczen: StanOgraniczen): SufitTygodni {
-  const ograniczenie = obowiazuje(stanOgraniczen, 'blokSkracaHoryzontDoDecyzji');
-  if (ograniczenie === 'tak') {
-    return {
-      maxTygodni: Math.min(zadanoTygodni, TYGODNI_PRZY_CZEKAM_NA_DECYZJE),
-      ograniczenie,
-      powod: `blokSkracaHoryzontDoDecyzji obowiązuje: horyzont skrócony do ${TYGODNI_PRZY_CZEKAM_NA_DECYZJE} tyg.`,
-    };
-  }
-  return {
-    maxTygodni: zadanoTygodni,
-    ograniczenie,
-    powod: ograniczenie === 'nie_wiem'
-      ? 'blokSkracaHoryzontDoDecyzji NIEROZSTRZYGNIĘTE — horyzont bez zmian'
-      : 'blokSkracaHoryzontDoDecyzji nie obowiązuje — horyzont bez zmian',
-  };
 }

@@ -14,6 +14,39 @@
 // Ten plik NIE robi zapytań i NIE zna Reacta — dostaje gotowe wiersze
 // i oddaje jeden wiersz `behavioural_trace`.
 //
+// ═══════════════════════════════════════════════════════════════════
+// ⚠️ 13.08.2026 (PLAN-D-P) — TEN PLIK NIE MA DZIŚ ANI JEDNEGO KONSUMENTA
+//     I JEST TO STAN ŚWIADOMY, NIE PRZEOCZENIE.
+//
+// Jedynym miejscem, w którym te cztery liczniki były pokazywane, była karta
+// „Ostatnie 28 dni, policzone" na ekranie Kalibracji. Kalibracja została
+// usunięta z produktu w całości 13.08.2026
+// (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md) — i słusznie, bo była
+// panelem do odczytania, a nie asystentem, który mówi.
+//
+// PLIK I TABELA `behavioural_trace` ZOSTAJĄ NIETKNIĘTE. Powód nie jest
+// sentymentalny. Tego samego dnia Kuba odwrócił zakazy 1 i 3: grywalizacja
+// wchodzi do produktu, a ciągłość pracy ma być pokazywana jako liczba
+// SKUMULOWANA, która nigdy nie wraca do zera (zasada N1 w
+// claude/ZASADY_OBOWIAZUJACE_13_08_2026.md). Ten plik liczy dokładnie te
+// liczby, jest przetestowany (`lib/sladZachowania.selftest.ts`, uruchamiany
+// przez `tests/run-selftests.mjs`) i za rundę albo dwie dostanie konsumenta
+// w rundzie systematyczności. Skasowanie działającego, sprawdzonego kodu po to,
+// żeby napisać go od nowa za dwa tygodnie, nie jest sprzątaniem.
+//
+// ⚠️ CZEGO TO NIE ZNACZY. Nie znaczy, że wolno tę kartę wskrzesić w dawnej
+// postaci. Cztery liczniki to są dane, z których WNIOSEK MA WYCIĄGAĆ SYSTEM
+// i cicho zmieniać to, co podpowiada — a nie panel, który zawodnik ma odczytać
+// i sam sobie zinterpretować. Wracają jako wejście do nagrody za WYKONANĄ
+// PRACĘ, nie jako ekran.
+//
+// ⚠️ I JEDNA LICZBA, KTÓRA MUSI BYĆ ROZWIĄZANA, ZANIM COKOLWIEK TO POKAŻE:
+// `daily_logs.calendar_event_id` było 13.08.2026 puste w 10 z 10 wpisów, więc
+// licznik „zaplanowane vs odbyte" pokazałby dziś „24 / 0". To nie jest wada
+// tego pliku — to jest brak danych na wejściu i musi zostać domknięty w tej
+// samej rundzie, w której pojawi się konsument.
+// ═══════════════════════════════════════════════════════════════════
+//
 // ── ZAKAZ 5 Z KONTRAKTU, WPISANY TU JAKO MECHANIZM ───────────────────
 // NIGDY nie liczyć „zrobione" po `calendar_events.status = 'completed'` —
 // ta wartość nie jest w systemie NIGDZIE zapisywana, więc licznik oparty

@@ -87,6 +87,45 @@
 // pokazuje etykiety odpowiedzi jako „poziomu" zawodnika — pokazuje pasek w
 // kierunku dobrym, policzony przez `answerPosition()`. Pokazanie samej
 // etykiety dałoby trzem z trzynastu segmentów obraz odwrócony.
+//
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-P 08.2026 (13.08.2026) — REGUŁA URATOWANA Z KALIBRACJI
+//
+// Kalibracja została usunięta z produktu w całości
+// (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md). Jedna rzecz z niej była
+// warta uratowania i nigdy do niej nie należała:
+//
+//     SPADKU NIE NAZYWA SIĘ SPADKIEM U KOGOŚ, KTO AKURAT SZYBKO ROŚNIE.
+//
+// Jej miejsce jest tutaj — to jest ten jeden moment, w którym zawodnik ogląda
+// spadek własnej samooceny. Do 13.08.2026 `rediagnosisBody('down')` podawało
+// dwie interpretacje („jest trudniej" albo „widzisz ostrzej") i NIE WIEDZIAŁO
+// NIC o wzrastaniu — więc zawodnikowi w szczycie skoku wzrostowego, o którym
+// produkt WIE, że rośnie 8 cm na rok, mówiło dokładnie to samo co każdemu
+// innemu. Warunek postawiony komuś, o kim znamy odpowiedź, jest gorszy niż
+// jego brak: brzmi jak wymówka.
+//
+// ⚠️ ODCZYT STANU, NIE FLAGA. Osłona wchodzi tu z koperty `weekly_voice.
+// ograniczenia`, przez `czyOslonaAktywna()` — patrz uzasadnienie tam, w tym
+// dlaczego NIE wolno wziąć samego `blokNieZwiekszaObjetosci`.
+// Parametr jest opcjonalny świadomie: wywołania sprzed tej rundy zachowują się
+// co do znaku tak jak dotąd, a brak stanu daje `nie_wiem`, czyli brzmienie
+// ostrożne, nie przeramowane.
+//
+// ⚠️ DWIE GAŁĘZIE, NIE JEDNA. Zasada P1 z `claude/ZASADY_OBOWIAZUJACE_13_08_2026.md`
+// mówi wprost: „utrzymanie wyniku w trakcie skoku wzrostowego jest realnym
+// osiągnięciem i tak ma być nazwane" — bo w tym okresie wynik zwykle spada.
+// Dlatego Osłona zmienia zdanie NIE TYLKO przy spadku, ale też przy braku
+// zmiany. Przy wzroście nie zmienia niczego: wzrost w tym okresie broni się sam
+// i doklejanie do niego zdania o wzrastaniu byłoby odbieraniem zasługi.
+//
+// ⚠️ CZEGO TU NIE MA I NIE MOŻE BYĆ: ani jednej liczby o dojrzałości
+// biologicznej (wiek biologiczny, przewidywany wzrost dorosłego, tempo w cm).
+// Produkt mówi „rośniesz teraz szybko" — i tyle. To jest ta sama granica, którą
+// trzyma karta głosu tygodnia `growth` w `lib/glosTygodnia.ts`.
+//
+// ⚠️ BRZMIENIA OBU NOWYCH ZDAŃ SĄ DO PRZEJRZENIA PRZEZ KUBĘ (nowe 13.08.2026).
+// ═══════════════════════════════════════════════════════════════════
 import {
   DIAGNOSIS_ANSWER_MIN,
   DIAGNOSIS_ANSWER_MAX,
@@ -95,6 +134,7 @@ import {
   resolveLivingDiagnosisWording,
 } from './livingDiagnosisQuestionBank';
 import { segmentLabel } from './labels';
+import { czyOslonaAktywna, type StanOgraniczen, type Obowiazuje } from './ograniczenia';
 
 // ─────────────────────────────────────────────────────────────
 // SKALA I POZYCJE
@@ -278,16 +318,46 @@ export function rediagnosisLead(weeks: number | null): string {
   return `${head}To samo pytanie, co w diagnozie — odpowiedz szczerze, a pokażemy Ci, co się przez ten czas zmieniło.`;
 }
 
-export function rediagnosisHeadline(direction: RediagnosisDirection): string {
+/**
+ * ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ (zmienione 13.08.2026, PLAN-D-P).
+ * Przy trwającej Osłonie nagłówek NIE mówi „w dół" ani „tak samo" — bo to
+ * zdanie jest pierwszą rzeczą, którą zawodnik czyta, i samo w sobie nazywa
+ * spadek spadkiem.
+ */
+export function rediagnosisHeadline(
+  direction: RediagnosisDirection,
+  oslona: Obowiazuje = 'nie_wiem',
+): string {
   if (direction === 'up') return 'Obraz przesunął się w górę.';
+  if (oslona === 'tak') {
+    return direction === 'down'
+      ? 'Rośniesz — i w tym okresie ta liczba potrafi spaść.'
+      : 'Utrzymałeś obraz w okresie, w którym zwykle spada.';
+  }
   if (direction === 'down') return 'Obraz przesunął się w dół.';
   return 'Obraz wygląda tak samo jak przed blokiem.';
 }
 
-export function rediagnosisBody(direction: RediagnosisDirection): string {
+export function rediagnosisBody(
+  direction: RediagnosisDirection,
+  // PLAN-D-P 08.2026 (13.08.2026) — KONSUMENT OGRANICZENIA
+  // `blokNieZwiekszaObjetosci` (przez `czyOslonaAktywna`). Reguła przeniesiona
+  // z `lib/kalibracja.ts`, patrz nagłówek pliku. `nie_wiem` NIE przeramowuje.
+  oslona: Obowiazuje = 'nie_wiem',
+): string {
   if (direction === 'up') {
     return 'Na to samo pytanie odpowiadasz dziś inaczej niż przed blokiem. To Twoja odpowiedź, '
       + 'nie ocena systemu — i dlatego coś znaczy.';
+  }
+  if (oslona === 'tak') {
+    if (direction === 'down') {
+      return 'To nie jest cofnięcie się. W okresie szybkiego wzrastania wynik potrafi chwilowo '
+        + 'zejść niżej, a potem wraca wyżej, niż był. Nie zwiększaj teraz objętości treningu '
+        + 'i pilnuj snu — to jest ta jedna rzecz, która w tym okresie robi różnicę.';
+    }
+    return 'W okresie szybkiego wzrastania wynik zwykle spada, a Twój się nie ruszył. '
+      + 'To nie jest „bez zmian" — to jest praca, która utrzymała Cię na miejscu. '
+      + 'Rób dalej to samo i pilnuj snu.';
   }
   if (direction === 'down') {
     return 'Może to znaczyć dwie rzeczy: albo w tym obszarze jest teraz trudniej niż było, '
@@ -336,6 +406,12 @@ export type RediagnosisView =
       headline: string;
       body: string;
       notSavedText: string | null;
+      /**
+       * (PLAN-D-P) Czy zdanie zostało przeramowane trwającą Osłoną. Nie jest
+       * dla zawodnika — jest dla logu i dla raportu, żeby dało się odpowiedzieć
+       * na pytanie „dlaczego produkt powiedział wtedy akurat to".
+       */
+      oslona: Obowiazuje;
     };
 
 export function buildRediagnosisView(params: {
@@ -352,9 +428,14 @@ export function buildRediagnosisView(params: {
   /** Pełne tygodnie pracy nad Blokiem. */
   weeks?: number | null;
   loading?: boolean;
+  /**
+   * (PLAN-D-P 13.08.2026) Koperta `weekly_voice.ograniczenia`. `null` = ekran
+   * jej nie podał; wtedy zdanie o spadku wygląda tak jak przed tą rundą.
+   */
+  ograniczenia?: StanOgraniczen | null;
 }): RediagnosisView {
   const { segmentId, baseline, answerValue, skipped = false, saved = true,
-    wordingKey = null, weeks = null, loading = false } = params;
+    wordingKey = null, weeks = null, loading = false, ograniczenia = null } = params;
 
   if (loading) return { kind: 'absent', reason: 'loading' };
   if (skipped) return { kind: 'absent', reason: 'skipped' };
@@ -385,6 +466,9 @@ export function buildRediagnosisView(params: {
   }
 
   const change = compareRediagnosis({ baselineScore: baseline.score, answerValue, dir });
+  // (PLAN-D-P) Brak koperty = `nie_wiem`, nigdy `nie`. Ta różnica jest cała
+  // reguła R5: „nie odczytałem" i „sprawdziłem, nie rośnie" to dwie rzeczy.
+  const oslona: Obowiazuje = ograniczenia === null ? 'nie_wiem' : czyOslonaAktywna(ograniczenia);
   return {
     kind: 'change',
     eyebrow: REDIAGNOSIS_EYEBROW,
@@ -394,8 +478,9 @@ export function buildRediagnosisView(params: {
     afterCaption: REDIAGNOSIS_AFTER_CAPTION,
     beforeBarPercent: barPercent(change.before),
     afterBarPercent: barPercent(change.after),
-    headline: rediagnosisHeadline(change.direction),
-    body: rediagnosisBody(change.direction),
+    headline: rediagnosisHeadline(change.direction, oslona),
+    body: rediagnosisBody(change.direction, oslona),
     notSavedText: saved ? null : REDIAGNOSIS_NOT_SAVED_TEXT,
+    oslona,
   };
 }

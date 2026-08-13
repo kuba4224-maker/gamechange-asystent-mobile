@@ -91,6 +91,17 @@ import {
   enableBiometricLock,
   disableBiometricLock,
 } from '../../lib/biometric-auth';
+// PLAN-D-K 08.2026 (13.08.2026) — CO SIĘ DZIEJE, GDY DOSTĘP WYGASA.
+// ⚠️ Ten moduł NIE ZNA daty końca pilotażu i nie wolno mu jej znać. Data stoi
+// w jednym miejscu: `public.koniec_okresu_probnego_pilotazu()`. Appka ją
+// odczytuje wraz z resztą stanu, nigdy nie pamięta.
+import {
+  RPC_STAN_DOSTEPU,
+  czytajStanDostepu,
+  opisDostepuDoLogu,
+  KOMUNIKAT_WYGASNIECIA,
+  type StanDostepu,
+} from '../../lib/dostepKonta';
 
 // ── Stałe — 1:1 z asystent_app.html (kontrakt, sekcje 1-4) ──
 const POSITIONS = [
@@ -220,6 +231,10 @@ export default function ProfilScreen() {
   const [biometricLockOn, setBiometricLockOn] = useState(false);
   const [biometricBusy, setBiometricBusy] = useState(false);
 
+  // PLAN-D-K 08.2026 — stan dostępu. `null` znaczy „jeszcze nie pytałem",
+  // co jest trzecim stanem obok „wiem" i „nie udało się odczytać".
+  const [stanDostepu, setStanDostepu] = useState<StanDostepu | null>(null);
+
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileOk, setProfileOk] = useState<string | null>(null);
 
@@ -306,6 +321,26 @@ export default function ProfilScreen() {
   }, [currentUser]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  // PLAN-D-K 08.2026 (13.08.2026) — STAN DOSTĘPU.
+  //
+  // ⚠️ ZAKAZ ŚCIEŻKI ODZYSKU: wołamy DOKŁADNIE RAZ, bez argumentów
+  // (`stan_dostepu()` ma `pronargs = 0`, zmierzone 13.08.2026 — PostgREST
+  // dopasowuje funkcje po NAZWACH parametrów, O33, więc dołożenie tu
+  // jakiegokolwiek argumentu urwałoby dopasowanie po cichu). Gdy wywołanie
+  // padnie, karta mówi „nie wiem", a nie „nie masz dostępu" — to są dwie
+  // różne rzeczy i zawodnik ma prawo je rozróżnić.
+  useEffect(() => {
+    let mounted = true;
+    if (!currentUser) return;
+    supabase.rpc(RPC_STAN_DOSTEPU).then(({ data, error }) => {
+      if (!mounted) return;
+      const stan = czytajStanDostepu(data, error ? error.message : null);
+      setStanDostepu(stan);
+      console.log('[PLAN-D-K]', opisDostepuDoLogu(stan));
+    });
+    return () => { mounted = false; };
+  }, [currentUser]);
 
   // AUDYT 06.08.2026 — odczyt lokalnie zapamiętanego adresu rodzica (patrz wyżej).
   useEffect(() => {
@@ -571,6 +606,26 @@ export default function ProfilScreen() {
 
       {profileError && <Text style={styles.error}>{profileError}</Text>}
       {profileOk && <Text style={styles.ok}>{profileOk}</Text>}
+
+      {/*
+        PLAN-D-K 08.2026 (13.08.2026) — KARTA DOSTĘPU.
+        Świadomie POZA numeracją etapów, tym samym wzorcem co „Bezpieczeństwo":
+        to nie jest pole formularza, tylko stan konta, i ma być widoczne
+        niezależnie od tego, na którym etapie zawodnik stoi.
+
+        ⛔ ZAKAZ SPRZEDAŻY W TYM MIEJSCU (polecenie K2). Ani ceny, ani przycisku
+        zakupu, ani odliczania dni. Karta mówi, co się stało — nie namawia.
+        ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ — patrz `lib/dostepKonta.ts`,
+        stała `KOMUNIKAT_WYGASNIECIA`. Nie jest zatwierdzone jako ostateczne.
+      */}
+      {stanDostepu?.rodzaj === 'znany' && !stanDostepu.maDostep && (
+        <View style={styles.block}>
+          <Text style={styles.blockLabel}>{KOMUNIKAT_WYGASNIECIA.tytul}</Text>
+          <Text style={styles.hint}>{KOMUNIKAT_WYGASNIECIA.coWygaslo}</Text>
+          <Text style={styles.hint}>{KOMUNIKAT_WYGASNIECIA.coDziala}</Text>
+          <Text style={styles.hint}>{KOMUNIKAT_WYGASNIECIA.czegoNieStracil}</Text>
+        </View>
+      )}
 
       {/* Wskaźnik postępu — Tor 7 Krok 3 */}
       <View style={styles.stepHeader}>

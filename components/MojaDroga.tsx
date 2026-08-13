@@ -64,14 +64,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 // PLAN-D-J 08.2026 (12.08.2026) — CO OBOWIĄZUJE W TYM TYGODNIU. Mapa nigdy nie
 // zabiera głosu (budżet 0 ZAWSZE), ale OBOWIĄZUJE ją stan — to jest dokładnie
-// rozróżnienie A1 ze specyfikacji. Dwa ograniczenia reguły P5 (spec 6.4)
-// dotyczą tego ekranu: `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`.
-// ⚠️ MECHANIZM DZIAŁA, ALE NIKT DZIŚ NIE USTAWIA STANU `paused_decision` —
-// nie ma dla niego wejścia w produkcie (zakaz 2.3 z noty pasa I). Ten kod jest
-// tu po to, żeby w dniu, w którym wejście powstanie, nie trzeba było ruszać Mapy.
-// 13.08.2026 (N4): i dokładnie dlatego Mapa MUSI ten stan rozróżniać JUŻ TERAZ —
-// patrz `exitAktywny` niżej. Gdyby czekała na dzień powstania wejścia, tamten
-// dzień byłby dniem, w którym zaczęłaby mówić „odpadłeś" komuś, kto nie odpadł.
+// rozróżnienie A1 ze specyfikacji. Dwa ograniczenia dotyczą tego ekranu:
+// `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`.
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026): oba są od tej rundy ZAWSZE `false`. Ich
+// jedyną przesłanką był stan `exit_mode.state = 'paused_decision'`, którego nie
+// dało się nigdzie włączyć i który został skasowany w całości (zadanie P8).
+// Odczyt ZOSTAJE — jest poprawny, przetestowany i zadziała w dniu, w którym
+// któreś z tych ograniczeń dostanie nową przesłankę. To jest stan ŚWIADOMY
+// i nazwany, nie cichy brak; rozstrzygnięcie należy do sesji nawigującej.
 import {
   czytajOgraniczenia,
   isMissingOgraniczeniaColumnError,
@@ -103,11 +103,6 @@ export const ACCOUNT_STATE_WARN =
   + 'select pronargs, pg_get_function_identity_arguments(p.oid) from pg_proc p '
   + 'join pg_namespace n on n.oid=p.pronamespace where n.nspname=\'public\' and p.proname=\'account_state\';';
 
-export const NIEZNANY_STAN_WYJSCIA_WARN =
-  '[PLAN-D-M/N4] exit_mode ma otwarty wiersz o stanie spoza znanych (active / paused_decision). '
-  + 'Mapa NIE przełącza się na wariant po deselekcji — fail closed, bo powiedzenie komuś „odpadłeś" '
-  + 'na podstawie nieznanej wartości jest gorsze niż nieprzełączenie wariantu. Wartości:';
-
 export const NIEZNANY_STAN_KONTA_WARN =
   '[PLAN-D-E] account_state zwróciło wartość spoza czterech znanych (full / limited / suspended / unknown_age). '
   + 'Mapa NIE pokazuje odcinka — fail closed. Dopisz nowy stan do AccountState w lib/mapaDrogi.ts. Wartość:';
@@ -116,45 +111,25 @@ export const EXIT_MODE_WARN =
   '[PLAN-D-E] odczyt exit_mode nie powiódł się — wariant Mapy zostaje podstawowy. '
   + 'Jeśli migracja osi decyzji jest wykonana, to jest prawdziwy błąd, nie brak tabeli.';
 
-/**
- * ŚWIADEK DESELEKCJI (wariant `witness`, reguła P8) NIE MA DZIŚ ŹRÓDŁA DANYCH.
- * Nie ma w bazie niczego, z czego dałoby się wywnioskować „koledzy z drużyny
- * odpadli". Przekazujemy `null`, czyli „nie wiem" — i to jest zapisane tutaj,
- * a nie ukryte w `false`, bo `false` znaczyłoby „sprawdziłem i nie jest
- * świadkiem". Szesnaście wierszy treści tego wariantu czeka w `road_factors`
- * od 11.08.2026.
- *
- * ── PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I2: ROZSTRZYGNIĘTE, NA NIE ────
- * Zadaniem było ustalić, SKĄD produkt ma to wiedzieć. Sprawdzone zostały
- * trzy jedyne drogi, jakie dziś istnieją, i żadna nie działa:
- *
- * 1. WYWNIOSKOWAĆ Z DRUŻYNY. `team_memberships` ma kolumnę `left_at`, więc
- *    z kształtu wygląda na źródło. Zmierzone 12.08.2026: tabela ma **0
- *    wierszy**, a w obu repozytoriach nie ma **ANI JEDNEGO** zapisu do niej
- *    (`insert`/`update`/`upsert` — zero trafień; czytają ją wyłącznie ekrany
- *    trenera). Nawet gdyby dane były: `left_at` nie odróżnia deselekcji od
- *    zmiany klubu, przeprowadzki i rzucenia piłki — a produkt musiałby
- *    odróżnić, bo cała treść tego wariantu mówi o DECYZJI SYSTEMU.
- * 2. WYWNIOSKOWAĆ Z `exit_mode` KOLEGÓW. Wymagałoby czytania cudzego wiersza
- *    o deselekcji, żeby zmienić ekran osoby trzeciej — czyli ujawnienia
- *    jednemu małoletniemu, że drugi odpadł. To jest decyzja o bezpieczeństwie
- *    nieletnich i o prywatności, więc należy do Kuby i do prawnika, nie do
- *    sesji. Osobno: `team_memberships` jest puste, więc nie ma nawet po czym
- *    połączyć zawodników w drużynę.
- * 3. ZAPYTAĆ ZAWODNIKA WPROST. Da się — i to jest jedyna droga, która daje
- *    prawdziwą odpowiedź. Ale to jest NOWE PYTANIE do zawodnika, w jego
- *    najgorszym tygodniu, o cudzą deselekcję. Brzmienie takiego pytania
- *    należy do Kuby (zakaz 5), a moment i forma — do rozstrzygnięcia po
- *    pierwszej prawdziwej rozmowie z zawodnikiem.
- *
- * DLATEGO NIE ZBUDOWANE, ŚWIADOMIE. Zgadywanie, że komuś odpadli koledzy,
- * jest gorsze niż niepokazanie treści: wariant otwiera się zdaniem „to, co
- * się stało, nie było oceną ich wartości" — i jeżeli nikomu nic się nie
- * stało, produkt właśnie powiedział zawodnikowi coś nieprawdziwego o jego
- * drużynie. Cichy brak z pustką jest tu tańszy niż cichy brak ze zmyśleniem.
- * ──────────────────────────────────────────────────────────────────────────
- */
-const SWIADEK_BRAK_ZRODLA = null;
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — TU BYŁ WARIANT „ŚWIADEK" I JEGO NIE MA.
+//
+// Wariant `witness` („zostałeś, ale koledzy odpadli") miał 16 wierszy treści
+// w `road_factors` od 11.08.2026 i wejście WYŁĄCZONE NA SZTYWNO
+// (`const SWIADEK_BRAK_ZRODLA = null`), bo produkt nie miał skąd wiedzieć, że
+// taka sytuacja zaszła. Pas I sprawdził 12.08.2026 trzy jedyne drogi i żadna
+// nie działa: zapisy drużyny są puste i tak czy tak nie odróżniają deselekcji
+// od przeprowadzki; czytanie `exit_mode` kolegów znaczyłoby ujawnienie jednemu
+// małoletniemu, że drugi odpadł (decyzja Kuby i prawnika, nie sesji); a pytanie
+// wprost jest NOWYM pytaniem, w najgorszym tygodniu zawodnika, o cudzą
+// deselekcję — i wymaga brzmienia Kuby.
+//
+// Stan „treść leży, wejście wyłączone, decyzji nie ma" trwał dwa dni i był
+// dokładnie tym cichym bałaganem, który ta runda sprząta. Treść 16 wierszy jest
+// wypisana W CAŁOŚCI w nocie przekazania pasa P — jeśli pierwsza rozmowa
+// z zawodnikiem pokaże, że ta sytuacja jest przeżywana tak, jak zakładaliśmy,
+// odtworzenie jej to jedna migracja.
+//
+// ⚠️ WARIANT `after_deselection` (32 wiersze) ZOSTAJE NIETKNIĘTY.
 
 type Props = { visible: boolean; onClose: () => void; userId: string | null };
 
@@ -213,19 +188,18 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
     if (exitRes.error) {
       console.warn(EXIT_MODE_WARN, exitRes.error);
     } else {
-      // ── ZADANIE N4 (13.08.2026, ze znaleziska pasa M) ────────────────────
-      // „CZEKAM NA DECYZJĘ" TO NIE JEST „ODPADŁEM". `exit_mode.state` ma trzy
-      // wartości (CHECK w bazie): `active`, `paused_decision`, `closed`.
-      // Do 13.08.2026 stało tu `length > 0`, czyli KAŻDY otwarty wiersz —
-      // więc gdyby wejście do `paused_decision` powstało, Mapa przełączyłaby
-      // się komuś, kto tylko wstrzymał decyzję, na wariant „po deselekcji"
-      // i zaczęła mówić o odpadnięciu, które się nie wydarzyło. Backend
-      // rozróżniał te stany od pasa I (`arbiter-glosu-io.js`), appka nie.
-      // Zamknięte wiersze są już odfiltrowane w zapytaniu (`closed_at is null`).
-      const otwarte = (exitRes.data ?? []) as { state?: string | null }[];
-      const nieznane = otwarte.filter((w) => w.state !== 'active' && w.state !== 'paused_decision');
-      if (nieznane.length > 0) console.warn(NIEZNANY_STAN_WYJSCIA_WARN, nieznane.map((w) => w.state));
-      exitAktywny = otwarte.some((w) => w.state === 'active');
+      // ⚠️ PLAN-D-P 08.2026 (13.08.2026) — TO ŚWIADOMIE COFA ZADANIE N4.
+      // 13.08.2026 rano stało tu rozróżnienie `state === 'active'`, żeby Mapa
+      // nie powiedziała „odpadłeś" komuś, kto tylko wstrzymał decyzję. Tego
+      // samego dnia stan `paused_decision` został skasowany w całości (pas P,
+      // zadanie P8: nie dało się go nigdzie włączyć), a CHECK w bazie zwężony
+      // do `('active','closed')`. Po tym zwężeniu OTWARTY wiersz `exit_mode`
+      // może mieć tylko jedną wartość, więc rozróżnienie nie ma czego
+      // rozróżniać — a warunek pilnujący nieistniejącego stanu myli następnego
+      // czytającego. Zamknięte wiersze odfiltrowuje samo zapytanie
+      // (`closed_at is null`).
+      // ⚠️ GDYBY STAN KIEDYŚ WRÓCIŁ, TA LINIJKA MUSI WRÓCIĆ RAZEM Z NIM.
+      exitAktywny = ((exitRes.data ?? []) as unknown[]).length > 0;
     }
 
     // PLAN-D-J 08.2026 — osobne, wąskie zapytanie o ograniczenia. Świadomie
@@ -253,7 +227,6 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
       accountState,
       birthYear,
       exitAktywny,
-      swiadekDeselekcji: SWIADEK_BRAK_ZRODLA,
       ograniczenia,
     }));
   }, [userId]);
@@ -356,10 +329,12 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
               {(stan.widok.stan === 'gotowy' || stan.widok.stan === 'wadliwy') && (
                 <>
                   {/* Sekcja 2 znika, gdy jest pusta — i to jest jedyne miejsce
-                      w tym pliku, gdzie coś znika. Powód: wariant „świadek
-                      deselekcji" NIE MA pozycji „w Twoich rękach" poza tą jedną
-                      na jutro, bo cała jego treść dotyczy tego, co się stało
-                      komu innemu. Nagłówek nad pustką czytałby się jak defekt. */}
+                      w tym pliku, gdzie coś znika. Nagłówek nad pustką czytałby
+                      się jak defekt treści, a nie jak jej brak.
+                      (Powodem był wariant „świadek deselekcji", który jako
+                      jedyny nie miał pozycji „w Twoich rękach" poza tą jedną na
+                      jutro. Wariant zniknął 13.08.2026, PLAN-D-P — ten warunek
+                      zostaje, bo chroni też przed brakiem treści w bazie.) */}
                   {stan.widok.wTwoichRekach.length > 0 ? (
                     <View style={{ marginTop: spacing.lg }}>
                       <Text style={styles.sectionLabel}>{SEKCJA_W_RECE}</Text>

@@ -51,14 +51,18 @@ check('arbiterGlosu.ts wskazuje, gdzie mieszka drabina',
   ZRODLO_DRABINY === 'gamechange-app/lib/arbiter-glosu.js', ZRODLO_DRABINY);
 check('…i gdzie mieszka warstwa ekranu', WARSTWA_EKRANU === 'lib/glosTygodnia.ts', WARSTWA_EKRANU);
 
-// Typ nadal jest kontraktem danych i musi mieć wszystkie siedem wartości
+// Typ nadal jest kontraktem danych i musi mieć wszystkie SZEŚĆ wartości
 // z CHECK-u w bazie — inaczej appka nie umiałaby nazwać tego, co odczyta.
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026): było siedem. `calibration` odeszło razem
+// z narzędziem (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md).
 {
-  const siedem: Voice[] = ['exit', 'injury', 'growth', 'compass', 'calibration', 'block', 'silence'];
-  check('typ Voice ma wszystkie siedem wartości z CHECK-u bazy', siedem.length === 7, JSON.stringify(siedem));
-  for (const v of siedem) {
+  const szesc: Voice[] = ['exit', 'injury', 'growth', 'compass', 'block', 'silence'];
+  check('typ Voice ma wszystkie sześć wartości z CHECK-u bazy', szesc.length === 6, JSON.stringify(szesc));
+  for (const v of szesc) {
     check(`…w tym „${v}"`, arbiter.includes(`'${v}'`), v);
   }
+  check('…i NIE ma już „calibration" — szczebel skasowany 13.08.2026 (PLAN-D-P)',
+    !/'calibration'/.test(arbiter), 'wartość calibration wróciła do typu Voice');
 }
 
 // ═══════════════════════════════════════════════════════════════════

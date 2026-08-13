@@ -205,26 +205,24 @@ check('źródło nie czyta zegara (data wchodzi parametrem, reguła E-N2)',
 // zapis WYCISZYŁBY PRODUKT W CAŁOŚCI (szczebel 0 drabiny), zamiast zrobić
 // to, czego chce spec 6.4.
 //
-// TA PRZYCZYNA ZNIKŁA. Zadanie I3 rozdzieliło oba stany w
-// `gamechange-app/lib/arbiter-glosu-io.js`: `paused_decision` nie jest już
-// ścieżką wyjścia, nie zabiera głosu i nie ustawia ciszy — jest STANEM
-// (skrócony horyzont Bloku, Mapa na to, co w rękach zawodnika, liczba
-// systemowa). Pilnują tego cztery komplety asercji po tamtej stronie,
-// z przebiegiem 52 tygodni na czwartym profilu włącznie.
+// 12.08.2026 (I3) przyczyna zniknęła: `paused_decision` zostało rozdzielone
+// od aktywnej ścieżki wyjścia po stronie czytnika arbitra i przestało wyciszać
+// produkt. Asercja została, ale pilnowała już węższej reguły.
 //
-// ASERCJA ZOSTAJE, ale pilnuje NOWEJ reguły, i ta reguła jest węższa:
-// ten plik zna dwa stany, które SAM ZAPISUJE (`active`, `closed`), i nie
-// zapisuje trzeciego. Powodem nie jest już ryzyko ciszy, tylko to, że
-// stan „czekam na decyzję" WŁĄCZA ZAWODNIK (spec 6.4), a wejścia do niego
-// w produkcie dziś NIE MA. Plik, który zapisuje stan, do którego nikt nie
-// ma jak wejść, tworzy wiersze bez właściciela.
-// ⚠️ Gdy to wejście powstanie, tej asercji NIE WOLNO po prostu skasować —
-// ma się zamienić na sprawdzenie, że wejście zapisuje `paused_decision`
-// jawnie i odwracalnie jednym ruchem, jak reszta tego pliku.
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — REGUŁA ZMIENIŁA SIĘ DRUGI RAZ I JEST
+// TERAZ NAJPROSTSZA Z MOŻLIWYCH: stan `paused_decision` NIE ISTNIEJE. Został
+// skasowany z bazy (CHECK zwężony do `('active','closed')`), z czytnika
+// arbitra, z budżetu uwagi i z Mapy — bo przez dwa dni był mechanizmem, do
+// którego nie było wejścia, a „mechanizm gotowy, czeka" to dokładnie ten
+// bałagan, który się mści.
+// ⚠️ Gdy taki stan kiedyś wróci, tej asercji NIE WOLNO po prostu skasować —
+// ma się zamienić na sprawdzenie, że wejście zapisuje go jawnie i odwracalnie
+// jednym ruchem, jak reszta tego pliku. Opis, czym ten stan był, jest w nocie
+// przekazania pasa P.
 // ─────────────────────────────────────────────────────────────────────
 check('źródło zapisuje WYŁĄCZNIE dwa stany, które sam zna: „active" i „closed"',
   zrodlo.includes("'active'") && zrodlo.includes("'closed'"), 'active/closed');
-check('źródło NIE zapisuje „paused_decision" — ten stan włącza zawodnik, a wejścia do niego jeszcze nie ma',
+check('źródło NIE zapisuje „paused_decision" — tego stanu nie ma już w CHECK-u bazy (PLAN-D-P)',
   !zrodlo.includes("'paused_decision'"), 'paused_decision');
 {
   // Druga połowa nowej reguły, i ta jest ważniejsza: gdyby taki wiersz

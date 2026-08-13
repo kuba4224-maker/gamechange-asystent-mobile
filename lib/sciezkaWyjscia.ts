@@ -60,15 +60,18 @@ export const RODZAJE_ZDARZEN: readonly RodzajZdarzenia[] = [
 /**
  * Wartości `exit_mode.state` dopuszczone przez CHECK w bazie.
  *
- * ⚠️ `paused_decision` (reguła P5, „czekam na decyzję") JEST w CHECK-u bazy,
- * ale APPKA GO NIE ZAPISUJE i ta runda go nie buduje. Powód jest konkretny,
- * nie estetyczny: czytnik arbitra uznaje za aktywną ścieżkę KAŻDY otwarty
- * wiersz o `state <> 'closed'` — więc wiersz `paused_decision` wyciszyłby
- * produkt w całości (priorytet 0), a spec 6.4 chce dla tego stanu czegoś
- * zupełnie innego (skrócony horyzont Bloku, przełączona Mapa, liczba
- * systemowa — ale NIE ciszy). Zapisanie go dziś dałoby zawodnikowi
- * „czekam na decyzję", które w praktyce znaczy „produkt zamilkł".
- * Pilnuje tego selftest.
+ * ⚠️ PLAN-D-P 08.2026 (13.08.2026) — CHECK MA OD TEJ RUNDY DWIE WARTOŚCI,
+ * NIE TRZY. `paused_decision` („czekam na decyzję") zostało skasowane z bazy
+ * i z całego kodu: obsługiwały je trzy warstwy naraz, a NIE DAŁO SIĘ GO
+ * NIGDZIE WŁĄCZYĆ — żaden ekran nie zapisywał tej wartości, tabela miała zero
+ * wierszy. Ten plik nigdy jej nie zapisywał i to się nie zmienia; zmieniło się
+ * to, że nie jest już wartością dopuszczoną przez bazę.
+ *
+ * ⚠️ CO ZOSTAJE: gdyby taki wiersz jednak skądś się wziął, ekran ma go NAZWAĆ
+ * jako stan nieznany, a nie pokazać jak zwykłe włączenie ścieżki wyjścia —
+ * „nie znam tego stanu" i „ścieżka wyjścia jest włączona" to dwie różne
+ * rzeczy. Pilnuje tego selftest i ta asercja jest po tej rundzie WAŻNIEJSZA,
+ * nie mniej ważna.
  */
 export const STAN_AKTYWNA = 'active';
 export const STAN_ZAMKNIETA = 'closed';

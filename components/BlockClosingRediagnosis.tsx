@@ -46,6 +46,12 @@ import {
   type RediagnosisBaseline,
 } from '../lib/rediagnosis';
 import { fetchRediagnosisContext, saveRediagnosisAnswer } from '../lib/rediagnosisIO';
+// PLAN-D-P 08.2026 (13.08.2026) — CO OBOWIĄZUJE W TYM TYGODNIU.
+// Reguła uratowana z Kalibracji („spadku nie nazywa się spadkiem u kogoś, kto
+// akurat szybko rośnie") siedzi w `lib/rediagnosis.ts` jako czysta funkcja.
+// Ten plik ją WYKONUJE, nie podejmuje — dokłada wyłącznie stan odczytany przez
+// `fetchRediagnosisContext`. Nadal ani jednego zdania widocznego dla zawodnika.
+import { czytajOgraniczenia, opisOgraniczenDoLogu, type StanOgraniczen } from '../lib/ograniczenia';
 
 type Props = {
   userId: string;
@@ -65,6 +71,11 @@ export default function BlockClosingRediagnosis({ userId, segmentId, blockStarte
   const [saved, setSaved] = useState(true);
   const [saving, setSaving] = useState(false);
   const [wordingKey, setWordingKey] = useState<string | null>(null);
+  // (PLAN-D-P) Stan startowy to jawne „nie odczytałem", nie pusta koperta —
+  // gdyby był pustą kopertą, brak odczytu wyglądałby jak „nie rośnie szybko".
+  const [ograniczenia, setOgraniczenia] = useState<StanOgraniczen>(
+    () => czytajOgraniczenia(undefined, 'koperta ograniczeń jeszcze nie odczytana'),
+  );
 
   // `onResolved` może być tylko raz — rodzic po nim odsłania przyciski
   // zamknięcia, a drugie wywołanie nic by nie zmieniło poza szumem.
@@ -97,6 +108,8 @@ export default function BlockClosingRediagnosis({ userId, segmentId, blockStarte
         if (!alive) return;
         setBaseline(ctx.baseline);
         setWordingKey(getPositionWordingKey(ctx.positionPrimary));
+        setOgraniczenia(ctx.ograniczenia);
+        console.log(`[rediagnoza] ${opisOgraniczenDoLogu(ctx.ograniczenia)}`);
         if (ctx.existingAnswer != null) {
           // Zawodnik już odpowiedział w trakcie tego Bloku (np. otworzył
           // przegląd drugi raz) — pokazujemy tę samą różnicę, nie pytamy znowu.
@@ -136,6 +149,7 @@ export default function BlockClosingRediagnosis({ userId, segmentId, blockStarte
 
   const view = buildRediagnosisView({
     segmentId, baseline, answerValue: answer, skipped, saved, wordingKey, weeks, loading,
+    ograniczenia,
   });
 
   // ════════════════════════════════════════════════════════════

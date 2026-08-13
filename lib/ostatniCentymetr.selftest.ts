@@ -26,6 +26,10 @@
 // ⚠️ REGUŁA, KTÓREJ TO SŁUŻY (audyt M, sekcja 6.7): zadanie nie jest skończone,
 // dopóki zawodnik tego nie widzi. Ten plik jest pierwszym miejscem, w którym ta
 // reguła cokolwiek MIERZY, zamiast być zdaniem w kontrakcie.
+//
+// ⚠️ 13.08.2026 (PLAN-D-P): plik schodzi z 12 asercji do 5. Zniknęły dwie całe
+// sekcje — (N4) i (N2) — obie razem z rzeczami, których pilnowały. Powody
+// stoją w sekcji 2 niżej, wypisane co do sztuki, zamiast po cichu.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,55 +103,31 @@ function check(label: string, cond: boolean, detail: string) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 2. „CZEKAM NA DECYZJĘ" TO NIE JEST „ODPADŁEM"
+// 2. ⚠️ TU BYŁY DWIE SEKCJE I OBIE ZNIKŁY 13.08.2026 (PLAN-D-P)
 // ═══════════════════════════════════════════════════════════════════
-// `exit_mode.state` ma trzy wartości (CHECK zmierzony w bazie 13.08.2026):
-// `active`, `paused_decision`, `closed`. Backend rozróżniał je od pasa I;
-// Mapa brała KAŻDY otwarty wiersz (`length > 0`) i przełączała się na wariant
-// „po deselekcji". Dopóki nikt nie ustawia `paused_decision`, defekt jest
-// niewidoczny — zapala się w dniu, w którym wejście do tego stanu powstanie,
-// czyli dokładnie wtedy, kiedy nikt już nie będzie pamiętał tej linijki.
-{
-  const mapa = zrodlo('components/MojaDroga.tsx');
-  check('(N4) wariant „po deselekcji" włącza WYŁĄCZNIE stan `active`',
-    /state\s*===\s*['"]active['"]/.test(mapa),
-    'brak jawnego warunku na `active` — Mapa może powiedzieć „odpadłeś" komuś, kto wstrzymał decyzję');
-  check('(N4) …a nie „jakikolwiek otwarty wiersz `exit_mode`"',
-    !/\(\s*exitRes\.data\s*\?\?\s*\[\]\s*\)\.length\s*>\s*0/.test(mapa),
-    'wrócił warunek `length > 0`');
-  check('(N4) stan spoza znanych dwóch jest głośny, a nie milcząco traktowany jak deselekcja',
-    /NIEZNANY_STAN_WYJSCIA_WARN/.test(mapa),
-    'brak ostrzeżenia o nieznanym stanie — cichy brak wróciłby tylnymi drzwiami');
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// 3. CZTERY LICZNIKI ZACHOWANIA — KOLEJNOŚĆ, NIE ISTNIENIE
-// ═══════════════════════════════════════════════════════════════════
-// `lib/sladZachowania.ts` liczy cztery liczniki poprawnie i ma własny selftest.
-// Jedyne miejsce w produkcie, w którym zawodnik miał je ZOBACZYĆ, ustawiało je
-// linijkę przed `await load()`, a `load()` zaczyna się od `setSladLinie(null)`.
-// Licznik kasował się natychmiast po policzeniu. Funkcja: poprawna. Test:
-// zielony. Zawodnik: nie zobaczył nigdy.
-{
-  const kal = zrodlo('components/Kalibracja.tsx');
-  const iPokazania = kal.indexOf('setSladLinie(opiszSlad');
-  const przedPokazaniem = iPokazania >= 0 ? kal.slice(0, iPokazania) : '';
-  const iOstatniegoLoad = przedPokazaniem.lastIndexOf('await load()');
-  const poPokazaniu = iPokazania >= 0 ? kal.slice(iPokazania) : '';
-
-  check('(N2) licznik śladu jest w ogóle ustawiany',
-    iPokazania >= 0, 'nie znalazłem `setSladLinie(opiszSlad` — licznika nie ma gdzie zobaczyć');
-  check('(N2) `await load()` stoi PRZED ustawieniem licznika, nie po nim',
-    iPokazania >= 0 && iOstatniegoLoad >= 0,
-    'ustawienie licznika nie jest poprzedzone `await load()` w tej samej funkcji — '
-    + 'jeśli `load()` przyjdzie później, skasuje licznik, zanim ktokolwiek go zobaczy');
-  check('(N2) …i po ustawieniu licznika nie ma już kolejnego `load()`, które by go skasowało',
-    iPokazania >= 0 && !/await\s+load\(\)/.test(poPokazaniu.slice(0, 400)),
-    'zaraz po ustawieniu licznika wołane jest `load()` — dokładnie defekt sprzed 13.08.2026');
-  check('(N2) `load()` nadal czyści licznik na wejściu (to jest poprawne — chodzi o kolejność)',
-    /setSladLinie\(null\)/.test(kal),
-    'zniknęło czyszczenie licznika — po przeładowaniu danych zostałaby stara, nieaktualna linijka');
-}
+// Nazywam to wprost, zamiast po cichu skrócić plik — spadek liczby asercji
+// bez powodu wygląda przy następnym czytaniu jak zgubiony test.
+//
+// (N4) „CZEKAM NA DECYZJĘ" TO NIE JEST „ODPADŁEM" — trzy asercje.
+// Pilnowały, żeby Mapa przełączała wariant „po deselekcji" wyłącznie przy
+// `exit_mode.state = 'active'`, a nie przy każdym otwartym wierszu.
+// ⚠️ TA RUNDA COFA ZADANIE N4 I TAK MA BYĆ. Stan `paused_decision` został
+// skasowany w całości (pas P, zadanie P8): nie dało się go nigdzie włączyć,
+// a CHECK w bazie zwęża się do `('active','closed')`. Po tej zmianie „otwarty
+// wiersz" i „wiersz aktywny" to jedno i to samo, więc asercja pilnowałaby
+// rozróżnienia, którego już nie ma. Gdyby stan kiedyś wrócił, ta sekcja MUSI
+// wrócić razem z nim — opis, czym był, jest w nocie przekazania pasa P.
+//
+// (N2) CZTERY LICZNIKI ZACHOWANIA — cztery asercje.
+// Pilnowały KOLEJNOŚCI: `setSladLinie(opiszSlad…)` po `await load()`, nie
+// przed. Czytały `components/Kalibracja.tsx`, a tego pliku nie ma
+// (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md), więc `readFileSync`
+// rzuciłby wyjątkiem i wywrócił CAŁY ten strażnik — łącznie z asercjami (N1),
+// które mają zostać nietknięte.
+// ⚠️ SAM `lib/sladZachowania.ts` ZOSTAJE i jego selftest nadal przechodzi.
+// Znikła karta, nie licznik. W dniu, w którym ślad zachowania dostanie nowego
+// konsumenta (runda systematyczności, zasada N1), ta sekcja wraca — z nową
+// ścieżką i tym samym pytaniem: czy zawodnik na pewno zdąży to zobaczyć.
 
 // ═══════════════════════════════════════════════════════════════════
 // 4. STRAŻNIK STRAŻNIKA
@@ -157,10 +137,9 @@ function check(label: string, cond: boolean, detail: string) {
 // przeniósł logikę gdzie indziej, testy przechodziłyby, nie sprawdzając nic.
 {
   const mapa = zrodlo('components/MojaDroga.tsx');
-  const kal = zrodlo('components/Kalibracja.tsx');
-  check('pliki, które ten strażnik czyta, naprawdę zawierają badaną logikę',
-    mapa.includes('supabase.rpc(') && mapa.includes('exit_mode') && kal.includes('opiszSlad'),
-    `MojaDroga=${mapa.length}B, Kalibracja=${kal.length}B`);
+  check('plik, który ten strażnik czyta, naprawdę zawiera badaną logikę',
+    mapa.includes('supabase.rpc(') && mapa.includes('exit_mode'),
+    `MojaDroga=${mapa.length}B`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

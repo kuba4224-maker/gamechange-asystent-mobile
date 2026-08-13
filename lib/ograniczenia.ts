@@ -53,12 +53,30 @@ export const WERSJA_OGRANICZEN_ZNANA = 1;
  *   • `czytajOgraniczenia` — klucz z bazy, którego tu nie ma, daje jawny stan
  *     „baza wie coś, czego ta wersja appki nie wie", a nie ciszę.
  */
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — SIEDEM KLUCZY ZESZŁO DO PIĘCIU.
+// Zniknęły dwa i oba dlatego, że straciły konsumenta, a nie dlatego, że
+// przestały być prawdziwe:
+//   • `kalibracjaPrzeramowujeSpadek` — jego jedynym konsumentem był
+//     `lib/kalibracja.ts` (`stanZmiany`), a Kalibracja została usunięta
+//     z produktu w całości (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md).
+//     ⚠️ SAMA REGUŁA NIE ZGINĘŁA: „spadku nie nazywa się spadkiem u kogoś, kto
+//     akurat szybko rośnie" przeprowadziła się do `lib/rediagnosis.ts`, czyli
+//     do zamknięcia Bloku. Czyta ją stamtąd `czyOslonaAktywna()` niżej;
+//   • `blokSkracaHoryzontDoDecyzji` — obsługiwał wyłącznie stan
+//     `exit_mode.state = 'paused_decision'`, którego nie dało się nigdzie
+//     włączyć i który został skasowany razem z gałęzią (pas P, zadanie P8).
+//
+// ⚠️ `WERSJA_OGRANICZEN` ŚWIADOMIE NIE ROŚNIE. Wersja mówi o KSZTAŁCIE koperty
+// (`{wersja, aktywne[], nieznane_ograniczenia[], nieznane[]}`), a kształt się nie
+// zmienił — zmienił się zbiór kluczy, które w tych tablicach mogą stać. Podbicie
+// wersji kazałoby appce odpowiedzieć `nie_wiem` na KAŻDE ograniczenie z każdego
+// wiersza zapisanego przed tą rundą, czyli wyłączyłoby Osłonę u wszystkich do
+// czasu najbliższego przebiegu crona. Klucz, którego appka nie zna, i tak ma
+// jawne wyjście: ląduje w `nieznaneKlucze` (patrz `czytajOgraniczenia`).
 export type KluczOgraniczenia =
   | 'wszystkoMilczy'
   | 'systemMilczyOCelach'
   | 'blokNieZwiekszaObjetosci'
-  | 'kalibracjaPrzeramowujeSpadek'
-  | 'blokSkracaHoryzontDoDecyzji'
   | 'mapaTylkoWTwoichRekach'
   | 'pokazacLiczbeSystemowa';
 
@@ -66,8 +84,6 @@ export const KLUCZE_OGRANICZEN: readonly KluczOgraniczenia[] = [
   'wszystkoMilczy',
   'systemMilczyOCelach',
   'blokNieZwiekszaObjetosci',
-  'kalibracjaPrzeramowujeSpadek',
-  'blokSkracaHoryzontDoDecyzji',
   'mapaTylkoWTwoichRekach',
   'pokazacLiczbeSystemowa',
 ];
@@ -181,6 +197,40 @@ export function obowiazuje(stan: StanOgraniczen, klucz: KluczOgraniczenia): Obow
 }
 
 /**
+ * PLAN-D-P 08.2026 (13.08.2026) — CZY TRWA OSŁONA (szybki wzrost).
+ *
+ * ── DLACZEGO TO JEST WYPROWADZENIE, A NIE WŁASNY KLUCZ ────────────────
+ * Do 13.08.2026 „zawodnik akurat szybko rośnie" miało w kopercie własny klucz
+ * (`kalibracjaPrzeramowujeSpadek`, ustawiany dokładnie na `oslonaAktywna`).
+ * Zniknął razem ze swoim jedynym konsumentem. Zostaje pytanie: skąd
+ * rediagnoza ma teraz wiedzieć, że trwa skok wzrostowy.
+ *
+ * ⚠️ NIE WOLNO WZIĄĆ SAMEGO `blokNieZwiekszaObjetosci`. Backend ustawia je jako
+ * `oslonaAktywna || kontuzjaAktywna` (`gamechange-app/lib/arbiter-glosu.js`,
+ * odczytane 13.08.2026) — więc zawodnik z kontuzją i BEZ skoku wzrostowego
+ * dostałby zdanie „rośniesz i dlatego ta liczba spadła". To jest podanie
+ * prawdopodobnego jako pewnego, czyli złamanie Z0.
+ *
+ * Dlatego liczymy to z DWÓCH kluczy naraz, i tylko tam, gdzie wychodzi to bez
+ * zgadywania:
+ *   • `blokNieZwiekszaObjetosci = nie`  → ani Osłona, ani kontuzja → `nie`;
+ *   • `blok = tak` i `systemMilczyOCelach = nie` → kontuzji NIE MA, więc
+ *     przesłanką musi być Osłona → `tak`;
+ *   • wszystko inne (obie naraz, albo którakolwiek nierozstrzygnięta)
+ *     → `nie_wiem`, czyli brzmienie ostrożne, nie przeramowane.
+ *
+ * ⚠️ TO JEST STAN, NIE KOMUNIKAT (zasada 1 z nagłówka pliku). Ta funkcja nie
+ * buduje ani jednego zdania — mówi tylko, którą gałąź wolno wybrać.
+ */
+export function czyOslonaAktywna(stan: StanOgraniczen): Obowiazuje {
+  const blok = obowiazuje(stan, 'blokNieZwiekszaObjetosci');
+  const kontuzja = obowiazuje(stan, 'systemMilczyOCelach');
+  if (blok === 'nie') return 'nie';
+  if (blok === 'tak' && kontuzja === 'nie') return 'tak';
+  return 'nie_wiem';
+}
+
+/**
  * Zdanie do konsoli. Ten sam powód co `opisDoLogu` w `lib/glosTygodnia.ts`:
  * na pytanie „dlaczego produkt zachował się wtedy tak" ma dać się odpowiedzieć
  * zdaniem, a nie zgadywaniem.
@@ -283,8 +333,18 @@ export function coPokazacNaDzis(stan: StanOgraniczen): WidokDzis {
 //   4. lista kluczy zgadza się z `KLUCZE_OGRANICZEN` w repozytorium backendu,
 //      gdy oba repozytoria leżą obok siebie (a gdy nie leżą — strażnik mówi
 //      to GŁOŚNO i liczy jako pominięcie, zamiast przejść na zielono).
-// Dołożenie ósmego ograniczenia bez odbiorcy zapala punkt 1. Wyjęcie
+// Dołożenie szóstego ograniczenia bez odbiorcy zapala punkt 1. Wyjęcie
 // konsumenta z pliku zapala punkt 3. Sprawdzone mutacją, oba.
+//
+// ⚠️ CZEGO TEN STRAŻNIK NIE ŁAPIE — NAZWANE 13.08.2026 (PLAN-D-P). Sprawdza,
+// że każdy klucz MA KONSUMENTA. Nie sprawdza, że backend jest w stanie ten
+// klucz kiedykolwiek WŁĄCZYĆ. Po skasowaniu stanu `paused_decision` (zadanie
+// P8) dokładnie tak jest z `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`:
+// oba mają żywego konsumenta w `lib/mapaDrogi.ts`, oba są poprawne — i oba są
+// od 13.08.2026 ZAWSZE `false`, bo jedyna przesłanka, która je zapalała,
+// zniknęła. To jest ŚWIADOMY stan, zapisany tutaj, a nie cichy brak: pas P miał
+// zdjąć gałąź bez wejścia, a nie przy okazji wyciąć Mapie dwa zachowania,
+// o których Kuba nie decydował. Rozstrzygnięcie należy do sesji nawigującej.
 
 export type WpisRejestru = {
   /** Ścieżka względem katalogu głównego appki. */
@@ -309,17 +369,8 @@ export const REJESTR_OGRANICZEN: Record<KluczOgraniczenia, WpisRejestru> = {
   blokNieZwiekszaObjetosci: {
     plik: 'lib/budzetUwagi.ts',
     symbol: 'sufitObjetosci',
-    coRobi: 'Sufit tygodniowy Bloku spada z limitu do tego, co zawodnik już robi — planer nie proponuje ani jednej sesji więcej, a przy zajętym tygodniu proponuje redukcję.',
-  },
-  kalibracjaPrzeramowujeSpadek: {
-    plik: 'lib/kalibracja.ts',
-    symbol: 'stanZmiany',
-    coRobi: 'Stan trzeci Kalibracji przestaje nazywać spadek spadkiem i mówi wprost, że w okresie szybkiego wzrastania to nie jest cofnięcie się.',
-  },
-  blokSkracaHoryzontDoDecyzji: {
-    plik: 'lib/budzetUwagi.ts',
-    symbol: 'sufitTygodni',
-    coRobi: 'Planer skraca horyzont Bloku, zamiast planować ślepo na osiem tygodni przez datę decyzji.',
+    coRobi: 'Sufit tygodniowy Bloku spada z limitu do tego, co zawodnik już robi — planer nie proponuje ani jednej sesji więcej, a przy zajętym tygodniu proponuje redukcję. '
+      + 'DRUGI KONSUMENT od 13.08.2026: `lib/rediagnosis.ts` czyta ten klucz przez `czyOslonaAktywna()`, żeby przy zamknięciu Bloku nie nazwać spadku spadkiem u kogoś, kto akurat szybko rośnie.',
   },
   mapaTylkoWTwoichRekach: {
     plik: 'lib/mapaDrogi.ts',

@@ -42,8 +42,10 @@ import {
   type KluczOgraniczenia,
   type StanOgraniczen,
 } from './ograniczenia';
-import { sufitObjetosci, sufitTygodni, ograniczLiczbeDni, TYGODNI_PRZY_CZEKAM_NA_DECYZJE } from './budzetUwagi';
-import { stanZmiany, progZmiany } from './kalibracja';
+import { sufitObjetosci, ograniczLiczbeDni } from './budzetUwagi';
+// PLAN-D-P 08.2026 (13.08.2026) — konsument reguły „spadku nie nazywa się
+// spadkiem u kogoś, kto szybko rośnie" przeniósł się z Kalibracji do rediagnozy.
+import { buildRediagnosisView } from './rediagnosis';
 import { zbudujOdcinek, LICZBA_SYSTEMOWA_ROTACJI, type RoadSegment, type RoadFactor } from './mapaDrogi';
 
 let passed = 0;
@@ -226,55 +228,62 @@ const PUSTE = czytajOgraniczenia(koperta());
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// 6. KONSUMENT: HORYZONT BLOKU — P5 „czekam na decyzję"
+// 6. ⚠️ TU BYŁ KONSUMENT „HORYZONT BLOKU" (P5) — 4 ASERCJE, SKASOWANY
 // ═════════════════════════════════════════════════════════════════════
+// PLAN-D-P 08.2026 (13.08.2026). `sufitTygodni()` skracała horyzont Bloku do
+// czterech tygodni przy ograniczeniu `blokSkracaHoryzontDoDecyzji`. Jedyną
+// przesłanką tego ograniczenia był stan `exit_mode.state = 'paused_decision'`,
+// którego NIE DAŁO SIĘ NIGDZIE WŁĄCZYĆ — cała gałąź została skasowana
+// (zadanie P8), razem z funkcją, ze stałą `TYGODNI_PRZY_CZEKAM_NA_DECYZJE`
+// i z samym kluczem. Nazywam to tutaj, zamiast po cichu skrócić plik.
+
+// ═════════════════════════════════════════════════════════════════════
+// 7. KONSUMENT: REDIAGNOZA — przeramowanie spadku przy Osłonie
+// ═════════════════════════════════════════════════════════════════════
+// ⚠️ TO JEST TA SAMA REGUŁA, KTÓRA DO 13.08.2026 MIESZKAŁA W KALIBRACJI.
+// Zmieniły się dwie rzeczy i tylko dwie: MIEJSCE (zamknięcie Bloku zamiast
+// osobnego ekranu pomiaru) i SPOSÓB ODCZYTU stanu Osłony — zamiast własnego
+// klucza `kalibracjaPrzeramowujeSpadek` idzie przez `czyOslonaAktywna()`,
+// czyli przez `blokNieZwiekszaObjetosci` ODJĄĆ kontuzję. Pełne uzasadnienie
+// stoi w `lib/ograniczenia.ts` przy tej funkcji.
 {
-  const bez = sufitTygodni(8, PUSTE);
-  check('bez P5 horyzont zostaje taki, jaki zaproponowało dozowanie',
-    bez.maxTygodni === 8, JSON.stringify(bez));
+  const READY = { state: 'ready' as const, score: 42 };
+  const widok = (v: number, ogr: unknown) => buildRediagnosisView({
+    segmentId: 'regeneracja', baseline: READY, answerValue: v, weeks: 6,
+    ograniczenia: ogr as never,
+  }) as { headline: string; body: string; oslona: string; direction: string };
 
-  const zP5 = sufitTygodni(8, czytajOgraniczenia(koperta(['blokSkracaHoryzontDoDecyzji'])));
-  check(`P5 → horyzont skrócony do ${TYGODNI_PRZY_CZEKAM_NA_DECYZJE} tyg. (spec 6.4)`,
-    zP5.maxTygodni === TYGODNI_PRZY_CZEKAM_NA_DECYZJE, JSON.stringify(zP5));
-
-  const krotszy = sufitTygodni(2, czytajOgraniczenia(koperta(['blokSkracaHoryzontDoDecyzji'])));
-  check('P5 NIE wydłuża horyzontu krótszego niż sufit',
-    krotszy.maxTygodni === 2, JSON.stringify(krotszy));
-
-  const nieWiem = sufitTygodni(8, czytajOgraniczenia(null, null));
-  check('nie_wiem nie skraca horyzontu',
-    nieWiem.maxTygodni === 8 && nieWiem.ograniczenie === 'nie_wiem', JSON.stringify(nieWiem));
-}
-
-// ═════════════════════════════════════════════════════════════════════
-// 7. KONSUMENT: KALIBRACJA — przeramowanie spadku
-// ═════════════════════════════════════════════════════════════════════
-{
-  const prog = progZmiany(1);
-  const bez = stanZmiany(-5, prog);
+  const bez = widok(2, PUSTE);
   check('bez Osłony spadek nadal nazywa się spadkiem',
-    bez.stan === 3 && bez.tytul === 'Wynik spadł', JSON.stringify(bez));
+    bez.direction === 'down' && /w dół/i.test(bez.headline), JSON.stringify(bez));
 
-  const zOslona = stanZmiany(-5, prog, czytajOgraniczenia(koperta(['kalibracjaPrzeramowujeSpadek'])));
-  check('Osłona → stan 3 NIE nazywa spadku spadkiem (spec 3.2)',
-    zOslona.stan === 3 && zOslona.tytul !== 'Wynik spadł', JSON.stringify(zOslona));
+  const zOslona = widok(2, czytajOgraniczenia(koperta(['blokNieZwiekszaObjetosci'])));
+  check('Osłona → spadek NIE nazywa się spadkiem',
+    zOslona.direction === 'down' && zOslona.oslona === 'tak' && !/w dół/i.test(zOslona.headline),
+    JSON.stringify(zOslona));
   check('…i mówi wprost, że to nie jest cofnięcie się',
-    zOslona.tresc.toLowerCase().includes('nie jest cofnięcie'), zOslona.tresc);
-  check('…i nadal ZERO liczb o dojrzałości biologicznej (zakaz bezwzględny, spec 3.3)',
-    !/wiek biologiczn|phv|dojrzałoś|przewidywany wzrost/i.test(`${zOslona.tytul} ${zOslona.tresc}`),
-    zOslona.tresc);
+    zOslona.body.toLowerCase().includes('nie jest cofnięcie'), zOslona.body);
+  check('…i nadal ZERO liczb o dojrzałości biologicznej (zakaz bezwzględny)',
+    !/wiek biologiczn|phv|dojrzałoś|przewidywany wzrost|[0-9]/i.test(`${zOslona.headline} ${zOslona.body}`),
+    zOslona.body);
   check('…i nie chwali ani nie porównuje z rówieśnikami',
-    !/świetnie|brawo|gratul|rówieśnik|inni zawodnicy/i.test(`${zOslona.tytul} ${zOslona.tresc}`),
-    zOslona.tresc);
+    !/świetnie|brawo|gratul|rówieśnik|inni zawodnicy/i.test(`${zOslona.headline} ${zOslona.body}`),
+    zOslona.body);
 
-  const nieWiem = stanZmiany(-5, prog, czytajOgraniczenia(null, null));
+  // ⛔ KONTUZJA WŁĄCZA `blokNieZwiekszaObjetosci` DOKŁADNIE TAK SAMO JAK OSŁONA.
+  // Bez odjęcia kontuzji produkt powiedziałby „rośniesz" komuś, kto leży z urazem.
+  const zKontuzja = widok(2, czytajOgraniczenia(koperta(['blokNieZwiekszaObjetosci', 'systemMilczyOCelach'])));
+  check('⛔ kontuzja NIE przeramowuje spadku — przesłanek nie da się rozróżnić',
+    zKontuzja.oslona === 'nie_wiem' && /w dół/i.test(zKontuzja.headline), JSON.stringify(zKontuzja));
+
+  const nieWiem = widok(2, czytajOgraniczenia(null, null));
   check('nie_wiem → brzmienie ostrożne, nie przeramowane',
-    nieWiem.tytul === 'Wynik spadł', JSON.stringify(nieWiem));
+    /w dół/i.test(nieWiem.headline), JSON.stringify(nieWiem));
 
-  check('stan 2 (poniżej progu) jest nietknięty przez ograniczenie',
-    stanZmiany(0.5, prog, czytajOgraniczenia(koperta(['kalibracjaPrzeramowujeSpadek']))).stan === 2, '');
-  check('stan 1 (realna poprawa) jest nietknięty przez ograniczenie',
-    stanZmiany(5, prog, czytajOgraniczenia(koperta(['kalibracjaPrzeramowujeSpadek']))).stan === 1, '');
+  check('brak zmiany przy Osłonie jest NAZWANY osiągnięciem (zasada P1)',
+    /utrzyma/i.test(widok(3, czytajOgraniczenia(koperta(['blokNieZwiekszaObjetosci']))).headline), '');
+  check('wzrost jest nietknięty przez ograniczenie',
+    widok(5, czytajOgraniczenia(koperta(['blokNieZwiekszaObjetosci']))).body === widok(5, PUSTE).body, '');
 }
 
 // ═════════════════════════════════════════════════════════════════════

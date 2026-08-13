@@ -23,11 +23,30 @@
 // `false`. Tu reużywamy banku pytań, skali i tabeli — nie ekranu. Zapis stąd
 // ma zresztą skutek uboczny, który jest pożądany: gdyby puls kiedyś wrócił,
 // bramka świeżości (21 dni) nie zapyta o segment, o który właśnie zapytaliśmy.
+//
+// PLAN-D-P 08.2026 (13.08.2026) — CZWARTY ODCZYT: CO OBOWIĄZUJE W TYM TYGODNIU.
+// Reguła uratowana z Kalibracji („spadku nie nazywa się spadkiem u kogoś, kto
+// akurat szybko rośnie") potrzebuje stanu Osłony, a ten mieszka w kopercie
+// `weekly_voice.ograniczenia`. Odczyt jest tu, a nie w komponencie, bo
+// komponent nie robi zapytań — i nie w `lib/rediagnosis.ts`, bo tamten plik nie
+// zna Supabase i musi dać się uruchomić w node.
+//
+// ⚠️ BEZ TEGO ODCZYTU REGUŁA BYŁABY MARTWA. `buildRediagnosisView` bez koperty
+// odpowiada `nie_wiem` i mówi dokładnie to, co mówiło przed tą rundą — czyli
+// przeniesienie reguły wyglądałoby na zrobione i nie zmieniłoby ani jednego
+// zdania na ekranie. To jest wzorzec 26 pozycji „JEST, ALE MARTWE" z audytu M.
 import { supabase } from './supabase';
 import { saveLivingDiagnosisPulse } from './livingDiagnosisPulses';
 import { isMissingTableError } from './componentHints';
 import { parseScores } from '../components/diagnosisProfile';
 import { baselineFromScores, type RediagnosisBaseline } from './rediagnosis';
+import {
+  czytajOgraniczenia,
+  isMissingOgraniczeniaColumnError,
+  KOLUMNA_OGRANICZEN,
+  type StanOgraniczen,
+} from './ograniczenia';
+import { poniedzialekTygodnia as poniedzialekGlosu } from './glosTygodnia';
 
 export type RediagnosisContext = {
   baseline: RediagnosisBaseline;
@@ -38,16 +57,21 @@ export type RediagnosisContext = {
   /** Tabela pulsów nie istnieje w bazie — patrz reguła R5. Nie blokuje stacji,
    *  ale zapis się nie uda i zawodnik zobaczy o tym jedno zdanie. */
   pulsesTableMissing: boolean;
+  /** (PLAN-D-P) Koperta ograniczeń na bieżący tydzień. Nigdy `null` — brak
+   *  odczytu to jawny stan `nie_odczytane`, nie „nic nie obowiązuje". */
+  ograniczenia: StanOgraniczen;
 };
 
 export async function fetchRediagnosisContext(params: {
   userId: string;
   segmentId: string;
   blockStartedAt: string;
+  /** ⚠️ REGUŁA E-N2: „dzisiaj" wchodzi parametrem, nie z zegara w środku. */
+  teraz?: Date;
 }): Promise<RediagnosisContext> {
-  const { userId, segmentId, blockStartedAt } = params;
+  const { userId, segmentId, blockStartedAt, teraz = new Date() } = params;
 
-  const [diagRes, pulseRes, profileRes] = await Promise.all([
+  const [diagRes, pulseRes, profileRes, ogrRes] = await Promise.all([
     // „Diagnoza sprzed bloku", nie „najnowsza diagnoza". Gdyby zawodnik zrobił
     // pełną rediagnozę W TRAKCIE Bloku, porównanie z nią pokazywałoby zmianę z
     // połowy okresu i zjadłoby część efektu pracy.
@@ -64,6 +88,13 @@ export async function fetchRediagnosisContext(params: {
       .order('created_at', { ascending: false }).limit(1),
     supabase.from('player_profiles').select('position_primary')
       .eq('user_id', userId).limit(1),
+    // (PLAN-D-P) Koperta ograniczeń na BIEŻĄCY tydzień — ten sam wzorzec
+    // odczytu co w `components/MojaDroga.tsx` i na ekranie „Dziś".
+    supabase.from('weekly_voice')
+      .select(`week_start, ${KOLUMNA_OGRANICZEN}`)
+      .eq('user_id', userId)
+      .eq('week_start', poniedzialekGlosu(teraz))
+      .limit(1),
   ]);
 
   // Trzy różne rzeczy, trzy różne stany — nigdy jeden wspólny „pusto".
@@ -81,11 +112,21 @@ export async function fetchRediagnosisContext(params: {
   const existingAnswer =
     rawAnswer && typeof rawAnswer.response_value === 'number' ? rawAnswer.response_value : null;
 
+  // (PLAN-D-P) Trzy stany, nigdy dwa: brak kolumny ≠ brak koperty ≠ błąd odczytu.
+  const wierszOgr = (ogrRes.data ?? [])[0] as Record<string, unknown> | undefined;
+  const ograniczenia = ogrRes.error && isMissingOgraniczeniaColumnError(ogrRes.error)
+    ? czytajOgraniczenia(undefined, `kolumny „${KOLUMNA_OGRANICZEN}" nie ma jeszcze w bazie`)
+    : czytajOgraniczenia(
+      wierszOgr ? wierszOgr[KOLUMNA_OGRANICZEN] : null,
+      ogrRes.error ? ogrRes.error.message : null,
+    );
+
   return {
     baseline,
     existingAnswer,
     positionPrimary: profileRes.error ? null : (profileRes.data?.[0]?.position_primary ?? null),
     pulsesTableMissing,
+    ograniczenia,
   };
 }
 

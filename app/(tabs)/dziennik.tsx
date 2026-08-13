@@ -32,6 +32,9 @@ import { BODY_LOCATIONS, BODY_LOCATION_LABELS, NON_LATERAL_LOCATIONS } from '../
 // DODANE 06.08.2026 — kolorowanie suwaków + wariant "bateria" dla energii,
 // patrz lib/scale-colors.ts dla pełnego uzasadnienia per funkcja.
 import { higherIsBetterColor, higherIsWorseColor, sleepHoursColor, neutralIntensityColor } from '../../lib/scale-colors';
+// PLAN-D-K 08.2026 (13.08.2026) — rozpoznanie odmowy dostępu (RLS, kod 42501)
+// i zdanie, które zawodnik wtedy czyta. ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ.
+import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
 
 // JEDNA DROGA B2 08.08.2026 — lokalne kopie 17 lokalizacji bólu, ich mapy nazw
 // i listy lokalizacji bez strony ciała usunięte; wszystkie trzy pochodzą teraz
@@ -324,7 +327,23 @@ export default function DziennikScreen() {
       resetForm();
       await loadHistory();
     } catch (e: any) {
-      setError('Nie udało się zapisać: ' + e.message);
+      // PLAN-D-K 08.2026 (13.08.2026) — TU BYŁA CISZA.
+      //
+      // `user_has_active_access` bramkuje w RLS `insert` i `update` na
+      // `daily_logs`. W dniu wygaśnięcia okresu próbnego baza zaczynała
+      // odrzucać zapis kodem `42501`, a zawodnik dostawał w twarz zdanie
+      // „Nie udało się zapisać: new row violates row-level security policy".
+      // Z tego zdania nie da się wyczytać ani co się stało, ani że nic nie
+      // zginęło. ⚠️ Kod `42501` ZMIERZONY na produkcji 13.08.2026,
+      // w transakcji cofniętej — nie zapamiętany.
+      //
+      // ⚠️ To NIE jest ścieżka odzysku: nie ponawiamy zapisu i nie zmieniamy
+      // jego treści. Zmienia się WYŁĄCZNIE zdanie, które zawodnik czyta.
+      setError(
+        toJestBrakDostepu(e)
+          ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+          : 'Nie udało się zapisać: ' + e.message,
+      );
     } finally {
       setSaving(false);
     }

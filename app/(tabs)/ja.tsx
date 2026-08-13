@@ -68,10 +68,10 @@
 // dwie liczby przy podpisach. Po roku gry to kilkaset wierszy przy każdym
 // wejściu na zakładkę. Teraz są to dwa zapytania `head: true` +
 // `count: 'exact'` — baza liczy u siebie i odsyła same liczby, zero wierszy.
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
@@ -97,18 +97,15 @@ import { unlockedMaterials, libraryEntryHint, LIBRARY_SECTION_LABEL } from '../.
 // Powód (piąta zakładka, zakaz 10) jest w nagłówku `components/MojaDroga.tsx`.
 import MojaDroga from '../../components/MojaDroga';
 import { MAPA_ENTRY_LABEL, MAPA_ENTRY_HINT_DOSTEPNA } from '../../lib/mapaDrogi';
-// PLAN-D-H 08.2026 (12.08.2026) — DWA MARTWE SZCZEBLE DRABINY DOSTAJĄ WEJŚCIE.
-// Do dziś `calibration_measurements` i `exit_mode` miały po ZERO wierszy, bo
-// żaden ekran do nich nie pisał — czytnik arbitra pytał o stan, którego nikt
-// nie umiał wywołać. Oba wchodzą jako pełnoekranowe modale, nie jako trasy:
-// powód (piąta zakładka, zakaz 10) jest w nagłówku `components/MojaDroga.tsx`.
-import Kalibracja from '../../components/Kalibracja';
-import { KALIBRACJA_ENTRY_LABEL, KALIBRACJA_ENTRY_PODPIS } from '../../lib/kalibracja';
-// PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I1. Karta „Czas na pomiar" na
-// ekranie „Dziś" prowadzi TUTAJ, parametrem `otworz`. Nazwa parametru jest
-// STAŁĄ z `lib/glosTygodnia.ts`, a nie napisem powtórzonym w dwóch plikach:
-// skrót albo literówka nie rzuca błędem, tylko po cichu przestaje trafiać.
-import { OTWORZ_KALIBRACJE } from '../../lib/glosTygodnia';
+// PLAN-D-H 08.2026 (12.08.2026) — ŚCIEŻKA WYJŚCIA dostaje wejście: `exit_mode`
+// miało ZERO wierszy, bo żaden ekran do niej nie pisał, a czytnik arbitra pytał
+// o stan, którego nikt nie umiał włączyć. Wchodzi jako pełnoekranowy modal, nie
+// jako trasa: powód (piąta zakładka, zakaz 10) w nagłówku `components/MojaDroga.tsx`.
+// ⚠️ PLAN-D-P 08.2026 (13.08.2026) — DRUGIE WEJŚCIE, KALIBRACJA, ZNIKŁO STĄD
+// RAZEM Z CAŁYM NARZĘDZIEM (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md).
+// Razem z nim odszedł parametr trasy `otworz`: kalibracja była JEDYNYM głosem
+// tygodnia, który miał dokąd prowadzić, więc karta na ekranie „Dziś" nie
+// nawiguje już nigdzie i ta zakładka nie ma czego otwierać z parametru.
 import SciezkaWyjscia from '../../components/SciezkaWyjscia';
 import { WYJSCIE_WEJSCIE_LABEL, WYJSCIE_WEJSCIE_PODPIS } from '../../lib/sciezkaWyjscia';
 import { otworzPunktPomocy } from '../../components/PunktPomocy';
@@ -142,28 +139,7 @@ export default function JaScreen() {
   // PLAN-D-H 08.2026 — stan lokalny, ZERO zapisu przy samym otwarciu.
   // Otwarcie ekranu nie jest zdarzeniem o zawodniku i nie zostawia śladu;
   // ścieżkę wyjścia włącza dopiero jawne potwierdzenie w środku modala.
-  const [kalibracjaOtwarta, setKalibracjaOtwarta] = useState(false);
   const [wyjscieOtwarte, setWyjscieOtwarte] = useState(false);
-
-  // PLAN-D-I 08.2026 (12.08.2026) — ZADANIE I1: WEJŚCIE Z KARTY GŁOSU TYGODNIA.
-  //
-  // ⚠️ TO NIE JEST DRUGI EKRAN KALIBRACJI. Otwiera się DOKŁADNIE TEN SAM,
-  // jedyny modal zamontowany niżej w tym pliku — ten sam, który otwiera wiersz
-  // „Kalibracja" w sekcji „Twój rozwój". Dwa wejścia, jeden egzemplarz.
-  //
-  // ⚠️ PARAMETR JEST JEDNORAZOWY. Bez `setParams` zostałby na trasie i modal
-  // otwierałby się PONOWNIE przy każdym powrocie na tę zakładkę — także wtedy,
-  // gdy zawodnik świadomie go zamknął. Zamknięcie ekranu przez zawodnika jest
-  // odpowiedzią „nie teraz" i produkt nie ma prawa jej nie usłyszeć.
-  const parametry = useLocalSearchParams<{ otworz?: string | string[] }>();
-  const zadanieOtwarcia = Array.isArray(parametry.otworz) ? parametry.otworz[0] : parametry.otworz;
-  useEffect(() => {
-    if (zadanieOtwarcia !== OTWORZ_KALIBRACJE) return;
-    setKalibracjaOtwarta(true);
-    // Pusty napis, nie `undefined`: `setParams` przyjmuje wartości tekstowe,
-    // a warunek wyżej i tak przepuszcza wyłącznie dokładne dopasowanie.
-    router.setParams({ otworz: '' });
-  }, [zadanieOtwarcia, router]);
 
   const load = useCallback(async () => {
     if (!currentUser) return;
@@ -370,13 +346,14 @@ export default function JaScreen() {
               Podpis jest STAŁY: Mapa działa też w koncie ograniczonym, więc
               nie ma tu liczby, która mogłaby skłamać przy braku dostępu. */}
           {renderRowRaw('moja-droga', MAPA_ENTRY_LABEL, MAPA_ENTRY_HINT_DOSTEPNA, () => setDrogaOtwarta(true))}
-          {/* PLAN-D-H 08.2026 — KALIBRACJA. Stoi zaraz pod Mapą, bo to jest
-              ta sama para: Mapa mówi, co robić, Kalibracja mierzy, na ile
-              dobrze się znasz. Podpis jest STAŁY i nie zawiera liczby —
-              liczba przy pustym stanie musiałaby brzmieć „0 pomiarów", czyli
-              otworzyć narzędzie zdaniem „to się nie liczy" (zakaz z P3). */}
-          {renderRowRaw('kalibracja', KALIBRACJA_ENTRY_LABEL, KALIBRACJA_ENTRY_PODPIS,
-            () => setKalibracjaOtwarta(true))}
+          {/* ⚠️ PLAN-D-P 08.2026 (13.08.2026) — TU STAŁA KALIBRACJA I JEJ NIE MA.
+              Sekcja schodzi z SZEŚCIU wierszy do pięciu. Powód nie jest
+              porządkowy: Kalibracja była przyrządem, który kazał zawodnikowi
+              odrobić protokół pomiaru i samemu odczytać z tabeli, co znaczy
+              jego wynik — a produkt ma MÓWIĆ, nie dawać do przeczytania
+              (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md).
+              Wniosek „przecenia się" ma wyciągać system z danych
+              długoterminowych i cicho zmieniać to, co podpowiada. */}
           {renderRow('/centrum-decyzji', 'Wszystkie rekomendacje', recsHint, unreadRecs > 0)}
           {renderRow('/cele', 'Cele', goalsHint)}
           {/* ZMIANA OBRAZU B5 08.08.2026 — wejście do biblioteki. Stoi jako
@@ -426,12 +403,7 @@ export default function JaScreen() {
         onClose={() => setDrogaOtwarta(false)}
         userId={currentUser?.id ?? null}
       />
-      {/* PLAN-D-H 08.2026 — oba poza ScrollView, bo to modale, nie treść. */}
-      <Kalibracja
-        visible={kalibracjaOtwarta}
-        onClose={() => setKalibracjaOtwarta(false)}
-        userId={currentUser?.id ?? null}
-      />
+      {/* PLAN-D-H 08.2026 — poza ScrollView, bo to modal, nie treść. */}
       <SciezkaWyjscia
         visible={wyjscieOtwarte}
         onClose={() => setWyjscieOtwarte(false)}

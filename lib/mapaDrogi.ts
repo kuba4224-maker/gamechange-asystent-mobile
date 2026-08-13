@@ -40,7 +40,20 @@ import { isMissingTableError, minimumPossibleAge } from './componentHints';
 // stan — to jest dokładnie rozróżnienie A1 ze specyfikacji.
 import { obowiazuje, type StanOgraniczen } from './ograniczenia';
 
-export type Wariant = 'base' | 'after_deselection' | 'witness';
+/**
+ * ⚠️ PLAN-D-P 08.2026 (13.08.2026) — DWA WARIANTY, NIE TRZY.
+ * `witness` („zawodnik został, ale koledzy odpadli") zniknął razem z 16
+ * wierszami treści w `road_factors`. Nie dlatego, że sytuacja nie zachodzi —
+ * dlatego, że produkt NIE MA SKĄD WIEDZIEĆ, że zaszła: wejście było wyłączone
+ * na sztywno od 11.08.2026, a trzy sprawdzone drogi wykrycia (zapisy drużyny,
+ * `exit_mode` kolegów, pytanie wprost) albo nie mają danych, albo wymagają
+ * decyzji o prywatności nieletnich, albo brzmienia Kuby. Zgadywanie znaczyłoby
+ * powiedzenie zawodnikowi czegoś nieprawdziwego o jego drużynie.
+ * Pełna treść tych 16 wierszy jest w nocie przekazania pasa P — do odtworzenia,
+ * jeśli pierwsza rozmowa z zawodnikiem pokaże, że jest potrzebna.
+ * ⚠️ `after_deselection` (32 wiersze) ZOSTAJE. Ścieżka wyjścia się nie zmienia.
+ */
+export type Wariant = 'base' | 'after_deselection';
 
 export type SilaDowodu = 'najwyzsza' | 'wysoka' | 'srednia' | 'posrednia' | 'brak';
 
@@ -197,16 +210,15 @@ export function wybierzOdcinek(
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * `exit_mode` aktywny → wariant „odpadłem". Zawodnik, który został, ale koledzy
- * odpadli → wariant „świadek". W obu: ta sama liczba systemowa zamiast pocieszenia.
+ * `exit_mode` aktywny → wariant „odpadłem". W przeciwnym razie podstawowy.
+ *
+ * ⚠️ `null` to „nie wiem" i daje wariant PODSTAWOWY, nie „po deselekcji".
+ * Kierunek błędu wybrany świadomie i nie zmienił się w rundzie P: powiedzenie
+ * „to, co się stało, nie było oceną Twojej wartości" komuś, komu nic się nie
+ * stało, jest gorsze niż niepokazanie treści.
  */
-export function wybierzWariant(params: {
-  exitAktywny: boolean | null;
-  swiadekDeselekcji: boolean | null;
-}): Wariant {
-  if (params.exitAktywny === true) return 'after_deselection';
-  if (params.swiadekDeselekcji === true) return 'witness';
-  return 'base';
+export function wybierzWariant(params: { exitAktywny: boolean | null }): Wariant {
+  return params.exitAktywny === true ? 'after_deselection' : 'base';
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -353,7 +365,6 @@ export function zbudujStanMapy(params: {
   accountState: AccountState | string | null;
   birthYear: number | null;
   exitAktywny: boolean | null;
-  swiadekDeselekcji: boolean | null;
   teraz?: Date;
   /** (J2) Stan nałożony przez arbitra. `null` = ekran go nie podał; wtedy Mapa wygląda jak przed rundą J. */
   ograniczenia?: StanOgraniczen | null;
@@ -388,10 +399,7 @@ export function zbudujStanMapy(params: {
     };
   }
 
-  const wariant = wybierzWariant({
-    exitAktywny: params.exitAktywny,
-    swiadekDeselekcji: params.swiadekDeselekcji,
-  });
+  const wariant = wybierzWariant({ exitAktywny: params.exitAktywny });
 
   return {
     stan: 'gotowa',
