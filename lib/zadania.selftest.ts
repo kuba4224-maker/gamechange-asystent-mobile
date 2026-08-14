@@ -132,11 +132,39 @@ console.log('R1. KUBEŁEK NIE JEST KOLUMNĄ');
     !KOLUMNY_ZADANIA.some((k) => /rank|order|prio|weight|bucket|position/i.test(k)),
     KOLUMNY_ZADANIA.join(', '));
 
-  // ⚠️ Ten pas NIE zakłada pliku pasa B1. Gdyby go założył, dwie sesje
-  // pisałyby w jednym pliku.
-  check('⛔ pas A4 nie założył `lib/kolejkaPodania.ts` (to jest plik pasa B1)',
-    !existsSync(join(libDir, 'kolejkaPodania.ts')),
-    'plik istnieje — sprawdź, czy nie powstał w tym pasie');
+  // ⚠️ ZMIENIONE 14.08.2026 (sesja naprawcza po odbiorze pasów A7/B1/X).
+  // CO TU STAŁO WCZEŚNIEJ:
+  //     check('⛔ pas A4 nie założył `lib/kolejkaPodania.ts` (to jest plik pasa B1)',
+  //       !existsSync(join(libDir, 'kolejkaPodania.ts')), …);
+  // DLACZEGO ZNIKNĘŁO: asercja pilnowała NIEOBECNOŚCI CUDZEGO PLIKU. Pas B1
+  // ten plik 14.08.2026 założył — zgodnie z planem — więc asercja stała się
+  // fałszywa z dnia na dzień i wywracała całą suitę (jedyny FAIL w 32 plikach).
+  // Strażnik, który czerwienieje od poprawnej pracy sąsiedniego pasa, uczy
+  // ludzi ignorować czerwone.
+  // CO PILNUJEMY ZAMIAST TEGO — INTENCJI, NIE NIEOBECNOŚCI: pas A4 nie miał
+  // budować rankera i nadal go nie buduje. Kolejność liczy `kolejkaPodania.ts`
+  // (pas B1), a `zadania.ts` ma jej NIE ZNAĆ: nie sortować, nie liczyć
+  // kubełków i nie importować rankera. Kubełek jako NAZWA POLA jest już wyżej
+  // (lista ZAKAZANE) — tu chodzi o logikę.
+  const IMPORT_RANKERA =
+    /(?:from|require\s*\()\s*['"][^'"]*kolejkaPodania['"]/;
+  check('⛔ `zadania.ts` nie importuje rankera `kolejkaPodania` — kolejność nie jest sprawą tego pliku',
+    !IMPORT_RANKERA.test(zywyTS),
+    'znalazłem import/require `kolejkaPodania` w zadania.ts');
+
+  const SORTOWANIE = /\.sort\s*\(|\.reverse\s*\(|localeCompare|\border\s+by\b/i;
+  check('⛔ `zadania.ts` nie ustawia niczego w kolejności (żadnego `.sort(`, `.reverse(`, `order by`)',
+    !SORTOWANIE.test(zywyTS),
+    'znalazłem własne sortowanie — to jest robota rankera z pasa B1');
+
+  // Nazwy, którymi ranker liczy kubełki. Gdyby któraś pojawiła się tutaj,
+  // znaczyłoby to, że logika kolejności została przepisana do tego pliku
+  // pod innym słowem, zamiast zaimportowana.
+  const LICZENIE_KUBELKOW =
+    /\bkubelekDla\b|\bwezKubelek\b|\bPROG_TERAZ\b|\bWAGA_BAZOWA\b|\bPREMIE\b|\bulozKolejke\b/;
+  check('⛔ `zadania.ts` nie liczy kubełków ani wag — nie ma u siebie kopii rankera',
+    !LICZENIE_KUBELKOW.test(zywyTS),
+    'znalazłem liczenie kubełka/wagi w zadania.ts');
 }
 
 // ═════════════════════════════════════════════════════════════════════

@@ -34,6 +34,45 @@ import { fetchPlayerMatchSelectionContext } from '../../lib/matchSegmentSelectio
 // zamiast surowego błędu RLS. Ten sam, którym pas K zastąpił błąd
 // w Dzienniku (`lib/dostepKonta.ts`). Zero nowej treści.
 import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-A7 08.2026 (14.08.2026) — MECZ WCHODZI DO KALENDARZA, JEDNYM TOREM.
+//
+// CO BYŁO ZŁE. Ten ekran zapisywał WYŁĄCZNIE `match_contexts`. Zmierzone
+// 14.08.2026 na żywej bazie:
+//
+//   select count(*) as meczow, count(*) filter (where exists (select 1
+//     from public.calendar_events c where c.user_id=m.user_id
+//      and c.event_type='match')) as z_odpowiednikiem
+//     from public.match_contexts m;   →   meczow = 2,  z_odpowiednikiem = 0
+//
+// Czyli: zawodnicy opisali dwa mecze i ANI JEDEN nie istnieje w kalendarzu.
+// Makieta widoku tygodnia stawia mecz w sobotę jako kafel z kropką `d-mecz`
+// i tagiem godziny — nie ma go z czego narysować. Rytm push `pre_match`
+// (`api/cron-send-notifications.js`) czeka na wiersze `event_type='match'`,
+// których nikt nigdy nie założył.
+//
+// ⛔ DLACZEGO NIE DRUGI FORMULARZ. Kalendarz UMIE zaplanować mecz na
+// przyszłość (`event_type='match'` jest w jego Pickerze od 28.07.2026). Gdyby
+// ten ekran po prostu wstawiał nowy wiersz, zawodnik, który zaplanował sobotni
+// mecz, a potem go opisał, miałby ten mecz w kalendarzu DWA RAZY — a oba
+// zapisy byłyby z osobna poprawne, więc nic by tego nie zgłosiło. Dlatego
+// decyzję „nowy wiersz czy domknięcie istniejącego" podejmuje CZYSTA FUNKCJA
+// `zdecydujOWierszuMeczu` z `lib/meczWKalendarzu.ts`, która ma selftest
+// i mutacje. Ten ekran ją WYKONUJE, nie podejmuje.
+//
+// ⚠️ ZAPIS MECZU NIE ZALEŻY OD ZAPISU DO KALENDARZA (warunek 3 polecenia).
+// Ale porażka nie jest cicha: zawodnik czyta zdanie po polsku, a konsola
+// dostaje powód, po którym da się to zdiagnozować (reguła R5).
+// ═══════════════════════════════════════════════════════════════════
+import { toLocalDateStr } from '../../lib/date-utils';
+import {
+  przygotujGodzineDoZapisu,
+  zdecydujOWierszuMeczu,
+  MECZ_ZAPISANY_BEZ_KALENDARZA,
+  opisNieudanegoZapisuMeczuDoLogu,
+  RODZAJ_MECZ,
+  type WierszKalendarzaDoDecyzji,
+} from '../../lib/meczWKalendarzu';
 
 const GAME_TYPE_LABELS: Record<string, string> = {
   official_match: 'Mecz oficjalny', friendly: 'Sparing',
@@ -124,6 +163,14 @@ export default function MeczScreen() {
   const [role, setRole] = useState('');
   const [minutes, setMinutes] = useState('');
   const [matchRpe, setMatchRpe] = useState<number>();
+  // PLAN-D-A7 — godzina rozpoczęcia meczu, WYŁĄCZNIE do kafla w kalendarzu.
+  // ⚠️ `match_contexts` NIE MA kolumny na czas ani na datę meczu (zmierzone
+  // 14.08.2026, `information_schema.columns`: 15 kolumn, jedyny czas to
+  // `created_at`, czyli moment ZAPISU). Ta godzina nie idzie więc do
+  // `match_contexts` — nie ma dokąd — tylko do `calendar_events.scheduled_time`.
+  // Tekst, nie `DateTimePicker`: pole zegarkowe zawsze pokazuje jakąś godzinę
+  // i nie umie wyrazić „nie podałem", a to jest stan poprawny.
+  const [godzinaMeczu, setGodzinaMeczu] = useState('');
 
   // Pozycja dziś
   const [playedDifferentPosition, setPlayedDifferentPosition] = useState(false);
@@ -263,6 +310,7 @@ export default function MeczScreen() {
 
   const resetForm = () => {
     setOwnScore(''); setOpponentScore(''); setRole(''); setMinutes(''); setMatchRpe(undefined);
+    setGodzinaMeczu('');
     setPlayedDifferentPosition(false); setPositionPlayedToday('');
     setEnteredRecoveryState(null); setDemandingConditions(false);
     setSelfRating(undefined); setMentalState(undefined);
@@ -277,6 +325,74 @@ export default function MeczScreen() {
   const setSlotFollowupAnswer = (index: number, code: string) => {
     setSegmentSlots((prev) => prev.map((s, i) => (i === index ? { ...s, followupAnswerCode: code } : s)));
   };
+
+  /**
+   * PLAN-D-A7 — ODBICIE MECZU W KALENDARZU. Jeden tor, zero drugiego formularza.
+   *
+   * Zwraca `null`, gdy się udało, albo POWÓD porażki (do logu). Ta funkcja
+   * ŚWIADOMIE NIE RZUCA: mecz jest już w `match_contexts` i nic, co stanie się
+   * tutaj, nie ma prawa tego cofnąć ani zamienić w komunikat o awarii zapisu.
+   *
+   * ⚠️ `scheduled_date` to DZIŚ, i to jest granica, którą trzeba znać.
+   * `match_contexts` nie ma pola „kiedy był mecz" — ma `created_at`, czyli
+   * kiedy zawodnik go zapisał, i to tę datę ekran pokazuje w historii meczów
+   * (`renderMatchCard` niżej). Kafel w kalendarzu stoi więc dokładnie tam,
+   * gdzie produkt i tak już ten mecz umieszcza. Zawodnik, który opisuje mecz
+   * trzy dni po fakcie, dostanie kafel w złym dniu — to jest znalezisko tej
+   * rundy, opisane w nocie przekazania, a NIE rzecz, którą wolno tu zgadywać.
+   */
+  async function dopiszMeczDoKalendarza(godzina: string | null): Promise<string | null> {
+    if (!currentUser) return 'brak zalogowanego zawodnika';
+    const data = toLocalDateStr(new Date());
+    const tytul = GAME_TYPE_LABELS[gameType] || 'Mecz';
+
+    // Krok 1 — CZY TEN MECZ JUŻ JEST W KALENDARZU. Bez tego odczytu nie da się
+    // odróżnić „zaplanowałem i opisuję" od „opisuję bez planu", a to jest cała
+    // różnica między jednym torem a dwoma.
+    const { data: istniejaceSurowe, error: odczytErr } = await supabase
+      .from('calendar_events')
+      .select('id,event_type,status,scheduled_date,scheduled_time')
+      .eq('user_id', currentUser.id)
+      .eq('event_type', RODZAJ_MECZ)
+      .eq('scheduled_date', data);
+    if (odczytErr) {
+      // ⛔ NIE wstawiamy „w ciemno" po nieudanym odczycie. Wstawienie bez
+      // wiedzy o tym, co już jest, jest dokładnie tym drugim torem, którego
+      // ta runda zakazuje — a duplikat w kalendarzu jest gorszy niż jego brak,
+      // bo wygląda na prawdziwy.
+      return `odczyt istniejących wierszy: ${odczytErr.message}`;
+    }
+
+    const decyzja = zdecydujOWierszuMeczu({
+      userId: currentUser.id,
+      data,
+      godzina,
+      tytul,
+      istniejace: (istniejaceSurowe ?? []) as WierszKalendarzaDoDecyzji[],
+    });
+    console.log(`[PLAN-D-A7] mecz → kalendarz: ${decyzja.powod}`);
+
+    if (decyzja.rodzaj === 'aktualizuj') {
+      const { data: zmienione, error: updErr } = await supabase
+        .from('calendar_events')
+        .update(decyzja.zmiany)
+        .eq('id', decyzja.id)
+        .select('id');
+      if (updErr) return `aktualizacja id=${decyzja.id}: ${updErr.message}`;
+      // ⚠️ PostgREST przy odmowie RLS na UPDATE nie zwraca błędu — zwraca ZERO
+      // zmienionych wierszy. Bez tego sprawdzenia „nie mam uprawnień" byłoby
+      // nieodróżnialne od „zapisano" (ten sam wzorzec, który pas A1 opisał
+      // w `lib/focusBlockJournalLink.ts`).
+      if (!zmienione || zmienione.length === 0) {
+        return `aktualizacja id=${decyzja.id} nie zmieniła ANI JEDNEGO wiersza (najczęściej RLS: calendar_events_update_own)`;
+      }
+      return null;
+    }
+
+    const { error: insErr } = await supabase.from('calendar_events').insert(decyzja.wiersz);
+    if (insErr) return `zapis nowego wiersza: ${insErr.message}`;
+    return null;
+  }
 
   async function submitMatchContext() {
     if (!currentUser) return;
@@ -297,6 +413,11 @@ export default function MeczScreen() {
       setError('Wybierz pozycję, na której dziś grałeś (albo odznacz pole wyżej).');
       return;
     }
+    // PLAN-D-A7 — godzina rozstrzyga się PRZED jakimkolwiek zapisem. Gdyby ta
+    // bramka stała niżej, mecz byłby już w bazie, a zawodnik dostałby błąd
+    // o godzinie — czyli komunikat porażki po udanym zapisie.
+    const wynikGodziny = przygotujGodzineDoZapisu(godzinaMeczu);
+    if (!wynikGodziny.zapisz) { setError(wynikGodziny.powod); return; }
 
     setSaving(true);
     try {
@@ -318,6 +439,23 @@ export default function MeczScreen() {
       const { data: inserted, error: insErr } = await supabase.from('match_contexts').insert(body).select();
       if (insErr) throw insErr;
       const matchContextId = inserted?.[0]?.id;
+
+      // ⭐ PLAN-D-A7 — ODBICIE W KALENDARZU. Stoi TU, zaraz po udanym zapisie
+      // meczu, a przed bólem i pytaniami segmentowymi, świadomie: tamte kroki
+      // rzucają wyjątkiem przy własnej porażce, więc gdyby kalendarz był pod
+      // nimi, jeden nieudany wpis bólowy zjadałby także kafel meczu.
+      // Wynik NIE jest rzucany — zbieramy go i zamieniamy na zdanie niżej.
+      let bladKalendarza: string | null = null;
+      if (matchContextId) {
+        bladKalendarza = await dopiszMeczDoKalendarza(wynikGodziny.wartosc);
+        if (bladKalendarza) {
+          console.error(opisNieudanegoZapisuMeczuDoLogu(
+            bladKalendarza.startsWith('odczyt') ? 'odczyt'
+              : bladKalendarza.startsWith('aktualizacja') ? 'aktualizuj' : 'utworz',
+            bladKalendarza,
+          ));
+        }
+      }
 
       if (hasPain && matchContextId) {
         const side = NON_LATERAL_LOCATIONS.has(painLocation) ? null : (painSide || null);
@@ -352,7 +490,9 @@ export default function MeczScreen() {
         }
       }
 
-      setOk('Mecz zapisany.');
+      // PLAN-D-A7 — porażka kalendarza NIE jest cicha i NIE jest awarią.
+      // Mecz jest zapisany; zdanie mówi obie te rzeczy naraz i daje wyjście.
+      setOk(bladKalendarza ? MECZ_ZAPISANY_BEZ_KALENDARZA : 'Mecz zapisany.');
       resetForm();
       await loadMecz();
     } catch (e: any) {
@@ -571,6 +711,22 @@ export default function MeczScreen() {
 
         <Text style={styles.label}>Minuty na boisku</Text>
         <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={minutes} onChangeText={setMinutes} placeholder="np. 90" />
+
+        {/* PLAN-D-A7 08.2026 — GODZINA ROZPOCZĘCIA, WYŁĄCZNIE DO KALENDARZA.
+            To NIE jest kolejne pole ankiety meczowej: nie idzie do
+            `match_contexts` (nie ma tam kolumny na czas) i nie karmi kaskady.
+            Idzie do `calendar_events.scheduled_time`, żeby kafel meczu
+            w widoku tygodnia mógł mieć tag „11:00" — dokładnie tak, jak
+            pokazuje makieta. Pusto jest poprawne i najczęstsze. */}
+        <Text style={styles.label}>O której zaczynał się mecz (opcjonalnie)</Text>
+        <TextInput
+          style={styles.input}
+          placeholderTextColor={colors.textSecondary}
+          keyboardType="numbers-and-punctuation"
+          value={godzinaMeczu}
+          onChangeText={setGodzinaMeczu}
+          placeholder="np. 11:00 — trafi do Twojego kalendarza"
+        />
       </View>
 
       {/* Pozycja dziś */}

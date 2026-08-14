@@ -72,6 +72,38 @@ import {
   czytajStanDostepu,
   RPC_STAN_DOSTEPU,
 } from '../../lib/dostepKonta';
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-A7 08.2026 (14.08.2026) — TRZY RZECZY, KTÓRYCH TEN EKRAN NIE ROBIŁ.
+//
+// Pomiar M5, powtórzony 14.08 na żywej bazie: `calendar_events` = 24 wiersze,
+// 24 z 24 to `micro_session` ze `source='system'`. Formularz niżej ma pięć
+// rodzajów i UMIE zapisać `source='player'` (sprawdzone: ustawia to w linii
+// z `body`), a mimo to nie ma ani jednego wiersza od zawodnika. Diagnoza
+// hipotez H1–H5 stoi w `claude/PRZEKAZANIE_PAS_A7_14_08_2026.md`, sekcja 4.
+// Trzy rzeczy, które ta runda naprawia po stronie tego ekranu:
+//
+//  1. **GODZINY NIE DA SIĘ BYŁO PODAĆ.** Kolumna `scheduled_time` istnieje
+//     od pasa A2+A3 (14.08), a `grep -rn scheduled_time app lib` dawał
+//     ZERO trafień piszących i ZERO czytających. Makieta widoku tygodnia
+//     pokazuje tagi „18:00" i „11:00" — nie było ich z czego narysować.
+//  2. **ŹRÓDŁA NIE BYŁO WIDAĆ.** Legenda makiety rozróżnia „Sesja Bloku
+//     Skupienia (system zaplanował)" od „Trening — Ty dodałeś". To jest
+//     kolumna `source`, nie `event_type` — ekran ją pobierał (`select('*')`)
+//     i nigdy nie rysował.
+//  3. **WYDARZENIE `completed` ZNIKAŁO Z EKRANU W CAŁOŚCI.** Wszystkie trzy
+//     sekcje filtrowały po `status === 'scheduled'` albo `'cancelled'`.
+//     Po migracji A1 (status `'completed'` dopuszczony od 14.08) pierwsza
+//     sesja zaliczona z Dziennika — i każdy mecz opisany na ekranie Mecz —
+//     wypadłyby z kalendarza bez śladu. Klasyczny „cichy brak": zapis się
+//     udaje, ekran milczy, nikt nie ma jak tego zauważyć.
+// ═══════════════════════════════════════════════════════════════════
+import { formatujGodzine } from '../../lib/godzinaWydarzenia';
+import {
+  przygotujGodzineDoZapisu,
+  opiszRodzaj,
+  opiszZrodlo,
+  opisNieznanegoRodzajuDoLogu,
+} from '../../lib/meczWKalendarzu';
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   club_training: 'Trening klubowy', own_training: 'Trening własny',
@@ -88,6 +120,12 @@ type Goal = { id: number; segment_id: string; status: string; is_priority: boole
 type CalEvent = {
   id: number; title: string; notes: string | null; event_type: string; status: string;
   scheduled_date: string | null; recurrence_rule: string | null; goal_id: number | null;
+  // PLAN-D-A7 — obie kolumny SĄ pobierane (`select('*')` niżej) i od tej rundy
+  // obie są RYSOWANE. Wpisanie ich w typ nie jest kosmetyką: dopóki tu ich nie
+  // było, TypeScript nie miał jak powiedzieć, że ekran sięga po coś, czego
+  // zapytanie nie przynosi — a to jest dokładnie ten defekt, którego pilnuje
+  // `lib/meczWKalendarzu.selftest.ts`, asercja (A7-2).
+  source: string | null; scheduled_time: string | null;
 };
 
 function formatRecurrence(rule: string) {
@@ -103,6 +141,12 @@ export default function KalendarzScreen() {
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [frequency, setFrequency] = useState<'once' | 'recurring'>('once');
+  // PLAN-D-A7 — godzina jako TEKST, nie `Date`. Powód: `Date` zawsze JAKĄŚ
+  // godzinę ma, więc pole oparte na `DateTimePicker` nie umie wyrazić „nie
+  // podałem". Makieta rozstrzyga to wprost („Godzina przy kaflu pojawia się
+  // tylko wtedy, gdy zawodnik ją podał"), a kolumna `scheduled_time` jest
+  // NULL-owalna właśnie po to. Pusty napis = brak godziny i nic się nie psuje.
+  const [godzina, setGodzina] = useState('');
   const [date, setDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
@@ -188,13 +232,24 @@ export default function KalendarzScreen() {
   // ale nie były pierwszą rzeczą, którą widać.
   const byDateAsc = (a: CalEvent, b: CalEvent) =>
     (a.scheduled_date! < b.scheduled_date! ? -1 : a.scheduled_date! > b.scheduled_date! ? 1 : 0);
-  const scheduledWithDate = events.filter((e) => e.status === 'scheduled' && e.scheduled_date);
+  // ⚠️ PLAN-D-A7 08.2026 — DO 14.08.2026 STAŁO TU `e.status === 'scheduled'`.
+  // Migracja A1 (wykonana 14.08) dopuściła `status = 'completed'`, a pas A1
+  // ustawia go z Dziennika przy zaliczeniu sesji Bloku. Ten ekran filtrował
+  // po `'scheduled'` w KAŻDEJ z trzech sekcji, więc pierwsze wydarzenie
+  // oznaczone jako wykonane ZNIKNĘŁOBY z kalendarza bez śladu — razem
+  // z każdym meczem, który od tej rundy zapisuje ekran Mecz. Zapis by się
+  // udał, ekran by milczał: „cichy brak" w czystej postaci.
+  // Kryterium jest teraz DATA, nie status; status idzie na plakietkę niżej.
+  const scheduledWithDate = events.filter(
+    (e) => (e.status === 'scheduled' || e.status === 'completed') && e.scheduled_date,
+  );
   const upcoming = scheduledWithDate.filter((e) => e.scheduled_date! >= todayStr).sort(byDateAsc);
   const past = scheduledWithDate.filter((e) => e.scheduled_date! < todayStr).sort((a, b) => -byDateAsc(a, b));
   const cancelled = events.filter((e) => e.status === 'cancelled');
 
   const resetForm = () => {
     setTitle(''); setNotes(''); setDate(null); setSelectedDays(new Set()); setGoalId('');
+    setGodzina('');
   };
 
   const toggleDay = (code: string) => {
@@ -221,6 +276,18 @@ export default function KalendarzScreen() {
     };
     if (notes.trim()) body.notes = notes.trim();
     if (goalId) body.goal_id = Number(goalId);
+
+    // PLAN-D-A7 — GODZINA ROZSTRZYGA SIĘ PRZED WYSŁANIEM, NIE W BAZIE.
+    // `chk_calendar_events_scheduled_time` odrzuca sekundy i `>= 24:00` kodem
+    // `23514`. Bez tej bramki zawodnik, który wpisze „25:00", dostaje surowy
+    // błąd bazy zamiast zdania po polsku. Pusto = brak godziny, nie błąd.
+    const wynikGodziny = przygotujGodzineDoZapisu(godzina);
+    if (!wynikGodziny.zapisz) { setError(wynikGodziny.powod); return; }
+    // ⚠️ Wysyłamy pole TYLKO wtedy, gdy godzina jest. `scheduled_time: null`
+    // też byłoby poprawne, ale wysyłanie jawnego `null` przy każdym zapisie
+    // kasowałoby godzinę przy każdej przyszłej edycji tego samego kształtu
+    // `body` — a `body` jest tu jedynym miejscem, z którego ten ekran pisze.
+    if (wynikGodziny.wartosc !== null) body.scheduled_time = wynikGodziny.wartosc;
 
     // chk_recurrence_xor_date: dokładnie jedno z dwóch, nigdy oba naraz.
     if (frequency === 'once') {
@@ -260,11 +327,24 @@ export default function KalendarzScreen() {
   }
 
   function renderEventCard(e: CalEvent) {
-    const typeLabel = EVENT_TYPE_LABELS[e.event_type] || e.event_type;
+    // ⚠️ PLAN-D-A7 08.2026 — DO 14.08.2026 STAŁO TU `EVENT_TYPE_LABELS[…] || e.event_type`.
+    // Rodzaj spoza piątki znanej appce (np. dołożony do CHECK-a w bazie i nie
+    // dołożony tutaj) pokazywał się zawodnikowi jako SUROWA WARTOŚĆ Z BAZY —
+    // „club_training" wygląda jak etykieta, więc nikt nigdy nie zgłosiłby,
+    // że etykiety brakuje. Reguła R5: brak wiedzy ma mieć własny, jawny stan.
+    const opisRodzaju = opiszRodzaj(e.event_type);
+    const typeLabel = opisRodzaju.znany
+      ? EVENT_TYPE_LABELS[opisRodzaju.id]
+      : opisRodzaju.komunikat;
+    if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
     const goal = e.goal_id ? goals.find((g) => g.id === e.goal_id) : null;
 
     const badges: string[] = [];
     if (e.status === 'cancelled') badges.push('Anulowane');
+    // PLAN-D-A7 — `status='completed'` to teraz osobny, WIDOCZNY stan. Bez tej
+    // gałęzi wydarzenie oznaczone jako wykonane rysowałoby się bez żadnej
+    // plakietki i wyglądało dokładnie jak zaplanowane, którego nikt nie ruszył.
+    if (e.status === 'completed') badges.push('Wykonano');
     if (e.status === 'scheduled' && e.scheduled_date && e.scheduled_date <= todayStr) {
       badges.push(loggedEventIds.has(e.id) ? 'Wykonano' : 'Nie wykonano');
     }
@@ -273,9 +353,20 @@ export default function KalendarzScreen() {
     if (e.scheduled_date) {
       meta.push(new Date(e.scheduled_date + 'T00:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short', weekday: 'short' }));
     }
+    // PLAN-D-A7 — GODZINA. `formatujGodzine` zwraca `null`, gdy godziny nie ma
+    // (nie `''` i nie `'—'`), więc brak godziny nie ma jak wyrenderować się
+    // jako pusty tag wyglądający na daną. Patrz `lib/godzinaWydarzenia.ts`.
+    const tagGodziny = formatujGodzine(e.scheduled_time);
+    if (tagGodziny) meta.push(tagGodziny);
     if (e.recurrence_rule) meta.push(formatRecurrence(e.recurrence_rule));
     // PLAN-D-A 08.2026 — `goals` to wąskie gardło, nie Cel.
     if (goal) meta.push('wąskie gardło: ' + (SEG_LABELS[goal.segment_id] || goal.segment_id));
+    // PLAN-D-A7 — KTO TĘ POZYCJĘ WSTAWIŁ. Legenda makiety widoku tygodnia
+    // rozróżnia kropki właśnie po tym („Sesja Bloku Skupienia (system
+    // zaplanował)" kontra „Trening — Ty dodałeś"), a rozróżnienie siedzi
+    // w kolumnie `source`, nie w `event_type`. Kolumna była pobierana
+    // (`select('*')`) i nierysowana od początku istnienia tego ekranu.
+    meta.push(opiszZrodlo(e.source).opis);
 
     return (
       <View key={e.id} style={styles.card}>
@@ -378,6 +469,22 @@ export default function KalendarzScreen() {
             </View>
           </>
         )}
+
+        {/* PLAN-D-A7 08.2026 — GODZINA, KTÓREJ WOLNO NIE BYĆ.
+            Stoi POZA gałęzią „jednorazowe / cykliczne" świadomie: trening
+            klubowy w każdy wtorek o 18:00 ma godzinę tak samo jak pojedynczy
+            mecz. Pole jest tekstowe, a nie zegarkowe — `DateTimePicker` w trybie
+            `time` zawsze JAKĄŚ godzinę pokazuje, więc nie umie wyrazić „nie
+            podałem", a to jest tu stan poprawny i najczęstszy. */}
+        <Text style={styles.label}>Godzina (opcjonalnie)</Text>
+        <TextInput
+          style={styles.input}
+          placeholderTextColor={colors.textSecondary}
+          value={godzina}
+          onChangeText={setGodzina}
+          keyboardType="numbers-and-punctuation"
+          placeholder="np. 18:00 — zostaw puste, jeśli nie wiesz"
+        />
 
         <Text style={styles.label}>Powiąż z wąskim gardłem (opcjonalnie)</Text>
         <View style={styles.pickerWrap}>
