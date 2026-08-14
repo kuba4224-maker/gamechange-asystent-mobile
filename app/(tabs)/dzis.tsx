@@ -121,7 +121,7 @@
 // pierwszym `load()`; kolejne odświeżenia (`useFocusEffect`, `RefreshControl`)
 // go NIE podnoszą, bo wtedy na ekranie są już prawdziwe dane i migotanie
 // byłoby gorsze niż jego brak.
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, Fragment } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -263,6 +263,48 @@ import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
 // oglądanym, a nie obowiązywała na tym, który widać zawsze. Rozstrzygnięcie idzie
 // z tej samej czystej funkcji, nie z kopii.
 import { opiszRodzaj, opisNieznanegoRodzajuDoLogu } from '../../lib/meczWKalendarzu';
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-B2 08.2026 (14.08.2026), zadanie B2.2 — TEN EKRAN PRZESTAJE
+// UKŁADAĆ WŁASNĄ KOLEJNOŚĆ.
+//
+// Do 14.08 ten plik był kolażem DZIEWIĘCIU niezależnych producentów (pomiar
+// B2.1 — polecenie spodziewało się sześciu). Każdy sam decydował, czy się
+// pokazać i gdzie stanąć, i żaden nie wiedział o pozostałych. Od 14.08 istnieje
+// `lib/kolejkaPodania.ts` — JEDNA czysta funkcja, która tę decyzję podejmuje
+// raz, z uzasadnieniem przy każdej pozycji.
+//
+// ⛔ TEN EKRAN NIE SORTUJE, NIE FILTRUJE I NIE TNIE KOLEJKI. Bierze prefiks,
+// który wydaje `wezDlaWidoku(kolejka, 'dzis')`, i rysuje go jednym komponentem.
+// Kolejność, która się nie podoba, jest ZGŁOSZENIEM DO PASA B1 — nie poprawką
+// tutaj. Własny `sort` na ekranie to powrót do kolażu.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  ulozKolejke,
+  wezDlaWidoku,
+  slad,
+  WAGA_BAZOWA,
+  type WejsciaKolejki,
+  type Kolejka,
+  type Kandydat,
+  type Wejscie,
+  type WydarzenieKalendarza,
+  type WpisDziennikaWejscie,
+  type WpisBolu,
+  type WejscieCelu,
+  type WejscieMeczu,
+} from '../../lib/kolejkaPodania';
+// Zadania zawodnika — CZTERY stany R5 (`sa_zadania` / `brak_danych` /
+// `brak_uprawnien` / `nie_wiem`). ⚠️ `odczytZadan` świadomie NIE PRZYJMUJE
+// tablicy, tylko całą odpowiedź bazy: dzięki temu nie da się jej zawołać,
+// odrzuciwszy wcześniej `error` — a to jest jedyny ruch, którym powstaje
+// „pustka zamiast błędu".
+import {
+  odczytZadan,
+  opisOdczytuDoLogu,
+  SELECT_ZADANIA,
+  TABELA_ZADAN,
+} from '../../lib/zadania';
+import PozycjaKolejkiCard from '../../components/PozycjaKolejkiCard';
 
 const SEG_LABELS = SEGMENT_LABELS;
 
@@ -276,8 +318,13 @@ type Goal = {
   origin: string | null; suggestion_note: string | null; refinement_note: string | null;
 };
 type RecommendationRow = Recommendation & { goal_id: number | null };
+// PLAN-D-B2 — doszły `status` i `scheduled_time`. Oba są WYMAGANE przez
+// `WydarzenieKalendarza` (kontrakt rankera §3): status rozstrzyga, czy pozycja
+// w ogóle wchodzi do kolejki, a godzina wychodzi WYŁĄCZNIE wtedy, gdy zawodnik
+// ją podał (D10) — `null` to nie jest północ i nie jest myślnik.
 type CalEvent = {
   id: number; title: string; event_type: string; scheduled_date: string | null;
+  scheduled_time: string | null; status: string;
   recurrence_rule: string | null; focus_block_id: string | null;
 };
 // WIEDZA B4 08.08.2026 — doszło `component_id`: to jest Element, nad którym
@@ -285,6 +332,128 @@ type CalEvent = {
 // trafniejsza niż reguła przekrojowa segmentu. `computeFocusBlockProgress`
 // tej kolumny nie czyta i nie zmienia przez to zachowania.
 type FocusBlockRow = { id: string; segment_id: string; status: string; component_id?: string | null };
+// PLAN-D-B2 — wiersze dwóch wejść kolejki, w kształcie, w jakim wracają z bazy.
+type WierszDziennika = {
+  id: number;
+  entry_type: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: string;
+  calendar_event_id: number | null;
+};
+/**
+ * Wszystko, co `load()` oddaje renderowi. ⚠️ `wydarzeniaDnia` NIE SĄ pochodną
+ * `wejscia.kalendarz`: karta „Dziś w kalendarzu" pokazuje też wydarzenia
+ * CYKLICZNE, których ranker świadomie nie widzi (`scheduled_date === null`,
+ * kolejkaPodania.ts:775). Gdyby ekran liczył je z wejścia kolejki, zawodnik
+ * z cotygodniowym treningiem przestałby go widzieć — po cichu.
+ */
+type DaneEkranu = {
+  wejscia: Omit<WejsciaKolejki, 'jednaOdpowiedz' | 'dodatkowi'>;
+  wydarzeniaDnia: CalEvent[];
+};
+
+type WierszBolu = {
+  id: number;
+  intensity: number | null;
+  excludes_from_training: boolean | null;
+  created_at: string;
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-B2 — TRZY STANY KAŻDEGO WEJŚCIA. ⛔ TU MIESZKA ZAKAZ `data ?? []`.
+//
+// `supabase-js` NIE RZUCA wyjątku, gdy odczyt się nie uda — zwraca
+// `{ data: null, error }`. Gdyby ten ekran napisał `data ?? []`, „nie udało się
+// odczytać" stałoby się NIEODRÓŻNIALNE od „nic nie masz na dziś": kolejka
+// pokazałaby spokojną pustkę, wszystko wyglądałoby na wdrożone i nikt nigdy
+// by tu nie wrócił. Ranker ma na to gotowy typ `Wejscie<T>` i to jest jedyna
+// droga, którą ten ekran go buduje.
+// ═══════════════════════════════════════════════════════════════════
+function powodBledu(e: unknown): string {
+  if (e && typeof e === 'object' && 'message' in e) {
+    return String((e as { message: unknown }).message);
+  }
+  return 'nieznany błąd odczytu';
+}
+
+function wejscieZOdpowiedzi<W, T>(
+  odp: { data: unknown; error: unknown },
+  nazwa: string,
+  mapuj: (wiersz: W) => T,
+): Wejscie<T[]> {
+  if (odp.error) return { rodzaj: 'nie_wiem', powod: `${nazwa}: ${powodBledu(odp.error)}` };
+  if (!Array.isArray(odp.data)) {
+    return { rodzaj: 'nie_wiem', powod: `${nazwa}: odpowiedź bazy nie jest listą` };
+  }
+  if (odp.data.length === 0) return { rodzaj: 'brak' };
+  return { rodzaj: 'jest', dane: (odp.data as W[]).map(mapuj) };
+}
+
+function liczbaAlboNull(x: unknown): number | null {
+  return typeof x === 'number' && Number.isFinite(x) ? x : null;
+}
+
+function wpisDziennikaDlaKolejki(w: WierszDziennika): WpisDziennikaWejscie {
+  const p: Record<string, unknown> = w.payload && typeof w.payload === 'object' ? w.payload : {};
+  const zmeczenie = liczbaAlboNull(p.morning_fatigue);
+  return {
+    dzien: toLocalDateStr(new Date(w.created_at)),
+    senGodziny: liczbaAlboNull(p.sleep_hours),
+    // Dziennik zapisuje `payload.morning_fatigue = 10 − energia` (patrz
+    // app/(tabs)/dziennik.tsx). Odwracamy TĄ SAMĄ konwersją, nie własną.
+    energia: zmeczenie === null ? null : 10 - zmeczenie,
+    rpe: liczbaAlboNull(p.rpe),
+  };
+}
+
+function wpisBoluDlaKolejki(w: WierszBolu): WpisBolu {
+  return {
+    dzien: toLocalDateStr(new Date(w.created_at)),
+    intensywnosc: liczbaAlboNull(w.intensity) ?? 0,
+    wykluczaZTreningu: w.excludes_from_training === true,
+  };
+}
+
+/**
+ * Dokąd prowadzi dotknięcie pozycji — WYNIKA ZE ŚLADU, nie z osobnej decyzji
+ * ekranu. Dzięki temu nie da się pokazać zdania o Dzienniku i wysłać zawodnika
+ * do wąskich gardeł.
+ * ⚠️ CELOWO NIEPEŁNA: pozycje zadań (`player`, `system`) nie mają jeszcze
+ * dokąd prowadzić — lista „Moje zadania" to pas C2. Brak trasy = brak
+ * dotknięcia, a nie dotknięcie prowadzące donikąd.
+ */
+const TRASA_POZYCJI: Record<string, '/dziennik' | '/kalendarz' | '/cele'> = {
+  journal: '/dziennik',
+  calendar: '/kalendarz',
+  blok: '/cele',
+  focus_block: '/cele',
+  zaproszenie: '/cele',
+};
+
+// ─────────────────────────────────────────────────────────────────────
+// BRZMIENIA KOLEJKI — ⚠️ WSZYSTKIE DO PRZEJRZENIA PRZEZ KUBĘ
+// ─────────────────────────────────────────────────────────────────────
+/** Znacznik dla Kuby i dla strażnika. Nie usuwać do czasu zatwierdzenia brzmień. */
+const BRZMIENIE_DO_PRZEJRZENIA_B2 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-B2, 14.08.2026)';
+
+/**
+ * ⚠️ TRZY STANY KOLEJKI TO TRZY RÓŻNE ZDANIA, NIGDY DWA (R5).
+ * `pusto` znaczy „odczytałem wszystko i naprawdę nic nie ma".
+ * `nie_wiem` znaczy „czegoś nie odczytałem" — i wtedy NIE WOLNO powiedzieć
+ * zawodnikowi, że nic nie ma, bo to byłaby nieprawda o nim (Z0).
+ * Sklejenie tych dwóch zdań w jedno jest głównym defektem, którego ten pas
+ * ma nie popełnić — pilnuje tego asercja w `lib/kolejkaNaDzis.selftest.ts`.
+ */
+const KOLEJKA_PUSTO = 'Na dziś nie mam dla Ciebie ani jednej rzeczy.';
+const KOLEJKA_NIE_WIEM = 'Nie wszystko udało mi się odczytać, więc nie powiem Ci, że nic nie masz.';
+const KOLEJKA_NIEPELNA = 'Ta lista jest niepełna — czegoś nie odczytałem.';
+const KOLEJKA_WCZYTUJE = 'Wczytuję…';
+
+/** ⚠️ BRZMIENIA PRZENIESIONE CO DO ZNAKU z karty „Dziennik", która stała
+ *  na tym ekranie do 14.08 jako osobny, ósmy element. Nie są nowe — zmieniły
+ *  miejsce na to, w którym zawodnik szuka odpowiedzi „co dziś zrobić". */
+const DZIENNIK_CO = 'Zapisz dzisiejszy wpis';
+const DZIENNIK_DLACZEGO = 'Nie masz jeszcze dzisiejszego wpisu.';
 
 function dayCodeFor(date: Date) {
   const idx = (date.getDay() + 6) % 7; // 0=Pon..6=Nd — ta sama konwencja co lib/date-utils.ts
@@ -308,12 +477,16 @@ export default function DzisScreen() {
   // brzmi jak raport, nie jak zaproszenie. Znalezione przy przejściu ścieżki
   // na świeżym koncie 10.08.2026 (zgłosił Kuba).
   const [hasDiagnosis, setHasDiagnosis] = useState<boolean | null>(null);
-  const [loggedToday, setLoggedToday] = useState(false);
+
   const [focusRec, setFocusRec] = useState<RecommendationRow | null>(null);
   const [otherUnreadCount, setOtherUnreadCount] = useState(0);
   const [openActionableCount, setOpenActionableCount] = useState(0);
-  const [todayEvents, setTodayEvents] = useState<CalEvent[]>([]);
   const [workProgress, setWorkProgress] = useState<FocusBlockProgress>(null);
+  // ⭐ PLAN-D-B2 — JEDEN STAN ZAMIAST DWÓCH. Zawiera wejścia kolejki (wszystko
+  // poza `jednaOdpowiedz`, którą ekran liczy dopiero w renderze, i poza
+  // `dodatkowi`) oraz dzisiejsze wydarzenia dla karty kalendarza.
+  // ⚠️ `null` = jeszcze nie odczytano. To NIE jest pusta kolejka.
+  const [dane, setDane] = useState<DaneEkranu | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
@@ -451,15 +624,22 @@ export default function DzisScreen() {
     if (!currentUser) return;
     const todayStr = toLocalDateStr(new Date());
     const todayCode = dayCodeFor(new Date());
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
 
-    const [goalsRes, logsRes, recsRes, eventsRes, blocksRes, doneLogsRes, userRes, diagRes, glosRes] = await Promise.all([
+    const [goalsRes, dziennikRes, recsRes, eventsRes, blocksRes, bolRes, zadaniaRes, userRes, diagRes, glosRes] = await Promise.all([
       supabase.from('goals').select('id,segment_id,is_priority,status,created_at,origin,suggestion_note,refinement_note')
         .eq('user_id', currentUser.id).eq('status', 'active')
         .order('is_priority', { ascending: false }).order('created_at', { ascending: false }),
-      supabase.from('daily_logs').select('id')
-        .eq('user_id', currentUser.id).gte('created_at', startOfDay.toISOString()).limit(1),
+      // ⭐ PLAN-D-B2 — JEDNO ZAPYTANIE ZAMIAST DWÓCH. Do 14.08 ten ekran pytał
+      // `daily_logs` dwa razy: raz o „czy jest dzisiejszy wpis" (`select('id')`
+      // z filtrem na dziś), drugi raz o `calendar_event_id` wykonanych sesji.
+      // Kolejka potrzebuje trzeciej rzeczy z tej samej tabeli — snu i RPE
+      // z ostatnich wpisów — a trzecie zapytanie o tę samą tabelę byłoby już
+      // groteską. Jedno zapytanie karmi WSZYSTKIE TRZY:
+      //   • `wejscie.dziennik` rankera (sen, energia, RPE — okno 5 wpisów),
+      //   • licznik pracy (`calendar_event_id`),
+      //   • „czy jest dzisiejszy wpis" — liczone z `dzien` wpisów, nie z bazy.
+      supabase.from('daily_logs').select('id,entry_type,payload,created_at,calendar_event_id')
+        .eq('user_id', currentUser.id).order('created_at', { ascending: false }),
       // JEDNA DROGA B2 08.08.2026 — pełne kolumny karty (nie skrót jak dotąd),
       // bo karta pokazuje teraz całą treść i przyciski. Ta sama lista kolumn co
       // w Centrum Decyzji (RECOMMENDATION_COLUMNS) — jedno źródło.
@@ -473,16 +653,29 @@ export default function DzisScreen() {
       // wykonana WYPADŁABY Z MIANOWNIKA licznika „N z M sesji" — czyli licznik
       // MALAŁBY DOKŁADNIE WTEDY, GDY ZAWODNIK PRACUJE. Odwrócenie sensu.
       // Ta linia MUSI być wdrożona PRZED migracją A1 (kolejność zmierzona 14.08).
-      supabase.from('calendar_events').select('id,title,event_type,scheduled_date,recurrence_rule,focus_block_id')
+      // PLAN-D-B2 — doszły `status` i `scheduled_time`: obu wymaga
+      // `WydarzenieKalendarza` (kontrakt rankera §3). ⚠️ To jest ROZSZERZENIE
+      // istniejącego zapytania, nie nowe zapytanie.
+      supabase.from('calendar_events').select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,focus_block_id')
         .eq('user_id', currentUser.id).in('status', ['scheduled', 'completed']),
       // WIEDZA B4 08.08.2026 — doszło `component_id` (Element Bloku Skupienia),
       // żeby podpowiedź dało się wycelować w to, nad czym zawodnik pracuje.
       supabase.from('focus_blocks').select('id,segment_id,status,component_id')
         .eq('user_id', currentUser.id).eq('status', 'active'),
-      // Wykonanie sesji rozpoznajemy po `daily_logs.calendar_event_id` — ten sam
-      // wzorzec co plakietki „Wykonano / Nie wykonano" w kalendarz.tsx.
-      supabase.from('daily_logs').select('calendar_event_id')
-        .eq('user_id', currentUser.id).not('calendar_event_id', 'is', null),
+      // ⭐ PLAN-D-B2, NOWE ZAPYTANIE nr 1 — BÓL. Wejście `bol` rankera: hamulec
+      // O1 punkt 2 (zgłoszony ból wycisza dokładanie objętości) i premia, która
+      // podnosi rzeczy o ciele. Bez niego wejście musiałoby oddać jawne
+      // „nie wiem", czyli kolejka mówiłaby „lista jest niepełna" PRZY KAŻDYM
+      // wejściu na ekran u każdego zawodnika — a to jest zdanie, które po
+      // tygodniu przestaje cokolwiek znaczyć.
+      supabase.from('pain_entries').select('id,intensity,excludes_from_training,created_at')
+        .eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(20),
+      // ⭐ PLAN-D-B2, NOWE ZAPYTANIE nr 2 — ZADANIA ZAWODNIKA. To jest wejście,
+      // o które chodzi w całym etapie B i C: `player_tasks` (pas A4).
+      // ⚠️ ZMIERZONE 14.08.2026: tabela ma 0 wierszy, więc dziś to zapytanie
+      // odda `brak_danych` u każdego. Tak ma być — pusty ekran jest uczciwy,
+      // a producenta zadań buduje pas B3.
+      supabase.from(TABELA_ZADAN).select(SELECT_ZADANIA).eq('user_id', currentUser.id),
       // WIEDZA B4 08.08.2026 — rocznik. JEDYNE źródło wieku, jakie appka ma
       // (`app/(tabs)/profil.tsx`, etap 0 kreatora). Karmi wyłącznie bramkę
       // wiekową A9 i nie jest nigdzie pokazywany.
@@ -563,8 +756,6 @@ export default function DzisScreen() {
     // a ekran zachowuje się wtedy jak dotąd.
     setHasDiagnosis(diagRes.error ? null : (diagRes.count ?? 0) > 0);
 
-    setLoggedToday(!!(logsRes.data && logsRes.data.length > 0));
-
     const recs = (recsRes.data ?? []) as unknown as RecommendationRow[];
     const rec = recs.find((r) => r.recommendation_type === 'training_focus') ?? null;
     unreadSnapshotRef.current = new Set(recs.filter((r) => !r.viewed_at).map((r) => r.id));
@@ -577,12 +768,11 @@ export default function DzisScreen() {
       && !r.feedback_response).length);
     markShownAsViewed(rec);
 
+    // ⚠️ `?? []` ZOSTAJE WYŁĄCZNIE TU I WYŁĄCZNIE DLA LICZNIKA PRACY, który
+    // miał tę gałąź przed tym pasem i którego ten pas nie przebudowuje.
+    // WEJŚCIE KOLEJKI budowane jest niżej z SUROWEJ odpowiedzi, przez
+    // `wejscieZOdpowiedzi` — patrz sekcja oznaczona „WEJŚCIA KOLEJKI".
     const events = (eventsRes.data ?? []) as CalEvent[];
-    const forToday = events.filter((e) =>
-      e.scheduled_date === todayStr ||
-      (!!e.recurrence_rule && e.recurrence_rule.replace('weekly:', '').split(',').includes(todayCode))
-    );
-    setTodayEvents(forToday);
 
     // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — STAN DOSTĘPU DO ZAPISU.
     // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE: gdyby RPC `stan_dostepu` padło
@@ -604,8 +794,9 @@ export default function DzisScreen() {
       goalSegmentId: goal?.segment_id ?? null,
       activeBlocks,
       scheduledEvents: events, // wyłącznie status='scheduled' — patrz zapytanie wyżej
-      doneEventIds: new Set(((doneLogsRes.data ?? []) as { calendar_event_id: number }[])
-        .map((l) => l.calendar_event_id)),
+      doneEventIds: new Set(((dziennikRes.data ?? []) as WierszDziennika[])
+        .map((l) => l.calendar_event_id)
+        .filter((x): x is number => typeof x === 'number')),
     }));
 
     setLoading(false);
@@ -627,6 +818,84 @@ export default function DzisScreen() {
       birthYear: userRes.error ? null : birthYear,
     });
     loadNewDose(blockForGoal?.id ?? null);
+
+    // ═══════════════════════════════════════════════════════════════
+    // ⬇⬇⬇ WEJŚCIA KOLEJKI — POCZĄTEK ⬇⬇⬇   (PLAN-D-B2, zadanie B2.2)
+    //
+    // ⛔ W TEJ SEKCJI NIE MA PRAWA PAŚĆ ANI JEDNO `?? []` ANI `|| []`.
+    // Każde wejście ma TRZY stany: `jest` / `brak` / `nie_wiem`. Sklejenie
+    // dwóch ostatnich zamienia „nie udało mi się odczytać" w „nie masz nic" —
+    // czyli w nieprawdę o zawodniku (Z0). Pilnuje tego asercja nr 3
+    // w `lib/kolejkaNaDzis.selftest.ts`, nie ten komentarz.
+    // ═══════════════════════════════════════════════════════════════
+    const weKalendarz: Wejscie<WydarzenieKalendarza[]> =
+      wejscieZOdpowiedzi<CalEvent, WydarzenieKalendarza>(eventsRes, 'kalendarz', (e) => ({
+        id: e.id,
+        title: e.title,
+        event_type: e.event_type,
+        scheduled_date: e.scheduled_date,
+        scheduled_time: e.scheduled_time,
+        status: e.status,
+        focus_block_id: e.focus_block_id,
+      }));
+
+    const weDziennik: Wejscie<WpisDziennikaWejscie[]> =
+      wejscieZOdpowiedzi<WierszDziennika, WpisDziennikaWejscie>(dziennikRes, 'dziennik', wpisDziennikaDlaKolejki);
+
+    const weBol: Wejscie<WpisBolu[]> =
+      wejscieZOdpowiedzi<WierszBolu, WpisBolu>(bolRes, 'ból', wpisBoluDlaKolejki);
+
+    // CEL — dwa zapytania, jedno wejście. ⚠️ Błąd KTÓREGOKOLWIEK z nich znaczy
+    // „nie wiem, nad czym pracujesz", a nie „nie masz nad czym pracować".
+    const weCel: Wejscie<WejscieCelu> = (goalsRes.error || blocksRes.error)
+      ? { rodzaj: 'nie_wiem', powod: `cel: ${powodBledu(goalsRes.error ?? blocksRes.error)}` }
+      : {
+        rodzaj: 'jest',
+        dane: { segmentCelu: goal ? goal.segment_id : null, maAktywnyBlok: blockForGoal !== null },
+      };
+
+    // MECZ — ⚠️ ZMIERZONE 14.08.2026: w całej bazie jest ZERO wydarzeń
+    // `event_type = 'match'`, a jedyny inny ślad meczu (`match_contexts`)
+    // opisuje mecz JUŻ OPISANY, czyli taki, na który kaskada nie czeka.
+    // Ten ekran nie czyta stanu kaskady. Dlatego: gdy meczu w kalendarzu nie
+    // ma — mówię „brak" i to jest prawda odczytana z kalendarza; gdy jest —
+    // mówię „nie wiem", zamiast zgadywać, czy kaskada czeka. Wejście domyka
+    // pas B3 (wgląd z kaskady meczowej).
+    const meczeMinione = weKalendarz.rodzaj === 'jest'
+      ? weKalendarz.dane.filter((e) => e.event_type === 'match'
+        && e.scheduled_date !== null && e.scheduled_date <= todayStr)
+      : [];
+    const weMecz: Wejscie<WejscieMeczu> = weKalendarz.rodzaj === 'nie_wiem'
+      ? { rodzaj: 'nie_wiem', powod: 'mecz: nie odczytałem kalendarza' }
+      : meczeMinione.length === 0
+        ? { rodzaj: 'brak' }
+        : { rodzaj: 'nie_wiem', powod: 'mecz: ekran „Dziś" nie czyta stanu kaskady meczowej (pas B3)' };
+
+    // ZADANIA — cztery stany R5. `odczytZadan` dostaje CAŁĄ odpowiedź bazy.
+    const weZadania = odczytZadan({ data: zadaniaRes.data, error: zadaniaRes.error });
+    console.log(`dzis: ${opisOdczytuDoLogu(weZadania)}`);
+
+    setDane({
+      wejscia: {
+        dzis: todayStr,
+        glos: stanTygodnia,
+        ograniczenia: stanOgraniczen,
+        zadania: weZadania,
+        kalendarz: weKalendarz,
+        dziennik: weDziennik,
+        bol: weBol,
+        cel: weCel,
+        mecz: weMecz,
+      },
+      // Karta „Dziś w kalendarzu" — NIETKNIĘTA przez ten pas (EK-12, EK-14).
+      // ⚠️ Ta lista bierze się z `events`, a nie z `weKalendarz`, właśnie po to,
+      // żeby wydarzenia cykliczne nie zniknęły razem z wejściem rankera.
+      wydarzeniaDnia: events.filter((e) =>
+        e.scheduled_date === todayStr
+        || (!!e.recurrence_rule && e.recurrence_rule.replace('weekly:', '').split(',').includes(todayCode))
+      ),
+    });
+    // ⬆⬆⬆ WEJŚCIA KOLEJKI — KONIEC ⬆⬆⬆
   }, [currentUser, markShownAsViewed, loadHint, loadNewDose]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -640,6 +909,21 @@ export default function DzisScreen() {
   const todayLabel = new Date().toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' });
   const goalSegmentLabel = priorityGoal ? (SEG_LABELS[priorityGoal.segment_id] ?? priorityGoal.segment_id) : null;
   const isRecLinkedToGoal = !!focusRec && !!priorityGoal && focusRec.goal_id === priorityGoal.id;
+
+  // ⭐ PLAN-D-B2 — „czy jest dzisiejszy wpis" LICZONE Z WEJŚCIA KOLEJKI, nie
+  // z osobnego stanu i nie z osobnego zapytania. Trzy wartości, nie dwie:
+  // `null` znaczy „nie odczytałem Dziennika" i wtedy pozycja NIE POWSTAJE —
+  // zaproszenie do wpisu wysłane komuś, kto wpis właśnie zrobił, jest
+  // nieprawdą o zawodniku tak samo jak każda inna (Z0).
+  const brakWpisuDzis: boolean | null = useMemo(() => {
+    if (dane === null) return null;
+    const d = dane.wejscia.dziennik;
+    if (d.rodzaj === 'brak') return true;
+    if (d.rodzaj !== 'jest') return null;
+    return !d.dane.some((w) => w.dzien === dane.wejscia.dzis);
+  }, [dane]);
+
+  const todayEvents: CalEvent[] = dane === null ? [] : dane.wydarzeniaDnia;
 
   // PIERWSZE URUCHOMIENIE 10.08.2026 — stan „zawodnik zero": ani diagnozy,
   // ani Celu. Świadomie WYMAGA OBU warunków: kto zdążył założyć Cel sam,
@@ -717,7 +1001,11 @@ export default function DzisScreen() {
   // („Wracasz po urazie" / „Zmieniła się Twoja sytuacja") już mówi zawodnikowi,
   // co się dzieje. To ZDEJMUJE z ekranu to, co w tych stanach jest wyrzutem:
   // licznik zrobionych sesji, zaproszenie do planowania i rekomendację.
-  const widokDzis = coPokazacNaDzis(ograniczenia);
+  // ⚠️ PLAN-D-B2 — `useMemo`, bo od tej rundy `widokDzis` jest ZALEŻNOŚCIĄ
+  // memoizacji kolejki. Nowy obiekt przy każdym renderze przeliczałby rankera
+  // za każdym przemalowaniem ekranu — a polecenie B2 §6.3 mówi wprost:
+  // `ulozKolejke` woła się RAZ. Zachowanie bez zmian co do znaku.
+  const widokDzis = useMemo(() => coPokazacNaDzis(ograniczenia), [ograniczenia]);
 
   // ═══════════════════════════════════════════════════════════════════
   // PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — JEDNA ODPOWIEDŹ.
@@ -725,7 +1013,7 @@ export default function DzisScreen() {
   // WYKONUJE, nie podejmuje. Wszystkie trzy części biorą się z rzeczy, które
   // ekran już miał — zero nowych zapytań do bazy.
   // ═══════════════════════════════════════════════════════════════════
-  const odpowiedz = zbudujJednaOdpowiedz({
+  const odpowiedz = useMemo(() => zbudujJednaOdpowiedz({
     widok: widokDzis,
     laduje: loading,
     maGardlo: !!priorityGoal,
@@ -739,7 +1027,106 @@ export default function DzisScreen() {
     // a wtedy zdanie „Twój Blok nie zwiększa objętości" sugerowałoby wzrost
     // komuś, kto leży z urazem. To jest Z0.
     oslona: czyOslonaAktywna(ograniczenia),
-  });
+  }), [widokDzis, loading, priorityGoal, goalSegmentLabel, workProgress, newDoseWaiting,
+    focusRec, currentUser, isRecLinkedToGoal, hintState, ograniczenia]);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-B2 (14.08.2026), zadanie B2.2 — KOLEJKA PODANIA.
+  //
+  // To jest JEDYNE miejsce w tym pliku, które decyduje, CO i W JAKIEJ
+  // KOLEJNOŚCI stoi na „Dziś". Ekran wybiera wyłącznie, ILE pozycji bierze —
+  // i nawet tego nie liczy sam: liczbę wydaje `wezDlaWidoku`.
+  //
+  // ⛔ ZERO `.sort()`, ZERO `.filter()` po regule, ZERO własnego `.slice()`.
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // DECYZJA B2-a (polecenie §4, DROGA B — z pomiarem, nie z gustu).
+  // Zmierzone 14.08.2026 na żywym rankerze: `ulozKolejke` produkuje pozycję ze
+  // źródła „jedna odpowiedź" w TRZECH z czterech jej źródeł (`blok`,
+  // `zaproszenie`, `brak`) — waga 1300, kubełek `teraz`, pozycja nr 1.
+  // W czwartym (`rekomendacja`) NIE produkuje NICZEGO i nie zapisuje tego
+  // nawet w `odrzucone`, bo `coZrobic.tekst` jest wtedy `null` — treść niesie
+  // karta rekomendacji (`zJednejOdpowiedzi`, kolejkaPodania.ts:804).
+  //
+  // Gdyby ekran rysował wyłącznie `wezDlaWidoku`, w tym czwartym przypadku
+  // z ekranu ZNIKNĘŁABY karta rekomendacji — a z nią CZTERY obietnice w stanie
+  // JEST (EK-07, EK-08, EK-09, EK-11). Dlatego rekomendacja wchodzi do rankera
+  // TĄ SAMĄ DROGĄ, CO KAŻDA INNA FUNKCJA: przez `dodatkowi` (kontrakt B1 §8.7),
+  // z kluczem śladu `rekomendacja` — który B1 przewidział w swojej liście
+  // kluczy. Karta jest wtedy CIAŁEM pozycji nr 1, a nie drugim producentem:
+  // jej miejsce ustala ranker.
+  const kolejka = useMemo<Kolejka | null>(() => {
+    if (dane === null) return null;
+
+    const dodatkowi: Kandydat[] = [];
+
+    // (1) REKOMENDACJA — patrz decyzja B2-a wyżej.
+    if (odpowiedz.coZrobic.zrodlo === 'rekomendacja' && focusRec !== null) {
+      const sladRekomendacji = slad({
+        rejestr: 'propozycja',
+        skad: 'decision_recommendations',
+        idWiersza: String(focusRec.id),
+        klucz: 'rekomendacja',
+      });
+      dodatkowi.push({
+        id: `rekomendacja:${focusRec.id}`,
+        co: focusRec.recommendation_text,
+        dlaczego: odpowiedz.dlaczego,
+        ileZajmieSekund: null,
+        skadToWiemy: sladRekomendacji,
+        wagaBazowa: WAGA_BAZOWA.jedna_odpowiedz,
+        zrodlo: 'jedna_odpowiedz',
+        rodzajPracy: 'praca_nad_celem',
+        podniesioneRecznie: false,
+        termin: dane.wejscia.dzis,
+        godzina: null,
+      });
+    }
+
+    // (2) DZISIEJSZY WPIS DZIENNIKA — do 14.08 osobna, ósma karta tego ekranu.
+    // ⚠️ NIE JEST NOWĄ FUNKCJĄ: jest istniejącym producentem, który przestał
+    // sam decydować, gdzie stanąć. Powstaje WYŁĄCZNIE wtedy, gdy zawodnik
+    // dzisiejszego wpisu nie ma — rzecz zrobiona nie jest rzeczą do zrobienia.
+    // ⚠️ `dlaczego` to zmierzony fakt o zawodniku (brak wiersza w `daily_logs`
+    // z dzisiejszą datą), a nie nasza teza. `ileZajmieSekund` = `null`, bo
+    // NIKT tego czasu nie zmierzył — „30 sekund" byłoby zmyśleniem (Z0).
+    // `rodzajPracy: 'porzadek'` jest rozstrzygnięciem: wpis w Dzienniku nie
+    // jest dokładaniem objętości, więc Osłona ani ból go NIE wyciszają —
+    // zawodnik po urazie ma prawo (i powód) dalej notować.
+    if (brakWpisuDzis === true) {
+      const sladDziennika = slad({
+        rejestr: 'fakt_o_tobie',
+        skad: 'daily_logs',
+        idWiersza: null,
+        klucz: 'journal',
+      });
+      dodatkowi.push({
+        id: `dziennik:${dane.wejscia.dzis}`,
+        co: DZIENNIK_CO,
+        dlaczego: DZIENNIK_DLACZEGO,
+        ileZajmieSekund: null,
+        skadToWiemy: sladDziennika,
+        wagaBazowa: WAGA_BAZOWA.zadanie_systemowe,
+        zrodlo: 'zadanie_systemowe',
+        rodzajPracy: 'porzadek',
+        podniesioneRecznie: false,
+        termin: dane.wejscia.dzis,
+        godzina: null,
+      });
+    }
+
+    // ⛔ JEDEN ARGUMENT. Drugi (`Zasady`) jest wyłącznie dla strażnika
+    // mutacyjnego rankera i dla pasa B3 — kontrakt B1 §8.1.
+    return ulozKolejke({ ...dane.wejscia, jednaOdpowiedz: odpowiedz, dodatkowi });
+  }, [dane, odpowiedz, focusRec, brakWpisuDzis]);
+
+  // ⛔ EKRAN NIE WYBIERA, KTÓRE POZYCJE POKAZAĆ. `wezDlaWidoku` wydaje PREFIKS
+  // kolejki (dziś: 4 pozycje) i to jest cała rola tego wiersza.
+  // ⚠️ Przy ścieżce wyjścia (`wyciszonaCalkowicie`) oddaje PUSTĄ tablicę —
+  // „zero przypomnień, zero liczników, zero porównań". Cztery wyszarzone
+  // przypomnienia byłyby nadal listą przypomnień.
+  const pozycjeNaDzis = kolejka === null ? [] : wezDlaWidoku(kolejka, 'dzis');
+  if (kolejka !== null) console.log(`dzis: ${kolejka.powod}`);
 
   // ⚠️ ROZRÓŻNIENIE R5 NIE ZGINĘŁO — ZESZŁO DO KONSOLI. „Nie ma tabeli",
   // „błąd odczytu" i „pusto" to nadal trzy różne rzeczy i nadal da się je
@@ -955,65 +1342,123 @@ export default function DzisScreen() {
             14.08.2026: `component_hints.dowody` wypełnione w 21 z 297 wierszy).
             Wypełniacz w rodzaju „to pomoże Ci się rozwijać" łamałby Z0.
             ═══════════════════════════════════════════════════════════ */}
-        {odpowiedz.pokazac && (
+        {/* ═══════════════════════════════════════════════════════════
+            ⭐ PLAN-D-B2 08.2026 (14.08.2026) — KOLEJKA PODANIA NA EKRANIE.
+
+            TU STAŁA JEDNA ODPOWIEDŹ I NIC POZA NIĄ. Pod nią, jako osobne
+            karty, stały: wpis Dziennika i kalendarz. Od tej rundy jedna
+            odpowiedź jest PIERWSZĄ POZYCJĄ KOLEJKI, a nie sąsiadem kolejki:
+            jej miejsce ustala `lib/kolejkaPodania.ts`, tak samo jak miejsce
+            każdej innej pozycji.
+
+            ⛔ TEN BLOK NIE ZAWIERA ANI JEDNEJ DECYZJI O KOLEJNOŚCI. Rysuje
+            `pozycjeNaDzis` w takiej kolejności, w jakiej je dostał.
+
+            TRZY STANY, TRZY RÓŻNE ZDANIA (R5) — patrz stałe `KOLEJKA_*`:
+              • `sa_pozycje` → lista;
+              • `pusto`      → „odczytałem wszystko i nic nie ma";
+              • `nie_wiem`   → „czegoś nie odczytałem" — ⛔ NIE pustka.
+            Do tego `niepelna` mówi wprost, że lista jest krótsza, niż powinna
+            — zamiast po cichu ją skrócić.
+
+            ⚠️ ŚCIEŻKA WYJŚCIA: przy `wyciszonaCalkowicie` cały ten blok znika.
+            `wezDlaWidoku` oddaje wtedy pustą tablicę, a lista czterech
+            wyszarzonych przypomnień byłaby nadal listą przypomnień.
+            ═══════════════════════════════════════════════════════════ */}
+        {(kolejka === null || !kolejka.wyciszonaCalkowicie) && odpowiedz.pokazac && (
           <View style={{ marginTop: 24 }}>
             <View style={styles.odpowiedzCard}>
               <View style={styles.odpowiedzStripe} />
 
               {/* ── CZĘŚĆ 1: CO DZIŚ ZROBIĆ — DOKŁADNIE JEDNA RZECZ ───── */}
               <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZROBIC}</Text>
-              {odpowiedz.coZrobic.zrodlo === 'rekomendacja' && focusRec && currentUser ? (
-                /* Treść i przyciski niesie TEN SAM komponent, który renderuje
-                   Centrum decyzji — zero drugiej kopii kodu karty. To jedyna
-                   akcja decyzyjna na tym ekranie i dlatego rekomendacja, gdy
-                   istnieje, jest ważniejsza od zdania z materiału. */
-                <RecommendationCard
-                  rec={focusRec}
-                  currentUserId={currentUser.id}
-                  isUnread={unreadSnapshotRef.current.has(focusRec.id)}
-                  headerSlot={null}
-                  footerSlot={null}
-                  onSubmitted={load}
-                />
+
+              {kolejka === null ? (
+                <Text style={styles.odpowiedzTresc}>{KOLEJKA_WCZYTUJE}</Text>
+              ) : pozycjeNaDzis.length === 0 ? (
+                /* ⛔ DWA RÓŻNE ZDANIA, NIGDY JEDNO. „Nie masz nic" powiedziane
+                   komuś, czyich danych nie udało się odczytać, jest nieprawdą
+                   o nim — i wygląda dokładnie tak samo jak prawda. */
+                <Text style={styles.kolejkaPustka}>
+                  {kolejka.stan === 'nie_wiem' ? KOLEJKA_NIE_WIEM : KOLEJKA_PUSTO}
+                </Text>
               ) : (
-                <Text style={styles.odpowiedzTresc}>{odpowiedz.coZrobic.tekst}</Text>
-            )}
+                <>
+                  {/* ⛔ JEDNA PĘTLA, ZERO WYBIERANIA. Ani `.slice()`, ani
+                      `.filter()`, ani `.sort()` — kolejność i liczba przyszły
+                      z rankera. Pierwsza pozycja dostaje dwie dodatkowe części
+                      jednej odpowiedzi, bo pierwsza pozycja JEST tą odpowiedzią. */}
+                  {pozycjeNaDzis.map((p, i) => (
+                    <Fragment key={p.id}>
+                      <PozycjaKolejkiCard
+                        pozycja={p}
+                        /* Pierwsza pozycja jest PODANA: rozwinięta, w pełnym
+                           kształcie. Kolejne są jednolinijkowe — rozwinięcie
+                           na jedno dotknięcie, bez opuszczania ekranu (P0). */
+                        pierwsza={i === 0}
+                        pokazacDlaczego={i !== 0}
+                        dzis={dane === null ? null : dane.wejscia.dzis}
+                        /* Treść i przyciski rekomendacji niesie TEN SAM komponent,
+                           który renderuje Centrum decyzji — zero drugiej kopii
+                           karty. ⚠️ To nie jest drugi producent: miejsce tej
+                           pozycji w kolejności ustalił ranker. */
+                        slot={p.skadToWiemy.klucz === 'rekomendacja' && focusRec && currentUser ? (
+                          <RecommendationCard
+                            rec={focusRec}
+                            currentUserId={currentUser.id}
+                            isUnread={unreadSnapshotRef.current.has(focusRec.id)}
+                            headerSlot={null}
+                            footerSlot={null}
+                            onSubmitted={load}
+                          />
+                        ) : undefined}
+                        onPress={TRASA_POZYCJI[p.skadToWiemy.klucz]
+                          ? () => router.push(TRASA_POZYCJI[p.skadToWiemy.klucz])
+                          : undefined}
+                      />
 
-              {/* Jedno dotknięcie prowadzi tam, gdzie ta jedna rzecz się dzieje.
-                  ⚠️ Trasa wynika ZE ŹRÓDŁA odpowiedzi, nie z osobnej decyzji
-                  ekranu — dzięki temu nie da się pokazać zdania o Bloku
-                  i wysłać zawodnika do wąskich gardeł. */}
-              {odpowiedz.coZrobic.zrodlo === 'blok' || odpowiedz.coZrobic.zrodlo === 'zaproszenie' ? (
-                <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/cele')}>
-                  <Text style={styles.cardAction}>{odpowiedz.coZrobic.tekst} →</Text>
-                </TouchableOpacity>
-              ) : null}
+                      {/* ── CZĘŚĆ 2: DLACZEGO AKURAT TO — JEDNO ZDANIE ──── */}
+                      {/* ⚠️ `null` znaczy „nie mam uzasadnienia, którego bym nie
+                          zmyślił". Zmyślone uzasadnienie jest gorsze niż jego
+                          brak, bo brzmi wiarygodnie — dlatego ta część potrafi
+                          zniknąć w całości. Zdanie bierze się Z POZYCJI, nie
+                          z odpowiedzi: gdyby pozycja nr 1 była inna niż jedna
+                          odpowiedź (bo tamta zamilkła), uzasadnienie odpowiedzi
+                          stałoby przy cudzej pozycji. */}
+                      {i === 0 && p.dlaczego !== null ? (
+                        <View style={styles.odpowiedzCzesc}>
+                          <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_DLACZEGO}</Text>
+                          <Text style={styles.odpowiedzDlaczego}>{p.dlaczego}</Text>
+                        </View>
+                      ) : null}
 
-              {/* ── CZĘŚĆ 2: DLACZEGO AKURAT TO — JEDNO ZDANIE ────────── */}
-              {/* ⚠️ `null` znaczy „nie mam uzasadnienia, którego bym nie zmyślił".
-                  Zmyślone uzasadnienie jest gorsze niż jego brak, bo brzmi
-                  wiarygodnie. Dlatego ta część potrafi zniknąć w całości. */}
-              {odpowiedz.dlaczego ? (
-                <View style={styles.odpowiedzCzesc}>
-                  <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_DLACZEGO}</Text>
-                  <Text style={styles.odpowiedzDlaczego}>{odpowiedz.dlaczego}</Text>
-                </View>
-              ) : null}
+                      {/* ── CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM ─ */}
+                      {/* ⛔ Tej części NIE DA SIĘ zbudować bez źródła: pilnuje
+                          tego typ `CoToZmieni` w lib/jednaOdpowiedz.ts, nie ten
+                          komentarz. ⚠️ Rysuje ją ekran, a nie komponent pozycji,
+                          bo „co to zmieni" NIE JEST polem pozycji kolejki —
+                          ranker takiego pola nie ma i nie powinien mieć. */}
+                      {i === 0 && odpowiedz.coToZmieni ? (
+                        <View style={styles.odpowiedzCzesc}>
+                          <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZMIENI}</Text>
+                          <Text style={styles.odpowiedzDowod}>{odpowiedz.coToZmieni.tekst}</Text>
+                          <Text style={styles.hintSource}>{odpowiedz.coToZmieni.zrodlo}</Text>
+                        </View>
+                      ) : null}
+                    </Fragment>
+                  ))}
 
-              {/* ── CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM ─── */}
-              {/* ⛔ Tej części NIE DA SIĘ zbudować bez źródła: pilnuje tego typ
-                  `CoToZmieni` w lib/jednaOdpowiedz.ts, nie ten komentarz. */}
-              {odpowiedz.coToZmieni ? (
-                <View style={styles.odpowiedzCzesc}>
-                  <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZMIENI}</Text>
-                  <Text style={styles.odpowiedzDowod}>{odpowiedz.coToZmieni.tekst}</Text>
-                  <Text style={styles.hintSource}>{odpowiedz.coToZmieni.zrodlo}</Text>
-                </View>
-              ) : null}
+                  {/* ⚠️ LISTA NIEPEŁNA MÓWI O SOBIE. Skrócona po cichu wygląda
+                      identycznie jak pełna — i to jest cały problem. */}
+                  {kolejka.niepelna ? (
+                    <Text style={styles.kolejkaNiepelna}>{KOLEJKA_NIEPELNA}</Text>
+                  ) : null}
+                </>
+              )}
 
               {/* Treść ZAWSZE WIDOCZNA (bezpieczeństwo) — NIE jest podpowiedzią
-                  dnia i nie konkuruje z jedną odpowiedzią. Stoi na dole tej samej
-                  karty, żeby nie stać się kolejnym kafelkiem. */}
+                  dnia i nie konkuruje z kolejką. Stoi na dole tej samej karty,
+                  żeby nie stać się kolejnym kafelkiem. */}
               {renderTrescZawszeWidoczna()}
             </View>
 
@@ -1037,16 +1482,20 @@ export default function DzisScreen() {
             nietknięta w tej sesji, nie odmrażana. */}
         <LivingDiagnosisPulseCard />
 
-        {/* Wpis dnia */}
-        <View style={{ marginTop: 24 }}>
-          <Text style={styles.sectionLabel}>Dziennik</Text>
-          <TouchableOpacity style={[styles.card, loggedToday && styles.cardMuted]} onPress={() => router.push('/dziennik')}>
-            <Text style={styles.cardLabel}>
-              {loggedToday ? 'Dzisiejszy wpis zapisany' : 'Nie masz jeszcze dzisiejszego wpisu'}
-            </Text>
-            <Text style={styles.cardAction}>{loggedToday ? 'Dodaj kolejny wpis →' : 'Zapisz dzisiejszy wpis →'}</Text>
-          </TouchableOpacity>
-        </View>
+        {/* ⚠️ PLAN-D-B2 08.2026 (14.08.2026) — KARTA „DZIENNIK" ZNIKŁA STĄD
+            I JEST TERAZ POZYCJĄ KOLEJKI. Była ósmym elementem tego ekranu
+            i ósmym producentem: sama decydowała, że stoi tu, pod kalendarzem
+            i nad niczym, choć „zapisz dzisiejszy wpis" jest rzeczą DO ZROBIENIA
+            DZIŚ — czyli dokładnie tym, co kolejka porządkuje.
+            Brzmienia przeniesione CO DO ZNAKU: `DZIENNIK_CO` i `DZIENNIK_DLACZEGO`
+            na górze tego pliku. Wejście do Dziennika nie zginęło — pozycja
+            prowadzi tam jednym dotknięciem (`TRASA_POZYCJI`), a sam Dziennik
+            jest jedną z czterech zakładek paska (EK-16).
+            ⚠️ CO USTĄPIŁO ŚWIADOMIE: potwierdzenie „Dzisiejszy wpis zapisany".
+            Rzecz zrobiona nie jest rzeczą do zrobienia, więc nie ma pozycji
+            w kolejce — a osobna karta tylko po to, żeby pochwalić za wpis,
+            jest dokładnie tym elementem, którego ten pas nie dokłada.
+            To jest DECYZJA, nie skutek uboczny — patrz nota przekazania §5. */}
 
         {/* Dzisiejszy kalendarz. JEDNA DROGA B2 08.08.2026 — jedna karta z listą
             zamiast osobnej karty na każde wydarzenie (patrz nagłówek: co ustąpiło). */}
@@ -1183,6 +1632,14 @@ const styles = StyleSheet.create({
   odpowiedzCzesc: { marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border },
   odpowiedzDlaczego: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   odpowiedzDowod: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textPrimary, marginBottom: 4 },
+  // PLAN-D-B2 — dwa stany pustej kolejki i zdanie o niepełnej liście.
+  // ⚠️ STYL JEST JEDEN, ZDANIA SĄ DWA. Rozróżnienie „pusto" / „nie wiem" nosi
+  // TEKST, nie kolor — kolor zawodnik zapamiętuje, a znaczenia się nie domyśli.
+  kolejkaPustka: { ...typography.body, fontSize: 15, lineHeight: 22, color: colors.textSecondary },
+  kolejkaNiepelna: {
+    ...typography.body, fontSize: 12, lineHeight: 18, color: colors.textTertiary,
+    marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border,
+  },
   // WIEDZA B4 08.08.2026 — PODPOWIEDŹ Z MATERIAŁU.
   // ⚠️ PLAN-D-T 08.2026 — od tej rundy `hintBox` rysuje WYŁĄCZNIE treść
   // ZAWSZE WIDOCZNĄ (bezpieczeństwo, m.in. telefon zaufania). Podpowiedź dnia
