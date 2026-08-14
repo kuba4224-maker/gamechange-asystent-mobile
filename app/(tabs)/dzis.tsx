@@ -305,6 +305,44 @@ import {
   TABELA_ZADAN,
 } from '../../lib/zadania';
 import PozycjaKolejkiCard from '../../components/PozycjaKolejkiCard';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-B4 08.2026 (14.08.2026), zadanie B4.2 — WGLĄDY WCHODZĄ NA EKRAN.
+//
+// `lib/wgladyZAlgorytmu.ts` (pas B3, 49 261 B, 81 asercji) liczył sześć wglądów
+// i NIE MIAŁ ANI JEDNEGO KONSUMENTA. Zmierzone przed tym pasem:
+//   grep -rn "wgladyZAlgorytmu" app components  →  ZERO.
+// Dziewięć obietnic (WG-25, WG-26, WG-27, WG-30, WG-32, WG-33, WG-34, WT-25,
+// WT-26) stało w stanie „KOD GOTOWY" wyłącznie dlatego, że nikt nie wpiął
+// jednego pola.
+//
+// ⛔ WGLĄD NIE JEST SIÓDMYM PRODUCENTEM I NIE DOSTAJE WŁASNEJ KARTY. Wchodzi
+// TĄ SAMĄ DROGĄ, CO KAŻDA INNA FUNKCJA — przez `dodatkowi` rankera. Ekran,
+// który po tym pasie ma więcej kart, zadania nie wykonał.
+//
+// ⛔ NIE FILTRUJEMY KANDYDATÓW PRZED RANKEREM. Wgląd, który ranker wyciszy,
+// ma zostać WIDOCZNY z powodem milczenia (WG-32); `.filter()` przed rankerem
+// kasuje go po cichu — czyli robi dokładnie to, czego WG-32 zakazuje.
+//
+// ⚠️ `Kandydat` ma DWA pola tekstowe, a wgląd ma TRZY części. Trzecia
+// („jedna rzecz do zrobienia") wychodzi WYŁĄCZNIE przez `wgladDlaPozycji()`
+// i rysuje ją ten ekran — patrz `WgladPozycji` niżej. Bez tego wgląd kończy
+// się na wiedzy, a to jest złamanie M4.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  policzWglady,
+  wgladDlaPozycji,
+  dataPoPolsku,
+  liczbaPoPolsku,
+  type WejsciaWgladow,
+  type WynikiWgladow,
+  type Wglad,
+  type WpisDziennikaWglad,
+  type WydarzenieWglad,
+  type PowiazanieWpisu,
+  type WpisBoluWglad,
+  type WpisMeczuWglad,
+  type ProfilWglad,
+} from '../../lib/wgladyZAlgorytmu';
 
 const SEG_LABELS = SEGMENT_LABELS;
 
@@ -350,14 +388,44 @@ type WierszDziennika = {
 type DaneEkranu = {
   wejscia: Omit<WejsciaKolejki, 'jednaOdpowiedz' | 'dodatkowi'>;
   wydarzeniaDnia: CalEvent[];
+  /**
+   * ⭐ PLAN-D-B4 — SZEŚĆ WEJŚĆ PRODUCENTA WGLĄDÓW. `dzis` nie stoi tutaj:
+   * bierze się z `wejscia.dzis`, żeby ranker i producent wglądów nie mogły
+   * dostać DWÓCH RÓŻNYCH dni. Jeden napis, jedno źródło.
+   */
+  wejsciaWgladow: Omit<WejsciaWgladow, 'dzis'>;
 };
 
 type WierszBolu = {
   id: number;
+  /**
+   * ⭐ PLAN-D-B4 — DOŁOŻONA KOLUMNA, NIE NOWE ZAPYTANIE. Bez niej wgląd
+   * o powtarzającym się bólu (WT-25) nie ma jak zgrupować zgłoszeń po miejscu.
+   * ⚠️ `body_location` jest w bazie NOT NULL (zmierzone 14.08.2026 na
+   * `information_schema.columns`), więc typ jest `string`, a nie `string | null`
+   * — pole zastępcze („nieznane miejsce") byłoby zmyśleniem.
+   */
+  body_location: string;
   intensity: number | null;
   excludes_from_training: boolean | null;
   created_at: string;
 };
+
+/**
+ * ⭐ PLAN-D-B4 — wiersz kaskady meczowej (WG-30, WG-34).
+ * ⚠️ ZMIERZONE 14.08.2026: `match_contexts` ma 2 wiersze, OBA z 29.07.2026.
+ * Próg osi to trzy mecze, więc dziś ten wgląd odda `brak_danych` z powodem.
+ * To jest oczekiwane — wiersza „na próbę" nikt nie dokłada (Z0).
+ */
+type WierszMeczu = {
+  id: number;
+  created_at: string;
+  match_rpe: number | null;
+  entered_recovery_state: string | null;
+};
+
+/** ⭐ PLAN-D-B4 — jedyna kolumna katalogu podpowiedzi, jakiej WT-26 potrzebuje. */
+type WierszKatalogu = { min_age: number | null };
 
 // ═══════════════════════════════════════════════════════════════════
 // PLAN-D-B2 — TRZY STANY KAŻDEGO WEJŚCIA. ⛔ TU MIESZKA ZAKAZ `data ?? []`.
@@ -414,6 +482,79 @@ function wpisBoluDlaKolejki(w: WierszBolu): WpisBolu {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-B4 — MAPOWANIE WIERSZ BAZY → WEJŚCIE PRODUCENTA WGLĄDÓW.
+//
+// Osobne funkcje od tych wyżej, choć czytają TE SAME odpowiedzi bazy. Powód
+// jest twardy: ranker i producent wglądów potrzebują RÓŻNYCH pól z tych samych
+// wierszy (ranker chce energii, wgląd chce identyfikatora wiersza i miejsca
+// bólu). Jedna wspólna funkcja musiałaby oddawać sumę obu kształtów, więc
+// każde nowe pole jednego z nich lądowałoby po cichu w drugim.
+//
+// ⚠️ ŻADNA Z NICH NIE POTRZEBUJE NOWEGO ZAPYTANIA. Cztery z sześciu wejść
+// wglądów jadą z odpowiedzi, które ten ekran i tak już pobiera.
+// ═══════════════════════════════════════════════════════════════════
+function wpisDziennikaDlaWgladu(w: WierszDziennika): WpisDziennikaWglad {
+  const p: Record<string, unknown> = w.payload && typeof w.payload === 'object' ? w.payload : {};
+  return {
+    idWiersza: String(w.id),
+    dzien: toLocalDateStr(new Date(w.created_at)),
+    // ⚠️ Wiersz `morning` niesie `sleep_hours`, wiersz `post_training` niesie
+    // `rpe` — NIGDY oba naraz. `null` w jednym z tych pól nie jest brakiem
+    // danych, tylko informacją, o czym ten wiersz jest.
+    senGodziny: liczbaAlboNull(p.sleep_hours),
+    rpe: liczbaAlboNull(p.rpe),
+  };
+}
+
+/**
+ * ⛔ `mood_motivation` NIE PRZECHODZI TĘDY I PRZECHODZIĆ NIE MA. Decyzja B3-b
+ * (nota B3 §4.1): granica B1 biegnie po SKUTKU, a zdanie zbudowane na tym
+ * kluczu jest o jedną zmianę nazwy zmiennej od zdania o nastroju. Producent
+ * wglądów nie ma dla niego pola i to jest jedyna wersja tej granicy, której
+ * nie da się przekroczyć przez przypadek.
+ */
+function powiazanieDlaWgladu(w: WierszDziennika): PowiazanieWpisu {
+  return {
+    idWpisu: String(w.id),
+    // ⚠️ `null` znaczy „ten wpis nie wskazuje żadnego wydarzenia" i JEST DZIŚ
+    // stanem 10 z 10 (zmierzone 14.08.2026). Producent policzy z tego
+    // `brak_danych`, a nie licznik „0 z 6" — bo to byłaby nieprawda o zawodniku.
+    idWydarzenia: w.calendar_event_id === null ? null : String(w.calendar_event_id),
+  };
+}
+
+function wydarzenieDlaWgladu(e: CalEvent): WydarzenieWglad {
+  return {
+    id: String(e.id),
+    dzien: e.scheduled_date,
+    rodzaj: e.event_type,
+    status: e.status,
+    tytul: e.title,
+  };
+}
+
+function wpisBoluDlaWgladu(w: WierszBolu): WpisBoluWglad {
+  return {
+    idWiersza: String(w.id),
+    dzien: toLocalDateStr(new Date(w.created_at)),
+    // ⚠️ KLUCZ MASZYNOWY, nie brzmienie. Nazwę miejsca dobiera producent
+    // z istniejącej mapy `lib/labels.ts`, a klucza spoza mapy NIE ZGADUJE.
+    miejsce: w.body_location,
+    intensywnosc: liczbaAlboNull(w.intensity) ?? 0,
+    wykluczaZTreningu: w.excludes_from_training === true,
+  };
+}
+
+function meczDlaWgladu(w: WierszMeczu): WpisMeczuWglad {
+  return {
+    idWiersza: String(w.id),
+    dzien: toLocalDateStr(new Date(w.created_at)),
+    ciezkosc: liczbaAlboNull(w.match_rpe),
+    stanWejscia: typeof w.entered_recovery_state === 'string' ? w.entered_recovery_state : null,
+  };
+}
+
 /**
  * Dokąd prowadzi dotknięcie pozycji — WYNIKA ZE ŚLADU, nie z osobnej decyzji
  * ekranu. Dzięki temu nie da się pokazać zdania o Dzienniku i wysłać zawodnika
@@ -454,6 +595,87 @@ const KOLEJKA_WCZYTUJE = 'Wczytuję…';
  *  miejsce na to, w którym zawodnik szuka odpowiedzi „co dziś zrobić". */
 const DZIENNIK_CO = 'Zapisz dzisiejszy wpis';
 const DZIENNIK_DLACZEGO = 'Nie masz jeszcze dzisiejszego wpisu.';
+
+// ─────────────────────────────────────────────────────────────────────
+// ⭐ PLAN-D-B4 — BRZMIENIA WGLĄDU, KTÓRE DOKŁADA EKRAN
+// ─────────────────────────────────────────────────────────────────────
+// ⚠️ TO SĄ DOKŁADNIE TRZY NOWE ZDANIA. Wszystkie zdania samych wglądów
+// (liczba, znaczenie, zastrzeżenie, rzecz do zrobienia) przychodzą GOTOWE
+// z `lib/wgladyZAlgorytmu.ts` i ten pas ich NIE ZMIENIA — decyzja o brzmieniu
+// należy do Kuby, nie do pasa, który je wpina (polecenie B4 §8.3).
+/** Znacznik dla Kuby i dla strażnika. Nie usuwać do czasu zatwierdzenia brzmień. */
+const BRZMIENIE_DO_PRZEJRZENIA_B4 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-B4, 14.08.2026)';
+
+/**
+ * Nagłówek trzeciej części wglądu. ⚠️ Ten sam kształt, co „CO DZIŚ ZROBIĆ" /
+ * „DLACZEGO AKURAT TO" / „CO TO ZMIENI" — bo to jest część TEJ SAMEJ karty,
+ * a nie nowy kafelek.
+ */
+const WGLAD_DO_ZROBIENIA = 'JEDNA RZECZ DO ZROBIENIA';
+/** WG-34 — oś pomiarów. Głębokość 1: jedno dotknięcie, bez opuszczania ekranu (P0). */
+const OS_POKAZ = 'Pokaż pomiary';
+const OS_UKRYJ = 'Ukryj pomiary';
+
+/**
+ * ⭐ PLAN-D-B4 — TRZECIA CZĘŚĆ WGLĄDU I OŚ POMIARÓW.
+ *
+ * ── DLACZEGO RYSUJE TO EKRAN, A NIE `PozycjaKolejkiCard` ─────────────
+ * Bo `doZrobienia` i `os` NIE SĄ POLAMI POZYCJI KOLEJKI — ranker ich nie zna
+ * i znać nie powinien (tak samo jak nie zna „co to zmieni", które ten ekran
+ * rysuje od pasa T). Komponent pozycji należy do pasa B2 i ten pas go nie
+ * zmienia; wgląd dokłada swoją trzecią część POD pozycją, wewnątrz tej samej
+ * karty.
+ *
+ * ── DWIE GŁĘBOKOŚCI (P0) ────────────────────────────────────────────
+ *   głębokość 0: rzecz do zrobienia — ZERO dotknięć. Wgląd, który kończy się
+ *                na wiedzy, łamie M4, więc czynność nie ma prawa być schowana.
+ *   głębokość 1: oś pomiarów (WG-34) — jedno dotknięcie, bez opuszczania
+ *                ekranu. Trzy daty z liczbami to materiał do sprawdzenia
+ *                „skąd to wiesz", a nie odpowiedź na „co mam dziś zrobić".
+ *
+ * ⛔ PUNKT OSI BEZ CZYTELNEJ DATY NIE JEST RYSOWANY. `dataPoPolsku` oddaje
+ * wtedy `null`, a surowe „2026-13-45" na ekranie jest gorsze niż brak punktu.
+ */
+function WgladPozycji({ wglad }: { wglad: Wglad | null }) {
+  const [osWidoczna, setOsWidoczna] = useState(false);
+  if (wglad === null) return null;
+
+  const punkty = wglad.os
+    .map((p) => ({ data: dataPoPolsku(p.dzien), wartosc: p.wartosc, jednostka: p.jednostka }))
+    .filter((p): p is { data: string; wartosc: number; jednostka: string } => p.data !== null);
+
+  return (
+    <View style={styles.wgladCzesc}>
+      <Text style={styles.odpowiedzNaglowek}>{WGLAD_DO_ZROBIENIA}</Text>
+      <Text style={styles.wgladDoZrobienia}>{wglad.doZrobienia}</Text>
+
+      {/* ── GŁĘBOKOŚĆ 1: OŚ POMIARÓW (WG-34) ────────────────────────── */}
+      {/* ⛔ Przełącznik rysuje się WYŁĄCZNIE wtedy, gdy oś naprawdę ma punkty.
+          Pusty przycisk „Pokaż pomiary", po którym nic się nie pokazuje, jest
+          obietnicą bez pokrycia — a wgląd bez osi to poprawny stan, nie defekt. */}
+      {punkty.length > 0 ? (
+        <>
+          <TouchableOpacity
+            style={styles.inlineLink}
+            onPress={() => setOsWidoczna((x) => !x)}
+            accessibilityRole="button"
+          >
+            <Text style={styles.cardAction}>{osWidoczna ? OS_UKRYJ : OS_POKAZ}</Text>
+          </TouchableOpacity>
+          {osWidoczna ? punkty.map((p) => (
+            <Text key={p.data} style={styles.osPunkt}>
+              {p.data}
+              {'  ·  '}
+              {liczbaPoPolsku(p.wartosc)}
+              {' '}
+              {p.jednostka}
+            </Text>
+          )) : null}
+        </>
+      ) : null}
+    </View>
+  );
+}
 
 function dayCodeFor(date: Date) {
   const idx = (date.getDay() + 6) % 7; // 0=Pon..6=Nd — ta sama konwencja co lib/date-utils.ts
@@ -625,7 +847,10 @@ export default function DzisScreen() {
     const todayStr = toLocalDateStr(new Date());
     const todayCode = dayCodeFor(new Date());
 
-    const [goalsRes, dziennikRes, recsRes, eventsRes, blocksRes, bolRes, zadaniaRes, userRes, diagRes, glosRes] = await Promise.all([
+    // ⭐ PLAN-D-B4 — TRZY NOWE ZAPYTANIA (`meczeRes`, `katalogRes`, `odcinkiRes`).
+    // Nadal JEDNA paczka `Promise.all`, więc kosztują jedną rundę sieci, nie trzy.
+    const [goalsRes, dziennikRes, recsRes, eventsRes, blocksRes, bolRes, zadaniaRes, userRes, diagRes, glosRes,
+      meczeRes, katalogRes, odcinkiRes] = await Promise.all([
       supabase.from('goals').select('id,segment_id,is_priority,status,created_at,origin,suggestion_note,refinement_note')
         .eq('user_id', currentUser.id).eq('status', 'active')
         .order('is_priority', { ascending: false }).order('created_at', { ascending: false }),
@@ -668,7 +893,12 @@ export default function DzisScreen() {
       // „nie wiem", czyli kolejka mówiłaby „lista jest niepełna" PRZY KAŻDYM
       // wejściu na ekran u każdego zawodnika — a to jest zdanie, które po
       // tygodniu przestaje cokolwiek znaczyć.
-      supabase.from('pain_entries').select('id,intensity,excludes_from_training,created_at')
+      // ⭐ PLAN-D-B4 — DOSZŁA JEDNA KOLUMNA `body_location`. ⚠️ To jest
+      // ROZSZERZENIE istniejącego zapytania, nie zapytanie nowe: wgląd WT-25
+      // („ten sam ból trzeci raz") grupuje zgłoszenia po miejscu, a bez tej
+      // kolumny musiałby zgadywać, czy trzy zgłoszenia to trzy razy to samo,
+      // czy trzy różne rzeczy.
+      supabase.from('pain_entries').select('id,body_location,intensity,excludes_from_training,created_at')
         .eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(20),
       // ⭐ PLAN-D-B2, NOWE ZAPYTANIE nr 2 — ZADANIA ZAWODNIKA. To jest wejście,
       // o które chodzi w całym etapie B i C: `player_tasks` (pas A4).
@@ -702,6 +932,32 @@ export default function DzisScreen() {
       // `isMissingOgraniczeniaColumnError`.
       supabase.from('weekly_voice').select(`week_start, voice, reason, spoke_at, ${KOLUMNA_OGRANICZEN}`)
         .eq('user_id', currentUser.id).eq('week_start', poniedzialekGlosu(new Date())).limit(1),
+      // ⭐ PLAN-D-B4, NOWE ZAPYTANIE nr 1 — KASKADA MECZOWA (WG-30, WG-34).
+      // ⚠️ ZMIERZONE 14.08.2026: `match_contexts` ma 2 wiersze, oba z 29.07,
+      // a próg osi to trzy mecze. Dziś ten wgląd ODDA `brak_danych` z powodem
+      // i tak ma być — oś trzech punktów narysowana z dwóch byłaby zmyśleniem.
+      supabase.from('match_contexts').select('id,created_at,match_rpe,entered_recovery_state')
+        .eq('user_id', currentUser.id).order('created_at', { ascending: false }),
+      // ⭐ PLAN-D-B4, NOWE ZAPYTANIE nr 2 — KATALOG PODPOWIEDZI (WT-26).
+      //
+      // ⛔ FILTR ODBIORCY JEST OBOWIĄZKOWY I NIE JEST OSTROŻNOŚCIĄ. Bez
+      // `odbiorca in ('zawodnik','oba')` wgląd powiedziałby zawodnikowi, że
+      // traci 18 podpowiedzi — a wszystkie 18 bramkowanych wiekiem ma
+      // `odbiorca='rodzic'` i NIGDY by ich nie zobaczył (znalezisko 10.9 noty
+      // B3, potwierdzone zapytaniem 14.08.2026: 0 z 274). To byłaby nieprawda
+      // o zawodniku przy zielonych testach, czyli dokładnie to, czego zakazuje Z0.
+      //
+      // ⚠️ JEDNO ZAPYTANIE NA DWIE LICZBY Z TRZECH: `podpowiedziRazem` to
+      // długość odpowiedzi, `podpowiedziZaBramkaWieku` to wiersze z `min_age`.
+      // Dwa osobne `count` byłyby dwoma zapytaniami po tę samą tabelę.
+      supabase.from('component_hints').select('min_age').in('odbiorca', ['zawodnik', 'oba']),
+      // ⭐ PLAN-D-B4, NOWE ZAPYTANIE nr 3 — ODCINKI MAPY DROGI (WT-26).
+      // ⚠️ `count: 'exact'` + `head: true` NIE ŚCIĄGA ANI JEDNEGO WIERSZA.
+      // Trzeciej liczby katalogu NIE DA SIĘ dołożyć do zapytania wyżej:
+      // `road_segments` nie ma relacji z `component_hints`, a PostgREST nie
+      // łączy tabel, między którymi relacji nie ma. Trzy liczby katalogu
+      // kosztują więc DWA zapytania — nie trzy i nie jedno.
+      supabase.from('road_segments').select('id', { count: 'exact', head: true }),
     ]);
 
     // PLAN-D-F 08.2026 — trzy różne powody, dla których tu może nic nie być:
@@ -875,6 +1131,72 @@ export default function DzisScreen() {
     const weZadania = odczytZadan({ data: zadaniaRes.data, error: zadaniaRes.error });
     console.log(`dzis: ${opisOdczytuDoLogu(weZadania)}`);
 
+    // ═══════════════════════════════════════════════════════════════
+    // ⬇⬇⬇ WEJŚCIA WGLĄDÓW — POCZĄTEK ⬇⬇⬇   (PLAN-D-B4, zadanie B4.2)
+    //
+    // ⛔ W TEJ SEKCJI TAKŻE NIE MA PRAWA PAŚĆ ANI JEDNO `?? []` ANI `|| []`.
+    // Producent wglądów rozróżnia `brak_danych` („odczytałem, nie ma z czego
+    // policzyć — oto próg i oto liczba") od `nie_wiem` („nie odczytałem, wgląd
+    // MÓGŁBY istnieć"). To rozróżnienie ginie w całości, jeżeli wołający sklei
+    // je tutaj — i ginie CICHO, bo obie gałęzie wyglądają na ekranie tak samo.
+    // Pilnuje tego asercja nr 3 w `lib/wgladyNaDzis.selftest.ts`.
+    //
+    // ⚠️ CZTERY Z SZEŚCIU WEJŚĆ NIE KOSZTUJĄ NOWEGO ZAPYTANIA: `dziennik`
+    // i `powiazania` jadą z `dziennikRes`, `kalendarz` z `eventsRes`, `bol`
+    // z `bolRes` (doszła jedna KOLUMNA). Nowe są dwa: `mecze` i `profil`.
+    // ═══════════════════════════════════════════════════════════════
+    const wgDziennik: Wejscie<WpisDziennikaWglad[]> =
+      wejscieZOdpowiedzi<WierszDziennika, WpisDziennikaWglad>(dziennikRes, 'dziennik (wglądy)', wpisDziennikaDlaWgladu);
+
+    const wgPowiazania: Wejscie<PowiazanieWpisu[]> =
+      wejscieZOdpowiedzi<WierszDziennika, PowiazanieWpisu>(dziennikRes, 'powiązania wpisów', powiazanieDlaWgladu);
+
+    const wgKalendarz: Wejscie<WydarzenieWglad[]> =
+      wejscieZOdpowiedzi<CalEvent, WydarzenieWglad>(eventsRes, 'kalendarz (wglądy)', wydarzenieDlaWgladu);
+
+    const wgBol: Wejscie<WpisBoluWglad[]> =
+      wejscieZOdpowiedzi<WierszBolu, WpisBoluWglad>(bolRes, 'ból (wglądy)', wpisBoluDlaWgladu);
+
+    const wgMecze: Wejscie<WpisMeczuWglad[]> =
+      wejscieZOdpowiedzi<WierszMeczu, WpisMeczuWglad>(meczeRes, 'mecze', meczDlaWgladu);
+
+    // PROFIL — TRZY ODPOWIEDZI, JEDNO WEJŚCIE, TRZY STANY.
+    // ⚠️ Błąd KTÓREJKOLWIEK z nich znaczy „nie wiem, ile Cię kosztuje brak
+    // rocznika", a NIE „nic Cię nie kosztuje". Różnica jest cała: przy zerowym
+    // skutku wgląd świadomie NIE POWSTAJE (nota B3 §3, wgląd 6), więc sklejenie
+    // błędu z zerem uciszyłoby go tak samo skutecznie — tylko po cichu.
+    const wgProfil: Wejscie<ProfilWglad> = (() => {
+      if (userRes.error) return { rodzaj: 'nie_wiem', powod: `profil: ${powodBledu(userRes.error)}` };
+      if (katalogRes.error) {
+        return { rodzaj: 'nie_wiem', powod: `katalog podpowiedzi: ${powodBledu(katalogRes.error)}` };
+      }
+      if (odcinkiRes.error) {
+        return { rodzaj: 'nie_wiem', powod: `odcinki Mapy drogi: ${powodBledu(odcinkiRes.error)}` };
+      }
+      if (!Array.isArray(katalogRes.data)) {
+        return { rodzaj: 'nie_wiem', powod: 'katalog podpowiedzi: odpowiedź bazy nie jest listą' };
+      }
+      // ⚠️ `count` z `head: true` bywa `null`, gdy PostgREST nie odda nagłówka.
+      // `null` to „nie policzyłem", a nie „zero odcinków" — a te dwie rzeczy
+      // dają PRZECIWNE wglądy (przy zerze odcinków rocznik nie zmienia nic).
+      if (typeof odcinkiRes.count !== 'number') {
+        return { rodzaj: 'nie_wiem', powod: 'odcinki Mapy drogi: baza nie oddała licznika' };
+      }
+      const katalog = katalogRes.data as unknown as WierszKatalogu[];
+      return {
+        rodzaj: 'jest',
+        dane: {
+          // Ten sam `birthYear`, którym karmimy bramkę wiekową wyżej — jedno
+          // źródło rocznika, więc bramka i wgląd nie mogą się rozjechać.
+          rokUrodzenia: userRes.error ? null : birthYear,
+          podpowiedziZaBramkaWieku: katalog.filter((r) => r.min_age !== null).length,
+          podpowiedziRazem: katalog.length,
+          odcinkowMapyDrogi: odcinkiRes.count,
+        },
+      };
+    })();
+    // ⬆⬆⬆ WEJŚCIA WGLĄDÓW — KONIEC ⬆⬆⬆
+
     setDane({
       wejscia: {
         dzis: todayStr,
@@ -894,6 +1216,15 @@ export default function DzisScreen() {
         e.scheduled_date === todayStr
         || (!!e.recurrence_rule && e.recurrence_rule.replace('weekly:', '').split(',').includes(todayCode))
       ),
+      // ⭐ PLAN-D-B4 — sześć wejść producenta wglądów, każde w trzech stanach.
+      wejsciaWgladow: {
+        dziennik: wgDziennik,
+        kalendarz: wgKalendarz,
+        powiazania: wgPowiazania,
+        bol: wgBol,
+        mecze: wgMecze,
+        profil: wgProfil,
+      },
     });
     // ⬆⬆⬆ WEJŚCIA KOLEJKI — KONIEC ⬆⬆⬆
   }, [currentUser, markShownAsViewed, loadHint, loadNewDose]);
@@ -1055,6 +1386,24 @@ export default function DzisScreen() {
   // z kluczem śladu `rekomendacja` — który B1 przewidział w swojej liście
   // kluczy. Karta jest wtedy CIAŁEM pozycji nr 1, a nie drugim producentem:
   // jej miejsce ustala ranker.
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-B4 (14.08.2026), zadanie B4.2 — SZEŚĆ WGLĄDÓW, JEDNO WYWOŁANIE.
+  //
+  // `policzWglady` jest CZYSTĄ FUNKCJĄ: nie czyta bazy, nie czyta zegara,
+  // nie ma pamięci między dniami. Wszystko, czego potrzebuje, przyszło już
+  // z `load()`. Dlatego stoi w `useMemo`, a nie w `load()` — liczenie sześciu
+  // wglądów przy każdym przemalowaniu ekranu byłoby marnotrawstwem, a liczenie
+  // ich w `load()` wiązałoby wynik z odczytem bazy bez żadnego powodu.
+  //
+  // ⛔ JEDEN ARGUMENT. Drugi (`ZasadyWgladow`) istnieje WYŁĄCZNIE dla strażnika
+  // mutacyjnego pasa B3 — podany stąd znaczyłby, że ekran ma własną, schowaną
+  // kopię reguł liczenia wglądów.
+  // ═══════════════════════════════════════════════════════════════════
+  const wglady = useMemo<WynikiWgladow | null>(() => {
+    if (dane === null) return null;
+    return policzWglady({ dzis: dane.wejscia.dzis, ...dane.wejsciaWgladow });
+  }, [dane]);
+
   const kolejka = useMemo<Kolejka | null>(() => {
     if (dane === null) return null;
 
@@ -1115,10 +1464,23 @@ export default function DzisScreen() {
       });
     }
 
+    // ⭐ (3) SZEŚĆ WGLĄDÓW — TO JEST CAŁE WPIĘCIE PASA B4. Jedno pole.
+    //
+    // ⛔ ZERO FILTROWANIA PRZED RANKEREM. Wgląd, który ranker wyciszy (Osłona,
+    // kontuzja, ścieżka wyjścia), ma zostać WIDOCZNY, wyszarzony, z powodem
+    // milczenia i warunkiem powrotu — to jest WG-32. `.filter()` w tym miejscu
+    // skasowałby go po cichu, czyli zrobiłby dokładnie to, czego WG-32 zakazuje,
+    // i zrobiłby to niewidocznie dla testów, bo lista byłaby po prostu krótsza.
+    //
+    // ⚠️ Kandydat wglądu ma wagę bazową 300 — NAJNIŻSZĄ ze wszystkich źródeł.
+    // To jest decyzja pasa B1, nie tego pasa: wgląd stoi POD rzeczami, które
+    // zawodnik ma dziś zrobić. Skutek jest zmierzony i opisany w nocie B4 §4.
+    if (wglady !== null) dodatkowi.push(...wglady.kandydaci);
+
     // ⛔ JEDEN ARGUMENT. Drugi (`Zasady`) jest wyłącznie dla strażnika
     // mutacyjnego rankera i dla pasa B3 — kontrakt B1 §8.1.
     return ulozKolejke({ ...dane.wejscia, jednaOdpowiedz: odpowiedz, dodatkowi });
-  }, [dane, odpowiedz, focusRec, brakWpisuDzis]);
+  }, [dane, odpowiedz, focusRec, brakWpisuDzis, wglady]);
 
   // ⛔ EKRAN NIE WYBIERA, KTÓRE POZYCJE POKAZAĆ. `wezDlaWidoku` wydaje PREFIKS
   // kolejki (dziś: 4 pozycje) i to jest cała rola tego wiersza.
@@ -1127,6 +1489,23 @@ export default function DzisScreen() {
   // przypomnienia byłyby nadal listą przypomnień.
   const pozycjeNaDzis = kolejka === null ? [] : wezDlaWidoku(kolejka, 'dzis');
   if (kolejka !== null) console.log(`dzis: ${kolejka.powod}`);
+
+  // ⭐ PLAN-D-B4 — `wglady.brakDanych` IDZIE DO KONSOLI, NIE NA EKRAN.
+  // To są zdania o STANIE NASZYCH DANYCH („2 pomiary ciężkości, próg 3"),
+  // czyli o nas, a nie o zawodniku — dokładnie ta klasa zdań, którą pas T
+  // zdjął z tego ekranu. Zawodnik dostaje z tego JEDNĄ rzecz: informację,
+  // że lista jest niepełna (`KOLEJKA_NIEPELNA` niżej), i to tylko wtedy, gdy
+  // czegoś naprawdę NIE ODCZYTALIŚMY — a nie wtedy, gdy odczyt się udał
+  // i danych po prostu nie ma.
+  if (wglady !== null) {
+    console.log(`dzis: ${wglady.powod}`);
+    for (const b of wglady.brakDanych) {
+      console.log(`dzis: wgląd „${b.klucz}" się nie policzył — ${b.powod}`);
+    }
+    for (const n of wglady.nieWiem) {
+      console.error(`dzis: wgląd nieodczytany — ${n.wejscie}: ${n.powod}`);
+    }
+  }
 
   // ⚠️ ROZRÓŻNIENIE R5 NIE ZGINĘŁO — ZESZŁO DO KONSOLI. „Nie ma tabeli",
   // „błąd odczytu" i „pusto" to nadal trzy różne rzeczy i nadal da się je
@@ -1432,6 +1811,23 @@ export default function DzisScreen() {
                         </View>
                       ) : null}
 
+                      {/* ── ⭐ TRZECIA CZĘŚĆ WGLĄDU: JEDNA RZECZ DO ZROBIENIA ── */}
+                      {/* ⛔ TO JEST NAJWAŻNIEJSZA LINIA PASA B4.
+                          `Kandydat` ma DWA pola tekstowe (`co`, `dlaczego`),
+                          a wgląd ma TRZY części: liczbę, znaczenie i JEDNĄ
+                          RZECZ DO ZROBIENIA. Trzecia nie mieści się w pozycji
+                          kolejki i wychodzi WYŁĄCZNIE przez `wgladDlaPozycji()`.
+                          Bez tego wywołania sześć wglądów kończy się NA WIEDZY —
+                          czyli łamie M4 („żaden materiał nie kończy się na
+                          wiedzy"), dziś złamane w 114 z 297 podpowiedzi.
+                          ⚠️ TO NIE JEST NOWA KARTA. Stoi WEWNĄTRZ tej pozycji,
+                          pod jej „dlaczego", dokładnie tak samo jak część
+                          „co to zmieni" niżej. Pozycja, która nie jest wglądem,
+                          dostaje `null` i nie rysuje się nic. */}
+                      {wglady !== null ? (
+                        <WgladPozycji wglad={wgladDlaPozycji(wglady, p.id)} />
+                      ) : null}
+
                       {/* ── CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM ─ */}
                       {/* ⛔ Tej części NIE DA SIĘ zbudować bez źródła: pilnuje
                           tego typ `CoToZmieni` w lib/jednaOdpowiedz.ts, nie ten
@@ -1450,7 +1846,15 @@ export default function DzisScreen() {
 
                   {/* ⚠️ LISTA NIEPEŁNA MÓWI O SOBIE. Skrócona po cichu wygląda
                       identycznie jak pełna — i to jest cały problem. */}
-                  {kolejka.niepelna ? (
+                  {/* ⭐ PLAN-D-B4 — TO SAMO ZDANIE MÓWI TERAZ TAKŻE O WGLĄDACH.
+                      `wglady.niepelna` znaczy, że któregoś z sześciu wejść
+                      producenta NIE UDAŁO SIĘ ODCZYTAĆ — a wtedy lista jest
+                      krótsza, niż powinna, i zawodnik ma o tym wiedzieć.
+                      ⛔ Nie dokładamy drugiego zdania: dwa zdania o tej samej
+                      rzeczy („lista jest niepełna") to dwa producenty tej samej
+                      informacji. `brakDanych` tu NIE WCHODZI — odczyt się
+                      wtedy udał i lista jest pełna, tylko krótka. */}
+                  {kolejka.niepelna || (wglady !== null && wglady.niepelna) ? (
                     <Text style={styles.kolejkaNiepelna}>{KOLEJKA_NIEPELNA}</Text>
                   ) : null}
                 </>
@@ -1640,6 +2044,18 @@ const styles = StyleSheet.create({
     ...typography.body, fontSize: 12, lineHeight: 18, color: colors.textTertiary,
     marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border,
   },
+  // ⭐ PLAN-D-B4 — TRZECIA CZĘŚĆ WGLĄDU.
+  // ⚠️ Te same wartości co `odpowiedzCzesc`: kreska u góry zamiast własnej
+  // ramki, bo to jest CZĘŚĆ TEJ POZYCJI, a nie kafelek pod nią. Zawodnik ma
+  // przeczytać „to należy do tego wglądu", nie „doszła kolejna karta".
+  wgladCzesc: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  // Rzecz do zrobienia jest CZYNNOŚCIĄ, więc waży tyle, co treść, a nie tyle,
+  // co przypis. Wgląd, którego trzecia część wygląda jak stopka, kończy się
+  // na wiedzy mimo że formalnie ją ma (M4).
+  wgladDoZrobienia: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary },
+  // WG-34 — punkt osi: data i liczba, nic więcej. ⛔ Bez wykresu i bez
+  // strzałek: „rośnie" jest interpretacją, a trzy daty z liczbami są pomiarem.
+  osPunkt: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary },
   // WIEDZA B4 08.08.2026 — PODPOWIEDŹ Z MATERIAŁU.
   // ⚠️ PLAN-D-T 08.2026 — od tej rundy `hintBox` rysuje WYŁĄCZNIE treść
   // ZAWSZE WIDOCZNĄ (bezpieczeństwo, m.in. telefon zaufania). Podpowiedź dnia

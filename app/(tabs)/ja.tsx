@@ -108,6 +108,23 @@ import { MAPA_ENTRY_LABEL, MAPA_ENTRY_HINT_DOSTEPNA } from '../../lib/mapaDrogi'
 // nawiguje już nigdzie i ta zakładka nie ma czego otwierać z parametru.
 import SciezkaWyjscia from '../../components/SciezkaWyjscia';
 import { WYJSCIE_WEJSCIE_LABEL, WYJSCIE_WEJSCIE_PODPIS } from '../../lib/sciezkaWyjscia';
+// ⭐ PLAN-D-C2 08.2026 (14.08.2026) — LISTA „MOJE ZADANIA" (WT-19).
+//
+// Pełnoekranowy modal, NIE nowa trasa w `app/(tabs)/` — ten sam wzorzec i ten
+// sam powód co przy Mapie drogi i Ścieżce wyjścia: nagłówek `_layout.tsx` mówi
+// wprost, że nowy plik w tym katalogu bez wpisu `href: null` wraca jako PIĄTA
+// ZAKŁADKA, a wpisu w `_layout.tsx` ten pas zrobić nie może (zasada A1).
+// Pełne uzasadnienie w nagłówku `components/ListaZadan.tsx`.
+//
+// ⚠️ TEN EKRAN NIE LICZY KOLEJKI. Kolejność i kubełki liczy ranker
+// (`lib/kolejkaPodania.ts`) — i to WEWNĄTRZ modala, nie tutaj. Stąd idzie
+// wyłącznie jedno: cztery stany odczytu `player_tasks`, żeby podpis wejścia
+// odróżniał „nie masz zadań" od „nie dostałem Twoich zadań" (R5). Bez tego
+// wiersz miałby opis na sztywno, czyli ten sam defekt, który 10.08 poprawiono
+// przy „Wyniku diagnozy".
+import ListaZadan from '../../components/ListaZadan';
+import { odczytZadan, SELECT_ZADANIA, TABELA_ZADAN, type OdczytZadan } from '../../lib/zadania';
+import { WEJSCIE_LISTA_LABEL, zdanieOdczytu } from '../../lib/listaZadan';
 import { otworzPunktPomocy } from '../../components/PunktPomocy';
 import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
 
@@ -140,13 +157,23 @@ export default function JaScreen() {
   // Otwarcie ekranu nie jest zdarzeniem o zawodniku i nie zostawia śladu;
   // ścieżkę wyjścia włącza dopiero jawne potwierdzenie w środku modala.
   const [wyjscieOtwarte, setWyjscieOtwarte] = useState(false);
+  // PLAN-D-C2 08.2026 — lista zadań. Stan lokalny, ZERO zapisu przy otwarciu:
+  // otwarcie listy nie jest zdarzeniem o zawodniku i nie zostawia śladu.
+  const [zadaniaOtwarte, setZadaniaOtwarte] = useState(false);
+  // ⚠️ CZTERY STANY, NIE DWA. `null` znaczy „jeszcze nie czytałem", a nie
+  // „nie masz zadań" — podpis wejścia startuje wtedy pusty zamiast kłamać.
+  const [odczytZadanStan, setOdczytZadanStan] = useState<OdczytZadan | null>(null);
 
   const load = useCallback(async () => {
     if (!currentUser) return;
 
-    // Pięć zapytań równolegle, żadne nie czeka na inne — ten sam wzorzec
+    // Sześć zapytań równolegle, żadne nie czeka na inne — ten sam wzorzec
     // co `load()` na ekranie Dziś. Każde z nich to WYŁĄCZNIE odczyt.
-    const [diagRes, profileRes, unreadRes, actionableRes, goalsRes] = await Promise.all([
+    // ⚠️ PLAN-D-C2 14.08.2026 — szóste zapytanie doszło razem z wejściem
+    // „Moje zadania". Zmierzone: `player_tasks` = 0 wierszy, więc jego koszt
+    // jest dziś zerowy, a bez niego podpis wejścia nie odróżniłby czterech
+    // stanów R5 i musiałby stać na sztywnym zdaniu.
+    const [diagRes, profileRes, unreadRes, actionableRes, goalsRes, zadaniaRes] = await Promise.all([
       // `diagnostics` to log zdarzeń, nie jeden wiersz na diagnozę — filtr
       // `event='email_submitted'` jest konieczny (ten sam co w diagnoza.tsx).
       supabase.from('diagnostics').select('scores')
@@ -168,6 +195,10 @@ export default function JaScreen() {
       // `status='active'` przeniesiony do bazy. Było: wszystkie cele zawodnika,
       // filtrowane w appce tylko po to, żeby policzyć aktywne.
       supabase.from('goals').select('segment_id').eq('user_id', currentUser.id).eq('status', 'active'),
+      // PLAN-D-C2 08.2026 — zadania zawodnika. ⛔ CAŁA odpowiedź idzie do
+      // `odczytZadan`, nie `data ?? []`: „nie udało się odczytać" i „nic nie
+      // masz" to dwie różne rzeczy i tylko jedna z nich jest o zawodniku.
+      supabase.from(TABELA_ZADAN).select(SELECT_ZADANIA).eq('user_id', currentUser.id),
     ]);
 
     // WIEDZA B4 08.08.2026 — segmenty aktywnych Celów: podpis przy „Cele"
@@ -220,6 +251,9 @@ export default function JaScreen() {
 
     // ─── Licznik biblioteki (ZMIANA OBRAZU B5 08.08.2026) ─────────
     setLibraryCount(unlockedMaterials({ goalSegmentIds, deficitSegmentIds }).length);
+
+    // ─── Cztery stany odczytu zadań (PLAN-D-C2 14.08.2026) ────────
+    setOdczytZadanStan(odczytZadan({ data: zadaniaRes.data, error: zadaniaRes.error }));
   }, [currentUser]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -356,6 +390,14 @@ export default function JaScreen() {
               długoterminowych i cicho zmieniać to, co podpowiada. */}
           {renderRow('/centrum-decyzji', 'Wszystkie rekomendacje', recsHint, unreadRecs > 0)}
           {renderRow('/cele', 'Cele', goalsHint)}
+          {/* ⭐ PLAN-D-C2 08.2026 — WT-19. Stoi POD „Celami" i NAD biblioteką:
+              lista jest rzeczą do zrobienia, a biblioteka treścią do czytania
+              (o kolejności biblioteki mówi komentarz niżej, z rundy B5).
+              ⚠️ Podpis pochodzi z CZTERECH STANÓW odczytu — dopóki nie
+              czytaliśmy, jest pusty, a nie zmyślony. */}
+          {renderRowRaw('moje-zadania', WEJSCIE_LISTA_LABEL,
+            odczytZadanStan === null ? '' : zdanieOdczytu(odczytZadanStan),
+            () => setZadaniaOtwarte(true))}
           {/* ZMIANA OBRAZU B5 08.08.2026 — wejście do biblioteki. Stoi jako
               ostatnie w „Twoim rozwoju": to jest treść do czytania, a nie
               rzecz, po którą zawodnik wchodzi tu codziennie. */}
@@ -407,6 +449,14 @@ export default function JaScreen() {
       <SciezkaWyjscia
         visible={wyjscieOtwarte}
         onClose={() => setWyjscieOtwarte(false)}
+        userId={currentUser?.id ?? null}
+      />
+      {/* PLAN-D-C2 08.2026 — lista zadań. Poza ScrollView, bo to modal,
+          nie treść. ⚠️ Po zamknięciu odświeżamy podpis wejścia: zawodnik mógł
+          w środku coś odhaczyć i wiersz nie ma prawa pokazywać starego stanu. */}
+      <ListaZadan
+        visible={zadaniaOtwarte}
+        onClose={() => { setZadaniaOtwarte(false); load(); }}
         userId={currentUser?.id ?? null}
       />
     </SafeAreaView>
