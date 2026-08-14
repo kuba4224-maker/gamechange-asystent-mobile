@@ -74,3 +74,79 @@ export function journalSavedMessage(linkedToBlockSession: boolean): string {
     ? 'Zapisano. Sesja doliczona do paska Twojego Celu ✓'
     : 'Zapisano.';
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PLAN-D-A1 08.2026 — ZNACZNIK WYKONANIA SESJI
+//
+// Zmierzone 14.08.2026 na żywej bazie: `calendar_events_status_check`
+// dopuszczał WYŁĄCZNIE 'scheduled' i 'cancelled', więc `status='completed'`
+// był w tej bazie NIEMOŻLIWY (błąd 23514). Zasada P3 nazywa skutek: „nie
+// liczymy »zrobione« z pola, którego nikt nie zapisuje".
+//
+// ⛔ TO NIE JEST DRUGI TOR ZALICZANIA SESJI. Nośnikiem prawdy pozostaje
+// `daily_logs.calendar_event_id` — licznik liczy z powiązania, tak jak dziś.
+// `status='completed'` jest POCHODNĄ tego powiązania i istnieje po to, żeby
+// kalendarz i cron widziały to samo, co widzi licznik. Gdyby kiedykolwiek
+// rozjechało się jedno z drugim, prawdą jest powiązanie.
+//
+// Decyzja jest czysta (bez Supabase), żeby dała się sprawdzić bez appki.
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Wydarzenie w oknie pickera — tyle, ile potrzeba do decyzji o znaczniku. */
+export type CompletionCandidate = { id: number; focusBlockId: string | null };
+
+export type CompletionDecision =
+  | { oznacz: true; eventId: number }
+  | { oznacz: false; powod: 'wpis-poranny' | 'brak-powiazania' | 'wydarzenie-spoza-bloku' };
+
+/**
+ * Czy ten wpis Dziennika ma postawić `status='completed'` na wydarzeniu — i na którym.
+ *
+ * Świadome decyzje:
+ *  • wpis PORANNY nigdy nie zalicza sesji (kontrakt Dziennika, sekcja 1) —
+ *    to samo rozstrzygnięcie, które ma render pytania;
+ *  • bez powiązania nie ma czego oznaczać — zawodnik nie wskazał wydarzenia;
+ *  • wydarzenie spoza Bloku (`focusBlockId == null`) też się nie oznacza:
+ *    licznik „N z M" liczy wyłącznie sesje Bloku, a znacznik ma odpowiadać
+ *    licznikowi, nie wyprzedzać go o własne znaczenie.
+ */
+export function decideSessionCompletion(params: {
+  entryType: 'morning' | 'post_training';
+  calendarLinkId: string;
+  options: CompletionCandidate[];
+}): CompletionDecision {
+  const { entryType, calendarLinkId, options } = params;
+  if (entryType !== 'post_training') return { oznacz: false, powod: 'wpis-poranny' };
+  if (!calendarLinkId) return { oznacz: false, powod: 'brak-powiazania' };
+  const wybrane = options.find((o) => String(o.id) === calendarLinkId);
+  if (!wybrane || wybrane.focusBlockId == null) return { oznacz: false, powod: 'wydarzenie-spoza-bloku' };
+  return { oznacz: true, eventId: wybrane.id };
+}
+
+/**
+ * Zdanie do KONSOLI, gdy postawienie znacznika się nie udało.
+ *
+ * ⚠️ To NIE jest treść dla zawodnika i nigdy nie ma nią być: dla niego wpis
+ * się zapisał i to jest prawda — powiązanie, z którego liczy się pasek, leży
+ * już w bazie. Ale porażka nie może być cicha (R5, zakaz 9): defekt niewidoczny
+ * dla autora jest defektem, którego nikt nie naprawi.
+ */
+export function completionFailureLog(eventId: number, powod: string): string {
+  return `[PLAN-D-A1] Wpis zapisany, ale nie udało się postawić status='completed' `
+    + `na calendar_events.id=${eventId}: ${powod}. `
+    + `Licznik liczy z daily_logs.calendar_event_id i jest NIENARUSZONY.`;
+}
+
+/**
+ * Zdanie do KONSOLI, gdy `update` przeszedł bez błędu, ale nie dotknął ani
+ * jednego wiersza. Zmierzone 14.08.2026: polityka `calendar_events_update_own`
+ * ma warunek `user_has_active_access(auth.uid())`, więc zawodnikowi bez
+ * aktywnego dostępu PostgREST odpowie sukcesem i pustą listą — czyli
+ * dokładnie tak, jak wygląda powodzenie. To jest „cichy brak" w czystej
+ * postaci i dlatego ma własne zdanie.
+ */
+export function completionNoRowsLog(eventId: number): string {
+  return `[PLAN-D-A1] update status='completed' na calendar_events.id=${eventId} `
+    + `nie zmienił ANI JEDNEGO wiersza (najczęściej RLS: calendar_events_update_own `
+    + `wymaga user_has_active_access). Wpis i powiązanie zapisane.`;
+}

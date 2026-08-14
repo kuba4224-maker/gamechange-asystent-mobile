@@ -459,8 +459,15 @@ export default function DzisScreen() {
       supabase.from('decision_recommendations').select(RECOMMENDATION_COLUMNS)
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: false }),
+      // ⚠️ PLAN-D 14.08.2026 — WARUNEK WSTĘPNY MIGRACJI A1, NIE KOSMETYKA.
+      // Do 14.08.2026 stało tu `.eq('status', 'scheduled')`.
+      // Pas A1 rozszerza `calendar_events_status_check` o wartość `'completed'`.
+      // Gdyby ten filtr został przy `'scheduled'`, PIERWSZA sesja oznaczona jako
+      // wykonana WYPADŁABY Z MIANOWNIKA licznika „N z M sesji" — czyli licznik
+      // MALAŁBY DOKŁADNIE WTEDY, GDY ZAWODNIK PRACUJE. Odwrócenie sensu.
+      // Ta linia MUSI być wdrożona PRZED migracją A1 (kolejność zmierzona 14.08).
       supabase.from('calendar_events').select('id,title,event_type,scheduled_date,recurrence_rule,focus_block_id')
-        .eq('user_id', currentUser.id).eq('status', 'scheduled'),
+        .eq('user_id', currentUser.id).in('status', ['scheduled', 'completed']),
       // WIEDZA B4 08.08.2026 — doszło `component_id` (Element Bloku Skupienia),
       // żeby podpowiedź dało się wycelować w to, nad czym zawodnik pracuje.
       supabase.from('focus_blocks').select('id,segment_id,status,component_id')

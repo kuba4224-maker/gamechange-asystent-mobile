@@ -128,7 +128,16 @@ export default function RecommendationCard({
   const isReferral = rec.recommendation_type === 'specialist_referral';
   const isPositionSignal = rec.recommendation_type === 'position_fit_signal';
   const isReferralCard = isReferral || isPositionSignal;
-  const toneBadge = rec.confidence_tone === 'questioning';
+  // ⚠️ ODZNAKA „ton pytający" USUNIĘTA 14.08.2026 (PLAN-D, decyzja Kuby).
+  // Do 13.08.2026 stało tu: `const toneBadge = rec.confidence_tone === 'questioning';`
+  // a niżej dwa miejsca renderowały napis „ton pytający".
+  // POWÓD USUNIĘCIA: pas S skasował gałąź `questioning` w api/generate-recommendation.js,
+  // która jako jedyna ustawiała tę wartość. Kolumna `decision_recommendations.confidence_tone`
+  // jest NOT NULL DEFAULT 'assertive' (zmierzone na żywej bazie 13.08.2026), więc warunek
+  // `=== 'questioning'` od tamtego dnia NIGDY się nie spełniał — odznaka była martwa.
+  // Sama odznaka mówiła zawodnikowi, że system jest mniej pewny, BO ZAWODNIK DWA RAZY ODMÓWIŁ.
+  // To jest dokładnie ta miękkość, którą pas S usunął z promptów (zasada M1).
+  // ⛔ KOLUMNA W BAZIE ZOSTAJE — jej kasowanie to migracja bez zysku (decyzja Kuby 14.08.2026).
 
   let headerNode: ReactNode = null;
   let actionNode: ReactNode;
@@ -143,13 +152,12 @@ export default function RecommendationCard({
     if (rec.weekly_focus_text) {
       headerNode = (
         <Text style={styles.focusText}>
-          {rec.weekly_focus_text}{toneBadge ? <Text style={styles.toneBadge}>  ton pytający</Text> : null}
+          {rec.weekly_focus_text}
         </Text>
       );
     }
     actionNode = (
       <Text style={styles.actionText}>
-        {!rec.weekly_focus_text && toneBadge ? <Text style={styles.toneBadge}>ton pytający  </Text> : null}
         <Text style={{ fontWeight: '700' }}>Co teraz: </Text>{rec.recommendation_text}
       </Text>
     );
@@ -255,7 +263,6 @@ const styles = StyleSheet.create({
   pillarLine: { fontSize: 11, color: colors.textSecondary, marginBottom: 8 },
   focusText: { ...typography.display, fontSize: 18, color: colors.textPrimary, marginBottom: 10 },
   actionText: { ...typography.body, fontSize: 15, color: colors.textPrimary, marginBottom: 10 },
-  toneBadge: { fontSize: 11, letterSpacing: 0.5, color: colors.textPrimary, backgroundColor: colors.surfaceElevated, borderRadius: radii.sm, paddingHorizontal: 6, overflow: 'hidden' },
   rationale: { fontSize: 13, color: colors.textSecondary, marginBottom: 12 },
   specialistLink: { alignSelf: 'flex-start', marginTop: 10, marginBottom: 4, minHeight: minTouchHeight, justifyContent: 'center', paddingHorizontal: 18, borderWidth: 1, borderColor: colors.brand, borderRadius: radii.md },
   specialistLinkText: { ...typography.bodyMedium, fontSize: 13, color: colors.brand, letterSpacing: 0.5 },

@@ -102,6 +102,21 @@ import {
   KOMUNIKAT_WYGASNIECIA,
   type StanDostepu,
 } from '../../lib/dostepKonta';
+// PLAN-D-A2A3 08.2026 (14.08.2026) — PLAN LEKCJI.
+// ⚠️ Ten ekran NIE rysuje tygodnia i nie liczy progu „ciasno" — widok tygodnia
+// jest osobnym pasem (C1). Tutaj jest wyłącznie miejsce, w którym zawodnik podaje
+// godziny szkoły, bo bez nich pasek zajętości nie ma z czego powstać.
+// ⚠️ Rozróżnienie „nie podał planu" (NIE_WIEM) od „podał i tego dnia nie ma
+// szkoły" (WOLNE) robi `lib/planLekcji.ts` i NIE WOLNO go tu odtwarzać drugi
+// raz — to jest reguła R5 i druga implementacja znaczy rozjazd.
+import {
+  parsujPlanLekcji,
+  oknoDnia,
+  zbudujOknaDoZapisu,
+  isoDzienTygodnia,
+  type PlanTygodnia,
+  type WierszPlanuLekcji,
+} from '../../lib/planLekcji';
 
 // ── Stałe — 1:1 z asystent_app.html (kontrakt, sekcje 1-4) ──
 const POSITIONS = [
@@ -148,6 +163,33 @@ const INJURY_MODE_CATEGORY_LABELS: Record<string, string> = {
 // profil.tsx) — treść niezmieniona co do znaku, porównana maszynowo.
 
 const STAGE_COUNT = 5;
+
+// PLAN-D-A2A3 08.2026 — dni tygodnia w numeracji ISO-8601 (1 = poniedziałek),
+// TEJ SAMEJ, którą trzyma `player_school_slots.weekday` i którą zwraca
+// `extract(isodow from date)` w bazie. JavaScript liczy inaczej (`getDay()`:
+// 0 = niedziela) i przeliczenie stoi w JEDNYM miejscu — `lib/planLekcji.ts`,
+// `isoDzienTygodnia`. Dwa przeliczenia = szkoła w niedzielę i nikt nie wie dlaczego.
+const DNI_TYGODNIA: Array<[number, string]> = [
+  [1, 'Poniedziałek'], [2, 'Wtorek'], [3, 'Środa'], [4, 'Czwartek'],
+  [5, 'Piątek'], [6, 'Sobota'], [7, 'Niedziela'],
+];
+
+// Brzmienie WPROST Z MAKIETY `claude/MAKIETA_WIDOK_TYGODNIA.html` (kolumna 3,
+// pustka „brak konfiguracji"). Nie jest przepisane ani skrócone.
+const PLAN_LEKCJI_PUSTKA = 'Nie wiemy, kiedy masz szkołę — dlatego cały tydzień wygląda na wolny.';
+
+type WierszFormularzaPlanu = { weekday: number; od: string; do_: string };
+
+const PUSTY_FORMULARZ_PLANU: WierszFormularzaPlanu[] =
+  DNI_TYGODNIA.map(([weekday]) => ({ weekday, od: '', do_: '' }));
+
+/** Poniedziałek tygodnia, w którym jest podana data — w czasie LOKALNYM. */
+function poniedzialekTygodnia(dzis: Date): Date {
+  const iso = isoDzienTygodnia(toLocalDateStr(dzis)) ?? 1;
+  const p = new Date(dzis);
+  p.setDate(dzis.getDate() - (iso - 1));
+  return p;
+}
 
 type InjuryRow = {
   id: number;
@@ -225,6 +267,21 @@ export default function ProfilScreen() {
   // — patrz komentarz na górze pliku.
   const [teamCodeInput, setTeamCodeInput] = useState('');
   const [savingTeamCode, setSavingTeamCode] = useState(false);
+
+  // Sekcja 2e — Plan lekcji (PLAN-D-A2A3 08.2026, 14.08.2026). Formularz
+  // NIEZALEŻNY od zapisu etapu, ten sam wzorzec co Wzrost / Raport dla rodzica
+  // / Kod drużyny. Zapis idzie JEDNYM wywołaniem `set_school_timetable` —
+  // atomowo, bo nagłówek bez okien znaczy w bazie „nie mam szkoły w żaden
+  // dzień", więc zerwane połączenie w połowie zapisu skłamałoby o zawodniku.
+  const [planLekcji, setPlanLekcji] = useState<WierszFormularzaPlanu[]>(PUSTY_FORMULARZ_PLANU);
+  const [savingPlanLekcji, setSavingPlanLekcji] = useState(false);
+  // `null` znaczy „jeszcze nie pytałem" — trzeci stan obok „wiem" i „nie udało
+  // się odczytać". Ten sam wzorzec co `stanDostepu` wyżej.
+  const [stanPlanuLekcji, setStanPlanuLekcji] = useState<PlanTygodnia | null>(null);
+  // Plan z okienkiem (dwa okna jednego dnia) jest w bazie POPRAWNY, a ten
+  // formularz ma jedno pole „od–do" na dzień. Zapis z niego SKASOWAŁBY drugie
+  // okno po cichu — więc przy takim planie formularz się nie włącza.
+  const [planLekcjiZOkienkami, setPlanLekcjiZOkienkami] = useState(false);
 
   // Sekcja 3
   const [goalDirection, setGoalDirection] = useState('');
@@ -352,6 +409,47 @@ export default function ProfilScreen() {
     });
     return () => { mounted = false; };
   }, [currentUser]);
+
+  // PLAN-D-A2A3 08.2026 (14.08.2026) — ODCZYT PLANU LEKCJI.
+  //
+  // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE, poza paczką w `loadProfile`: gdyby
+  // funkcja `school_week` nie istniała (migracja jeszcze nie wklejona) albo
+  // padła, cały ekran Profilu ma działać dalej. Ten sam wzorzec co odczyt
+  // stanu dostępu wyżej.
+  // ⚠️ Nieudany odczyt daje `parsujPlanLekcji(null)`, czyli `odczytany: false`
+  // — a to jest COŚ INNEGO niż „zawodnik nie podał planu". Ekran, który by je
+  // skleił, wysłałby do pustego formularza kogoś, kto już wszystko wpisał.
+  const wczytajPlanLekcji = useCallback(async () => {
+    if (!currentUser) return;
+    const odKiedy = toLocalDateStr(poniedzialekTygodnia(new Date()));
+    const { data, error } = await supabase.rpc('school_week', { p_from: odKiedy });
+    if (error) {
+      // ⚠️ Nieudany odczyt NIE UDAJE pustego planu. `parsujPlanLekcji(null)`
+      // daje `odczytany: false`, więc ekran powie „nie udało się odczytać",
+      // a nie „nie wiemy, kiedy masz szkołę" komuś, kto już wszystko wpisał.
+      console.warn('[PLAN-D-A2A3] nie odczytałem planu lekcji:', error.message);
+      setStanPlanuLekcji(parsujPlanLekcji(null));
+      return;
+    }
+    const plan = parsujPlanLekcji((data ?? []) as WierszPlanuLekcji[]);
+    setStanPlanuLekcji(plan);
+
+    // Wypełnienie formularza tym, co NAPRAWDĘ obowiązuje w tym tygodniu.
+    let sokienka = false;
+    const wiersze = DNI_TYGODNIA.map(([weekday]) => {
+      const dzien = Object.keys(plan.dni).find((d) => isoDzienTygodnia(d) === weekday);
+      // Brak daty dla tego dnia tygodnia → `oknoDnia` odpowiada NIE_WIEM.
+      // Nie budujemy tu drugiego stanu „domyślnego" obok tamtego.
+      const okno = oknoDnia(plan, dzien ?? '');
+      if (okno.stan !== 'SZKOLA') return { weekday, od: '', do_: '' };
+      if (okno.okna.length > 1) sokienka = true;
+      return { weekday, od: okno.okna[0].poczatek, do_: okno.okna[0].koniec };
+    });
+    setPlanLekcjiZOkienkami(sokienka);
+    setPlanLekcji(wiersze);
+  }, [currentUser]);
+
+  useEffect(() => { wczytajPlanLekcji(); }, [wczytajPlanLekcji]);
 
   // AUDYT 06.08.2026 — odczyt lokalnie zapamiętanego adresu rodzica (patrz wyżej).
   useEffect(() => {
@@ -566,6 +664,51 @@ export default function ProfilScreen() {
       setProfileError('Nie udało się dołączyć do drużyny: ' + e.message);
     } finally {
       setSavingTeamCode(false);
+    }
+  };
+
+  // PLAN-D-A2A3 08.2026 (14.08.2026) — ZAPIS PLANU LEKCJI.
+  //
+  // ⚠️ JEDNO wywołanie `set_school_timetable`, nie dwa zapisy z appki.
+  // Nagłówek bez okien znaczy w bazie „podałem plan i nie mam szkoły w żaden
+  // dzień" — więc zapis w dwóch krokach, przerwany po pierwszym, zamieniłby
+  // utratę pakietu w deklarację, której zawodnik nie złożył.
+  //
+  // ⚠️ Walidacja stoi w `lib/planLekcji.ts` (`zbudujOknaDoZapisu`), żeby dało
+  // się ją sprawdzić bez ekranu. Baza ma te same reguły w CHECK-ach — appka
+  // jest tu grzecznością, nie zabezpieczeniem.
+  const zapiszPlanLekcji = async () => {
+    if (!currentUser) return;
+    setProfileError(null);
+    setProfileOk(null);
+
+    const wynik = zbudujOknaDoZapisu(planLekcji);
+    if (!wynik.ok) {
+      setProfileError(wynik.powod);
+      return;
+    }
+
+    setSavingPlanLekcji(true);
+    try {
+      // Data obowiązywania z czasu LOKALNEGO zawodnika, nie z `CURRENT_DATE`
+      // bazy — ten sam powód co przy dacie pomiaru wzrostu: baza liczy w UTC.
+      const { error } = await supabase.rpc('set_school_timetable', {
+        p_slots: wynik.okna,
+        p_valid_from: toLocalDateStr(new Date()),
+      });
+      if (error) throw error;
+
+      // Stan bierzemy z POWTÓRNEGO ODCZYTU, nie z tego, co chcieliśmy zapisać.
+      // Zbudowanie go z własnego żądania znaczyłoby, że ekran pokazuje życzenie
+      // appki, a nie zawartość bazy — i różnicy nikt by nie zobaczył.
+      await wczytajPlanLekcji();
+      setProfileOk(wynik.okna.length === 0
+        ? 'Zapisane: w tym okresie nie masz szkoły w żaden dzień.'
+        : 'Plan lekcji zapisany.');
+    } catch (e: any) {
+      setProfileError('Nie udało się zapisać planu lekcji: ' + e.message);
+    } finally {
+      setSavingPlanLekcji(false);
     }
   };
 
@@ -1018,6 +1161,105 @@ export default function ProfilScreen() {
         </TouchableOpacity>
       </View>
 
+      {/*
+        PLAN-D-A2A3 08.2026 (14.08.2026) — PLAN LEKCJI.
+
+        ŚWIADOMIE POZA NUMERACJĄ ETAPÓW, tym samym wzorcem co „Bezpieczeństwo"
+        i karta dostępu — i ma to jeden, policzalny powód. `loadProfile` ustawia
+        etap startowy na PIERWSZYM NIEWYPEŁNIONYM, więc zawodnik z gotowym
+        profilem ląduje na etapie 5 z 5. Gdyby plan lekcji siedział w etapie 0,
+        trzeba by go było szukać CZTEREMA kliknięciami „Wstecz" — razem sześć
+        dotknięć od otwarcia appki. Poza etapami są dwa (Ja → Profil).
+        Zasada podania P0: rzecz ważna nie może wymagać szukania.
+
+        ⛔ TU NIE MA WIDOKU TYGODNIA ANI PASKA ZAJĘTOŚCI — to jest pas C1.
+        Tu jest wyłącznie źródło danych, z których tamten pasek powstanie.
+      */}
+      <View style={[styles.block, { marginTop: spacing.lg }]}>
+        <Text style={styles.blockLabel}>Plan lekcji</Text>
+
+        {stanPlanuLekcji === null ? (
+          <Text style={styles.hint}>Wczytuję Twój plan lekcji…</Text>
+        ) : !stanPlanuLekcji.odczytany ? (
+          /* ⚠️ TRZECI STAN, NIE DRUGI. „Nie udało się odczytać" to nie to samo
+             co „nie podałeś planu" — i formularz jest tu WYŁĄCZONY, bo zapis
+             z pustych pól skasowałby plan, którego właśnie nie widzimy. */
+          <Text style={styles.hint}>
+            Nie udało się teraz odczytać Twojego planu lekcji. Nie zmieniamy go, dopóki
+            go nie zobaczymy — spróbuj wejść tu jeszcze raz za chwilę.
+          </Text>
+        ) : (
+          <>
+            {/* Brzmienie WPROST Z MAKIETY (pustka „brak konfiguracji"). */}
+            <Text style={styles.hint}>
+              {Object.values(stanPlanuLekcji.dni).every((d) => d.stan === 'NIE_WIEM')
+                ? `${PLAN_LEKCJI_PUSTKA} Podaj godziny, w których jesteś w szkole — resztę policzymy sami.`
+                : 'Godziny szkoły. Dzień bez godzin znaczy, że tego dnia nie masz szkoły.'}
+            </Text>
+
+            {planLekcjiZOkienkami ? (
+              /* ⚠️ Plan z przerwą w środku dnia jest w bazie POPRAWNY, a to pole
+                 ma jedno „od–do" na dzień. Zapis stąd skasowałby drugie okno
+                 po cichu — więc formularz się nie włącza i mówi o tym wprost.
+                 ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ. */
+              <Text style={styles.hint}>
+                Twój plan ma dzień z przerwą w środku (dwa okna zajęć). Tego pola nie
+                otwieramy, żeby zapis nie skasował drugiego okna — napisz do nas, a poprawimy to ręcznie.
+              </Text>
+            ) : (
+              <>
+                {DNI_TYGODNIA.map(([weekday, nazwa]) => {
+                  const wiersz = planLekcji.find((r) => r.weekday === weekday)
+                    ?? { weekday, od: '', do_: '' };
+                  const ustaw = (pole: 'od' | 'do_', v: string) =>
+                    setPlanLekcji((prev) => prev.map((r) => (r.weekday === weekday ? { ...r, [pole]: v } : r)));
+                  return (
+                    <View key={weekday} style={styles.planDzien}>
+                      <Text style={styles.planDzienNazwa}>{nazwa}</Text>
+                      <TextInput
+                        style={[styles.input, styles.planGodzina]}
+                        placeholderTextColor={colors.textSecondary}
+                        value={wiersz.od}
+                        onChangeText={(v) => ustaw('od', v)}
+                        placeholder="8:00"
+                        autoCapitalize="none"
+                      />
+                      <Text style={styles.planMysl}>–</Text>
+                      <TextInput
+                        style={[styles.input, styles.planGodzina]}
+                        placeholderTextColor={colors.textSecondary}
+                        value={wiersz.do_}
+                        onChangeText={(v) => ustaw('do_', v)}
+                        placeholder="15:30"
+                        autoCapitalize="none"
+                      />
+                    </View>
+                  );
+                })}
+
+                <TouchableOpacity
+                  style={[styles.btnSecondary, savingPlanLekcji && styles.btnDisabled]}
+                  disabled={savingPlanLekcji}
+                  onPress={zapiszPlanLekcji}
+                >
+                  <Text style={styles.btnSecondaryText}>
+                    {savingPlanLekcji ? 'Zapisuję...' : 'Zapisz plan lekcji'}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Plan lekcji zmienia się co semestr i baza trzyma HISTORIĘ:
+                    nowy zapis obowiązuje od dziś, a tygodnie sprzed zmiany
+                    zostają narysowane starymi godzinami. */}
+                <Text style={styles.hint}>
+                  Zapisany plan obowiązuje od dziś. Tygodnie sprzed zmiany zostają
+                  z godzinami, które wtedy miałeś.
+                </Text>
+              </>
+            )}
+          </>
+        )}
+      </View>
+
       {/* Bezpieczeństwo — Krok 3.4. Świadomie POZA etapami (ustawienie
           urządzenia, nie pole profilu) — widoczne niezależnie od tego, na
           którym etapie jest zawodnik. */}
@@ -1077,6 +1319,11 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.border },
   dotActive: { backgroundColor: colors.brand, width: 18 },
+  // PLAN-D-A2A3 08.2026 — wiersz jednego dnia planu lekcji.
+  planDzien: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  planDzienNazwa: { ...typography.body, fontSize: 13, color: colors.textPrimary, width: 104 },
+  planGodzina: { flex: 1, marginBottom: 0, textAlign: 'center' },
+  planMysl: { ...typography.body, fontSize: 13, color: colors.textSecondary },
   stepNav: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   stepNavBack: { flex: 1, marginTop: 0 },
   stepNavNext: { flex: 1 },

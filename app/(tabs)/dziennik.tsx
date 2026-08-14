@@ -25,6 +25,10 @@ import {
   BLOCK_LINK_YES_LABEL,
   BLOCK_LINK_NO_LABEL,
   type LinkableCalendarEvent,
+  // PLAN-D-A1 08.2026 — znacznik wykonania sesji (pochodna powiązania).
+  decideSessionCompletion,
+  completionFailureLog,
+  completionNoRowsLog,
 } from '../../lib/focusBlockJournalLink';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
 // JEDNA DROGA B2 08.08.2026 — jedno źródło nazw lokalizacji bólu.
@@ -131,13 +135,30 @@ export default function DziennikScreen() {
     if (!currentUser) return;
     const from = new Date(); from.setDate(from.getDate() - 2);
     const to = new Date(); to.setDate(to.getDate() + 1);
-    const { data } = await supabase
+    // PLAN-D-A1 08.2026 — TU BYŁA CISZA (R5, zakaz 9).
+    //
+    // Do 14.08.2026 ta linia brzmiała `const { data } = await supabase…`:
+    // błąd odczytu był ODRZUCANY PRZY DESTRUKTURYZACJI, a `data ?? []` niżej
+    // zamieniało go w pustą listę. Skutek: nieudany odczyt kalendarza wygląda
+    // DOKŁADNIE tak samo jak brak sesji — picker jest pusty, pytanie o sesję
+    // Bloku się nie pokazuje, wpis zapisuje się bez powiązania i NIKT (łącznie
+    // z autorem kodu) nie ma jak się dowiedzieć, że coś padło.
+    //
+    // ⚠️ To NIE zmienia niczego, co widzi zawodnik: pusty picker nadal jest
+    // pustym pickerem, a Dziennik ma działać także wtedy, gdy kalendarz się
+    // nie wczytał. Zmienia się wyłącznie to, że defekt przestaje być niewidoczny.
+    const { data, error: calErr } = await supabase
       .from('calendar_events')
       .select('*')
       .eq('user_id', currentUser.id)
       .eq('status', 'scheduled')
       .gte('scheduled_date', toLocalDateStr(from))
       .lte('scheduled_date', toLocalDateStr(to));
+    if (calErr) {
+      console.warn('[PLAN-D-A1] Nie udało się wczytać okna kalendarza do Dziennika: '
+        + `${calErr.message} (kod ${calErr.code ?? 'brak'}). Picker i pytanie o sesję `
+        + 'Bloku będą puste — to NIE znaczy, że zawodnik nie ma zaplanowanych sesji.');
+    }
     const opts = (data ?? []).map((e: any) => ({
       id: e.id,
       label: `${new Date(e.scheduled_date + 'T00:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' })} — ${e.title}`,
@@ -301,6 +322,53 @@ export default function DziennikScreen() {
         dailyLogId = inserted?.[0]?.id;
       }
 
+      // ════════════════════════════════════════════════════════════
+      // PLAN-D-A1 08.2026 — ZNACZNIK WYKONANIA: POCZĄTEK
+      //
+      // Wpis, który zaliczył sesję Bloku, stawia `calendar_events.status =
+      // 'completed'` na tym wydarzeniu. `status` jest POCHODNĄ powiązania
+      // `daily_logs.calendar_event_id` — nie drugim źródłem prawdy i nie
+      // drugim torem zaliczania. Licznik „N z M" liczy z powiązania,
+      // dokładnie tak jak dotąd.
+      //
+      // ⚠️ TRZY RZECZY, KTÓRE MUSZĄ TU ZOSTAĆ, cokolwiek się zmieni niżej:
+      //  1. WPIS JUŻ JEST ZAPISANY. Ten blok stoi PO insercie i nie ma prawa
+      //     go cofnąć ani zablokować. W chwili tej zmiany migracja CHECK-a
+      //     (`claude/MIGRACJA_A1_STATUS_COMPLETED_14_08_2026.sql`) nie jest
+      //     jeszcze na żywej bazie, więc ten `update` ZWRÓCI 23514 — i tak
+      //     ma być. Wpis zapisuje się mimo to.
+      //  2. ŻADNEGO `throw`. Dlatego własne `try`/`catch`, a nie wspólne
+      //     z zapisem wpisu: wyjątek stąd trafiłby do bannera „Nie udało się
+      //     zapisać" i skłamałby zawodnikowi o jego wpisie.
+      //  3. ŻADNEJ CISZY. Każda porażka — błąd, wyjątek albo zero dotkniętych
+      //     wierszy (RLS!) — zostawia ślad w konsoli z powodem. Zawodnikowi
+      //     nie pokazujemy nic: dla niego wpis się udał i to jest prawda.
+      // ════════════════════════════════════════════════════════════
+      const decyzjaZnacznika = decideSessionCompletion({
+        entryType,
+        calendarLinkId,
+        options: calendarLinkOptions.map((o) => ({ id: o.id, focusBlockId: o.focusBlockId })),
+      });
+      if (decyzjaZnacznika.oznacz) {
+        const eventId = decyzjaZnacznika.eventId;
+        try {
+          const { data: oznaczone, error: statusErr } = await supabase
+            .from('calendar_events')
+            .update({ status: 'completed' })
+            .eq('id', eventId)
+            .eq('user_id', currentUser.id)
+            .select('id');
+          if (statusErr) {
+            console.warn(completionFailureLog(eventId, `${statusErr.message} (kod ${statusErr.code ?? 'brak'})`));
+          } else if (!oznaczone || oznaczone.length === 0) {
+            console.warn(completionNoRowsLog(eventId));
+          }
+        } catch (statusEx: any) {
+          console.warn(completionFailureLog(eventId, `wyjątek: ${statusEx?.message ?? String(statusEx)}`));
+        }
+      }
+      // ════════════════ ZNACZNIK WYKONANIA: KONIEC ════════════════
+
       if (hasPain && dailyLogId) {
         const side = NON_LATERAL_LOCATIONS.has(painLocation) ? null : (painSide || null);
         const { error: painErr } = await supabase.from('pain_entries').insert({
@@ -317,8 +385,11 @@ export default function DziennikScreen() {
       // ZAPIS B7 08.08.2026 — gdy wpis zaliczył sesję Bloku, mówimy to wprost
       // (zasada 4: zbieramy tylko wtedy, gdy oddajemy). Zaliczenie = wybrane
       // wydarzenie ma `focus_block_id`, obojętnie czy przez pytanie, czy picker.
-      const linkedToBlock = entryType === 'post_training' && !!calendarLinkId
-        && !!calendarLinkOptions.find((o) => String(o.id) === calendarLinkId && o.focusBlockId);
+      // PLAN-D-A1 08.2026 — ten sam warunek, co decyzja o znaczniku wyżej,
+      // liczony JEDNĄ funkcją zamiast dwoma kopiami. Dwie kopie tego samego
+      // warunku to droga do produktu, który stawia znacznik i mówi „Zapisano."
+      // albo odwrotnie — a różnicy nikt nie zauważy.
+      const linkedToBlock = decyzjaZnacznika.oznacz;
       // 10.08.2026 — gdy poprawiliśmy dzisiejszy wpis zamiast tworzyć nowy,
       // mówimy to wprost. Brzmienie zatwierdzone przez Kubę. Wpis poranny nigdy
       // nie zalicza sesji Bloku (to robi wyłącznie wpis potreningowy), więc ta

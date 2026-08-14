@@ -64,3 +64,92 @@ export function computeFocusBlockProgress(params: {
     total: blockEvents.length,
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PLAN-D-A1 08.2026 — TRZECI STAN LICZNIKA: „NIE WIEM"
+//
+// CO ZMIERZONO 14.08.2026 na żywej bazie:
+//   select count(*), count(calendar_event_id) from public.daily_logs;
+//   → 10 wpisów, 0 powiązanych.
+// Przy 24 zaplanowanych sesjach Bloku `computeFocusBlockProgress` zwraca
+// dziś `{ done: 0, total: M }`, a ekran rysuje z tego „0 z M sesji zrobione".
+//
+// DLACZEGO TO JEST ZŁAMANIE Z0. „0 z M" to zdanie w rejestrze FAKT O TOBIE:
+// twierdzi, że zawodnik nie odbył ani jednej sesji. Prawda jest inna —
+// NIE WIEMY, ile odbył, bo ani jeden wpis nie przeszedł przez powiązanie.
+// Produkt podaje prawdopodobne (a właściwie: nieprawdziwe) jako pewne,
+// i robi to w sprawie, w której się myli na niekorzyść zawodnika.
+//
+// DYSKRYMINATOR — jedno zdanie: rozróżniamy po tym, czy ten zawodnik ma
+// W OGÓLE JAKIEKOLWIEK powiązanie wpisu z wydarzeniem (`doneEventIds`
+// niepuste, obojętnie którego Bloku dotyczy). Jeśli ma choć jedno —
+// mechanizm demonstrowalnie do niego dotarł, więc „0 z M" dla TEGO Bloku
+// jest uczciwą liczbą. Jeśli nie ma ani jednego — nie mamy dowodu, że
+// mechanizm w ogóle miał okazję zadziałać, i wtedy liczba nie wychodzi
+// na ekran.
+//
+// ⚠️ Stanem domyślnym przy braku danych do rozróżnienia jest NIE_WIEM,
+// nigdy „0 z M".
+// ═══════════════════════════════════════════════════════════════════════
+
+export type FocusBlockProgressState =
+  /** Są powiązania albo jest dowód, że mechanizm u tego zawodnika działał. */
+  | { stan: 'WIADOMO'; done: number; total: number }
+  /** Nie ma aktywnego Bloku pod tym Celem albo Blok nie ma ani jednej sesji. */
+  | { stan: 'BRAK_PLANU' }
+  /** M > 0, N = 0 i ZERO dowodu, że którykolwiek wpis przeszedł przez powiązanie. */
+  | { stan: 'NIE_WIEM'; total: number };
+
+// ── Brzmienie stanu NIE_WIEM ───────────────────────────────────────────
+// ⚠️⚠️ DO PRZEJRZENIA PRZEZ KUBĘ — to jest treść widoczna dla zawodnika,
+// a brzmienia należą do niego. Poniższe to PROPOZYCJA, nie decyzja.
+//
+// Dwie rzeczy, których to brzmienie pilnuje, bo bez nich byłoby szkodliwe:
+//  • ZERO OCENY PRACY ZAWODNIKA. Puste powiązania to defekt produktu, nie
+//    jego zaniedbanie. „Nie odhaczasz sesji" byłoby postawieniem mu zarzutu
+//    za nasz błąd (M1: zakazana jest ocena charakteru i konfrontacja).
+//  • RZECZ DO ZROBIENIA (M4). Komunikat bez wyjścia jest zakazany —
+//    zawodnik ma wiedzieć, co zrobić, żeby liczba się pojawiła.
+
+export const NIE_WIEM_TYTUL = (total: number) =>
+  `Nie wiemy, ile z ${total} sesji się odbyło`;
+
+export const NIE_WIEM_POWOD =
+  'Żaden wpis w Dzienniku nie jest jeszcze połączony z sesją z kalendarza, '
+  + 'więc nie ma z czego tego policzyć.';
+
+export const NIE_WIEM_RZECZ_DO_ZROBIENIA =
+  'Po najbliższym treningu otwórz Dziennik → Wpis potreningowy i odpowiedz '
+  + 'na pytanie o sesję Bloku. Od tego wpisu licznik pokaże liczbę.';
+
+/** Ekran, który brzmienie NIE_WIEM wskazuje zawodnikowi jako wyjście. */
+export const NIE_WIEM_EKRAN_WYJSCIA = 'Dziennik';
+
+/**
+ * Ten sam postęp co `computeFocusBlockProgress`, ale z jawnym stanem
+ * w typie zwracanym — żeby ekran NIE MÓGŁ pomylić „zero zrobionych"
+ * z „nie wiemy, ile zrobionych".
+ *
+ * `computeFocusBlockProgress` zostaje bez zmian: konsumuje ją dziś
+ * `app/(tabs)/dzis.tsx` (pas T, plik poza tym pasem). Podmiana wywołania
+ * jest KONTRAKTEM dla pasa T / sesji nawigującej, nie tej rundy.
+ */
+export function computeFocusBlockProgressState(params: {
+  goalSegmentId: string | null;
+  activeBlocks: FocusBlockLike[];
+  scheduledEvents: BlockEventLike[];
+  /** WSZYSTKIE powiązania tego zawodnika, nie tylko z tego Bloku — to jest dyskryminator. */
+  doneEventIds: Set<number>;
+}): FocusBlockProgressState {
+  const postep = computeFocusBlockProgress(params);
+  if (postep === null) return { stan: 'BRAK_PLANU' };
+
+  const { done, total } = postep;
+  if (done > 0) return { stan: 'WIADOMO', done, total };
+
+  // done === 0 — i tu przebiega cała różnica.
+  const maJakikolwiekDowod = params.doneEventIds.size > 0;
+  return maJakikolwiekDowod
+    ? { stan: 'WIADOMO', done: 0, total }
+    : { stan: 'NIE_WIEM', total };
+}
