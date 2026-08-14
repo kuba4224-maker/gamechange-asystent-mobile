@@ -218,14 +218,39 @@ function check(label: string, cond: boolean, detail: string) {
   // ⚠️ DO 14.08.2026 W `kalendarz.tsx` STAŁO `EVENT_TYPE_LABELS[e.event_type]
   // || e.event_type`. Ten wzorzec jest cichą awarią: przy nieznanym rodzaju
   // pokazuje zawodnikowi wartość z kolumny bazy, udającą nazwę.
-  const kalendarz = zrodlo(PLIK_KALENDARZ);
-  check('(A7-3) kalendarz nie wrócił do pokazywania surowej wartości z bazy',
-    !/\|\|\s*e\.event_type/.test(kalendarz),
-    'w pliku znów jest `|| e.event_type` — nieznany rodzaj pokaże się jako nazwa');
+  //
+  // ⚠️ ROZSZERZONE 14.08.2026 WIECZOREM — I DLACZEGO TO NIE JEST KOSMETYKA.
+  // Pas A7 postawił ten strażnik WYŁĄCZNIE na `kalendarz.tsx`. Wzorzec żył
+  // dalej w `dzis.tsx` — czyli reguła obowiązywała na ekranie, który zawodnik
+  // otwiera rzadko, i nie obowiązywała na ekranie, który widzi po każdym
+  // uruchomieniu appki. Strażnik pilnujący JEDNEGO z dwóch miejsc tego samego
+  // wzorca jest gorszy niż jego brak: daje zielone światło i nazwę „domknięte".
+  // Pętla niżej ma rosnąć razem z listą ekranów rysujących rodzaj wydarzenia.
+  const EKRANY_Z_RODZAJEM: Array<[string, string]> = [
+    ['kalendarz', PLIK_KALENDARZ],
+    ['dziś', PLIK_DZIS],
+  ];
 
-  check('(A7-3) kalendarz rozstrzyga rodzaj przez `opiszRodzaj`, a nie po swojemu',
-    kalendarz.includes('opiszRodzaj('),
-    'ekran przestał wołać wspólną regułę i zapewne ma własną kopię');
+  for (const [nazwa, sciezka] of EKRANY_Z_RODZAJEM) {
+    const kod = zrodlo(sciezka);
+
+    check(`(A7-3) ${nazwa} nie pokazuje surowej wartości z bazy jako nazwy rodzaju`,
+      !/\|\|\s*e\.event_type/.test(kod),
+      `w ${sciezka} znów jest \`|| e.event_type\` — nieznany rodzaj pokaże się jako nazwa`);
+
+    check(`(A7-3) ${nazwa} rozstrzyga rodzaj przez \`opiszRodzaj\`, a nie po swojemu`,
+      kod.includes('opiszRodzaj('),
+      `${sciezka} przestał wołać wspólną regułę i zapewne ma własną kopię`);
+
+    // ⚠️ TA ASERCJA ZAMYKA DZIURĘ W DWÓCH POWYŻSZYCH. Obie są spełnialne przez
+    // USUNIĘCIE rysowania rodzaju w ogóle: bez `|| e.event_type` i bez wołania
+    // `opiszRodzaj` wystarczy skasować linię z etykietą. Wtedy zawodnik nie widzi
+    // rodzaju wcale, a suita jest zielona. Dlatego wymagamy TU obecności obu
+    // gałęzi rozstrzygnięcia — znanej i nieznanej.
+    check(`(A7-3) ${nazwa} rysuje OBIE gałęzie: etykietę znanego i komunikat nieznanego`,
+      /EVENT_TYPE_LABELS\[\s*opisRodzaju\.id\s*\]/.test(kod) && /opisRodzaju\.komunikat/.test(kod),
+      `${sciezka} woła \`opiszRodzaj\`, ale nie rysuje obu wyników — rodzaj mógł zniknąć z ekranu`);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════

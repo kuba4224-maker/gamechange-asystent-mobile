@@ -256,6 +256,13 @@ import { czytajStanDostepu, RPC_STAN_DOSTEPU } from '../../lib/dostepKonta';
 // zamontowanego w app/_layout.tsx. Zero drugiego egzemplarza.
 import { otworzPunktPomocy } from '../../components/PunktPomocy';
 import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
+// PLAN-D 14.08.2026 — RODZAJ, KTÓREGO NIE ZNAMY, MA SIĘ NAZWAĆ.
+// Pas A7 domknął to w `kalendarz.tsx` i postawił tam strażnika. Ten sam wzorzec
+// (`EVENT_TYPE_LABELS[e.event_type] || e.event_type`) żył dalej TUTAJ, na ekranie,
+// który zawodnik otwiera pierwszy — czyli reguła obowiązywała na ekranie rzadziej
+// oglądanym, a nie obowiązywała na tym, który widać zawsze. Rozstrzygnięcie idzie
+// z tej samej czystej funkcji, nie z kopii.
+import { opiszRodzaj, opisNieznanegoRodzajuDoLogu } from '../../lib/meczWKalendarzu';
 
 const SEG_LABELS = SEGMENT_LABELS;
 
@@ -1057,12 +1064,24 @@ export default function DzisScreen() {
                 <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
               </>
             ) : (
-              todayEvents.map((e) => (
-                <Text key={e.id} style={styles.eventLine}>
-                  <Text style={styles.eventTitle}>{e.title}</Text>
-                  {'  ·  '}{EVENT_TYPE_LABELS[e.event_type] || e.event_type}
-                </Text>
-              ))
+              todayEvents.map((e) => {
+                // ⚠️ PLAN-D 14.08.2026 — DO DZIŚ STAŁO TU
+                // `EVENT_TYPE_LABELS[e.event_type] || e.event_type`.
+                // Rodzaj spoza piątki znanej appce (dołożony do CHECK-a w bazie
+                // i nie dołożony tutaj) pokazywał się zawodnikowi jako SUROWA
+                // WARTOŚĆ Z KOLUMNY — „club_training" wygląda jak etykieta, więc
+                // nikt nigdy nie zgłosiłby, że etykiety brakuje. Reguła R5: brak
+                // wiedzy ma mieć własny, jawny stan, a nie udawać wiedzę.
+                const opisRodzaju = opiszRodzaj(e.event_type);
+                if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
+                return (
+                  <Text key={e.id} style={styles.eventLine}>
+                    <Text style={styles.eventTitle}>{e.title}</Text>
+                    {'  ·  '}
+                    {opisRodzaju.znany ? EVENT_TYPE_LABELS[opisRodzaju.id] : opisRodzaju.komunikat}
+                  </Text>
+                );
+              })
             )}
             {/* NAWIGACJA B3 08.08.2026 — to jest JEDYNE wejście do Kalendarza
                 po zabraniu jego zakładki z paska, więc link musi nazywać obie
