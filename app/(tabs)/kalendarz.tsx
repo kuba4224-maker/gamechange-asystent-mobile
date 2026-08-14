@@ -38,6 +38,7 @@ import { useState, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import Checkbox from 'expo-checkbox';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -65,7 +66,12 @@ import { SEGMENT_LABELS } from '../../lib/labels';
 // (`lib/trzyPustki.ts`), a komunikat — tym samym, którym pas K zastąpił
 // błąd w Dzienniku. Zero nowej treści.
 // ═══════════════════════════════════════════════════════════════════
-import { rozpoznajPustke, opisPustkiDoLogu } from '../../lib/trzyPustki';
+import {
+  rozpoznajPustke,
+  opisPustkiDoLogu,
+  PUSTKA_BRAK_KONFIGURACJI_TEKST,
+  PUSTKA_BRAK_KONFIGURACJI_CTA,
+} from '../../lib/trzyPustki';
 import {
   toJestBrakDostepu,
   ZAPIS_ODRZUCONY_BRAK_DOSTEPU,
@@ -104,6 +110,62 @@ import {
   opiszZrodlo,
   opisNieznanegoRodzajuDoLogu,
 } from '../../lib/meczWKalendarzu';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-C1 08.2026 (14.08.2026) — WIDOK TYGODNIA.
+//
+// ── CO TU BYŁO DO 14.08.2026 WIECZOREM ──────────────────────────────
+// Ten ekran grupował wiersze PO STATUSIE: Cykliczne · Nadchodzące · Minione ·
+// Anulowane. Makieta `claude/MAKIETA_WIDOK_TYGODNIA.html` pokazuje coś zupełnie
+// innego: SIEDEM WIERSZY DNI, cały tydzień naraz, z wagą każdego dnia widoczną
+// bez czytania legendy. To nie jest ten sam ekran w innej kolejności — to jest
+// inny sposób patrzenia na te same wiersze.
+//
+// Rejestr obietnic policzył cenę tej luki: JEDENAŚCIE obietnic (WT-04…WT-11,
+// WT-16, WT-18 i WG-02…WG-07) czekało na JEDEN brakujący element — wiersz dnia.
+//
+// ── CO SIĘ ZMIENIŁO NA EKRANIE, ŻEBY NIC NIE ZNIKNĘŁO PO CICHU ──────
+// • Doszły zakładki **Tydzień / Listy** (WT-03). Domyślna jest „Tydzień",
+//   dokładnie jak w makiecie (`<div class="seg"><div class="on">Tydzień</div>`).
+// • **Stare grupowanie NIE ZOSTAŁO USUNIĘTE.** Cztery sekcje i formularz żyją
+//   w całości pod zakładką „Listy" — o jedno dotknięcie dalej niż dotąd.
+//   To jest jedyna rzecz, która na tym ekranie „podrożała", i jest wymieniona
+//   w nocie pasa C1, sekcja 4.
+// • Plakietka **„Nie wykonano" ZNIKŁA** i nie wróci. Renderowała się dla każdej
+//   przeszłej pozycji bez wpisu w dzienniku — czyli produkt ZGADYWAŁ PRZECIWKO
+//   ZAWODNIKOWI: brak danych zamieniał w oskarżenie. Zastępują ją trzy stany
+//   z WG-05 (`lib/widokTygodnia.ts`, `rozstrzygnijStanPrzeszly`).
+//
+// ── ⛔ CZEGO TU NIE MA I MIEĆ NIE BĘDZIE ────────────────────────────
+// ŻADNEJ SIATKI GODZINOWEJ. Obietnica WT-34 jest dziś w stanie JEST i siatka
+// ZGASIŁABY spełnioną obietnicę. Uzasadnienie ze stopki makiety:
+// `scheduled_date` to data bez godziny, więc siatka rysowałaby pozycje
+// w miejscach, których nie znamy. Pasek zajętości pokazuje WYŁĄCZNIE godziny
+// szkoły — jedyne dane, które godzinę naprawdę mają.
+//
+// ── ⛔ ZERO `?? []` NA WEJŚCIACH ────────────────────────────────────
+// „Nie udało się odczytać" i „nic nie masz" to dwa różne zdania (R5). Trzy stany
+// (`events`, `loggedEventIds`, `planLekcji`) są dziś `T | null`, gdzie `null`
+// znaczy WYŁĄCZNIE „odczyt się nie udał". Do 14.08 stało tu `(eventRows ?? [])`
+// i nieudany odczyt wyglądał na pusty kalendarz.
+// ═══════════════════════════════════════════════════════════════════
+import { poniedzialekTygodnia } from '../../lib/glosTygodnia';
+import { parsujPlanLekcji, type PlanTygodnia, type WierszPlanuLekcji } from '../../lib/planLekcji';
+import {
+  zbudujTydzien,
+  czyPlanLekcjiZnany,
+  przesunTydzien,
+  segmentyPaska,
+  liczbaPozycji,
+  opisTygodniaDoLogu,
+  rozstrzygnijStanPrzeszly,
+  LEGENDA_KROPEK,
+  PLAKIETKI_STANU_PRZESZLEGO,
+  NIE_UDALO_SIE_ODCZYTAC_TYGODNIA,
+  type KlasaKropki,
+  type PozycjaDnia,
+  type WierszDnia,
+  type WagaDnia,
+} from '../../lib/widokTygodnia';
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   club_training: 'Trening klubowy', own_training: 'Trening własny',
@@ -134,8 +196,28 @@ function formatRecurrence(rule: string) {
   return 'Co tydzień: ' + m[1].split(',').map((d) => DAY_LABELS_PL[d] || d).join(', ');
 }
 
+// PLAN-D-C1 — kolor kropki. Klasa przychodzi z reguły (`klasaKropki`
+// w lib/widokTygodnia.ts), tutaj zostaje wyłącznie przypisanie tokenu.
+// ⚠️ `nieznana` NIE dostaje koloru rodzaju — dostaje obrys, tak samo jak
+// pozycja, o której nic nie wiemy. Kolor „na oko" byłby zgadywaniem.
+const KOLOR_KROPKI: Record<KlasaKropki, { backgroundColor: string; borderColor?: string; borderWidth?: number }> = {
+  blok: { backgroundColor: colors.success },
+  klub: { backgroundColor: colors.textSecondary },
+  mecz: { backgroundColor: colors.brand },
+  zadanie: { backgroundColor: 'transparent', borderColor: colors.textTertiary, borderWidth: 1.5 },
+  nieznana: { backgroundColor: 'transparent', borderColor: colors.warning, borderWidth: 1.5 },
+};
+
+// PLAN-D-C1 — ile segmentów paska wagi zapala się przy której wadze.
+// ⚠️ Sama waga jest REGUŁĄ i mieszka w `lib/widokTygodnia.ts` (tabela
+// `PUNKTY_RODZAJU` + `PROGI_WAGI`). Tutaj jest wyłącznie jej obraz.
+const SEGMENTY_WAGI: Record<WagaDnia, number> = {
+  pusty: 0, lekki: 1, sredni: 2, ciezki: 3, nie_wiem: 0,
+};
+
 export default function KalendarzScreen() {
   const { currentUser } = useAuth();
+  const router = useRouter();
 
   const [eventType, setEventType] = useState('club_training');
   const [title, setTitle] = useState('');
@@ -153,10 +235,20 @@ export default function KalendarzScreen() {
   const [goalId, setGoalId] = useState('');
 
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [events, setEvents] = useState<CalEvent[]>([]);
-  const [loggedEventIds, setLoggedEventIds] = useState<Set<number>>(new Set());
+  // ⛔ PLAN-D-C1 — TRZY WEJŚCIA, KAŻDE Z JAWNYM `null` = „ODCZYT SIĘ NIE UDAŁ".
+  // Do 14.08 stało tu `useState<CalEvent[]>([])` plus `(eventRows ?? [])`,
+  // więc padnięte zapytanie wyglądało dokładnie jak pusty kalendarz.
+  const [events, setEvents] = useState<CalEvent[] | null>(null);
+  const [loggedEventIds, setLoggedEventIds] = useState<ReadonlySet<number> | null>(null);
+  const [planLekcji, setPlanLekcji] = useState<PlanTygodnia | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
   const [showPast, setShowPast] = useState(false);
+
+  // PLAN-D-C1 — zakładki WT-03. Domyślnie „Tydzień", jak w makiecie.
+  const [zakladka, setZakladka] = useState<'tydzien' | 'listy'>('tydzien');
+  // PLAN-D-C1 — który tydzień oglądamy (WT-04). Stan, nie zegar: strzałki
+  // muszą go zmieniać, a `useFocusEffect` nie może go resetować pod palcem.
+  const [poniedzialek, setPoniedzialek] = useState<string>(() => poniedzialekTygodnia(new Date()));
 
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -175,7 +267,7 @@ export default function KalendarzScreen() {
       .eq('user_id', currentUser.id)
       .order('is_priority', { ascending: false })
       .order('created_at', { ascending: false });
-    const rows = (data ?? []) as Goal[];
+    const rows = (data || []) as Goal[];
     setGoals(rows);
     return rows;
   }, [currentUser]);
@@ -188,15 +280,46 @@ export default function KalendarzScreen() {
       .from('calendar_events')
       .select('*')
       .eq('user_id', currentUser.id);
-    if (err) return; // load* nie pokazuje banera błędu — konwencja z web
-    setEvents((eventRows ?? []) as CalEvent[]);
+    if (err) {
+      // ⛔ PLAN-D-C1 — NIEUDANY ODCZYT NIE UDAJE PUSTEGO KALENDARZA.
+      // Do 14.08 stało tu `return` bez śladu, a stan zostawał poprzedni albo
+      // pusty. Teraz `null` niesie się aż na ekran i ekran mówi, czego nie wie.
+      console.warn('[PLAN-D-C1] nie odczytałem calendar_events:', err.message);
+      setEvents(null);
+    } else if (eventRows) {
+      setEvents(eventRows as CalEvent[]);
+    } else {
+      setEvents(null);
+    }
 
-    const { data: logRows } = await supabase
+    const { data: logRows, error: logErr } = await supabase
       .from('daily_logs')
       .select('calendar_event_id')
       .eq('user_id', currentUser.id)
       .not('calendar_event_id', 'is', null);
-    setLoggedEventIds(new Set((logRows ?? []).map((l: any) => l.calendar_event_id)));
+    if (logErr || !logRows) {
+      // ⚠️ Bez dziennika NIE WIEMY, czy przeszła pozycja się odbyła — i to jest
+      // stan `nie_odczytano`, a nie „brak wpisu" i tym bardziej nie „nie wykonano".
+      if (logErr) console.warn('[PLAN-D-C1] nie odczytałem daily_logs:', logErr.message);
+      setLoggedEventIds(null);
+    } else {
+      setLoggedEventIds(new Set(logRows.map((l: any) => l.calendar_event_id as number)));
+    }
+
+    // PLAN-D-C1 — PLAN LEKCJI. ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE, ten sam
+    // wzorzec co w `profil.tsx`: gdyby funkcja `school_week` nie istniała
+    // (migracja A3 jeszcze nie wklejona) albo padła, kalendarz ma działać dalej.
+    // ⚠️ To jest wejście, które ODBLOKOWUJE obietnicę WT-31 — do tej rundy
+    // `planLekcjiZnany` było przybite do `null` i gałąź „brak konfiguracji"
+    // w `lib/trzyPustki.ts` była NIEOSIĄGALNA. Brzmienie istniało od pasa T
+    // i nikt go nigdy nie zobaczył.
+    const planRes = await supabase.rpc('school_week', { p_from: poniedzialek });
+    if (planRes.error) {
+      console.warn('[PLAN-D-C1] nie odczytałem planu lekcji:', planRes.error.message);
+      setPlanLekcji(parsujPlanLekcji(null));
+    } else {
+      setPlanLekcji(parsujPlanLekcji((planRes.data || []) as WierszPlanuLekcji[]));
+    }
 
     // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — STAN DOSTĘPU DO ZAPISU.
     // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE, POZA paczką wyżej: gdyby RPC
@@ -208,7 +331,7 @@ export default function KalendarzScreen() {
       dostepRes.data, dostepRes.error ? dostepRes.error.message : null,
     );
     setMoznaZapisywac(stanDostepu.rodzaj === 'znany' ? stanDostepu.maDostep : null);
-  }, [currentUser, loadGoals]);
+  }, [currentUser, loadGoals, poniedzialek]);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -223,29 +346,38 @@ export default function KalendarzScreen() {
   const activeGoals = goals.filter((g) => g.status === 'active');
 
   const todayStr = toLocalDateStr(new Date());
-  const recurring = events.filter((e) => e.status === 'scheduled' && e.recurrence_rule);
-  // AUDYT 06.08.2026 — "Nadchodzące" nie miało filtra daty, tylko sortowanie rosnąco.
-  // Efekt: na górze sekcji siedziały wydarzenia sprzed tygodni i miesięcy, w większości
-  // z plakietką "Nie wykonano". Zawodnik wchodził po plan na dziś, a dostawał listę
-  // zaległości. Rozdzielone na dwie sekcje: nadchodzące (od dziś włącznie) i zwinięta
-  // historia (przeszłe), żeby plakietki "Wykonano / Nie wykonano" nadal były dostępne,
-  // ale nie były pierwszą rzeczą, którą widać.
-  const byDateAsc = (a: CalEvent, b: CalEvent) =>
-    (a.scheduled_date! < b.scheduled_date! ? -1 : a.scheduled_date! > b.scheduled_date! ? 1 : 0);
-  // ⚠️ PLAN-D-A7 08.2026 — DO 14.08.2026 STAŁO TU `e.status === 'scheduled'`.
-  // Migracja A1 (wykonana 14.08) dopuściła `status = 'completed'`, a pas A1
-  // ustawia go z Dziennika przy zaliczeniu sesji Bloku. Ten ekran filtrował
-  // po `'scheduled'` w KAŻDEJ z trzech sekcji, więc pierwsze wydarzenie
-  // oznaczone jako wykonane ZNIKNĘŁOBY z kalendarza bez śladu — razem
-  // z każdym meczem, który od tej rundy zapisuje ekran Mecz. Zapis by się
-  // udał, ekran by milczał: „cichy brak" w czystej postaci.
-  // Kryterium jest teraz DATA, nie status; status idzie na plakietkę niżej.
-  const scheduledWithDate = events.filter(
-    (e) => (e.status === 'scheduled' || e.status === 'completed') && e.scheduled_date,
-  );
-  const upcoming = scheduledWithDate.filter((e) => e.scheduled_date! >= todayStr).sort(byDateAsc);
-  const past = scheduledWithDate.filter((e) => e.scheduled_date! < todayStr).sort((a, b) => -byDateAsc(a, b));
-  const cancelled = events.filter((e) => e.status === 'cancelled');
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-C1 — TYDZIEŃ. Cała logika jest w czystej funkcji; ten ekran
+  // jej WYNIK RYSUJE, a nie liczy. Zero Reacta po tamtej stronie znaczy, że
+  // reguły (waga dnia, zdanie, kolizja) dają się sprawdzić bez ekranu — a reguła,
+  // której nie da się sprawdzić, cicho przestaje obowiązywać.
+  // ═══════════════════════════════════════════════════════════════════
+  const tydzien = zbudujTydzien({
+    poniedzialek,
+    dzisiaj: todayStr,
+    wydarzenia: events,
+    planLekcji,
+    wpisyDziennika: loggedEventIds,
+  });
+
+  // PLAN-D-C1 — pustka TYGODNIA (a nie sekcji). Rozstrzyga ta sama czysta
+  // funkcja co dotąd; zmienia się wyłącznie zakres, o którym mówi.
+  // ⚠️ Przy nieudanym odczycie NIE MA PUSTKI — jest zdanie o nieudanym odczycie.
+  // Pustka znaczy „sprawdziłem i nic nie ma", a tego nie sprawdziliśmy.
+  const pustkaTygodnia = tydzien.odczyt.wydarzenia
+    ? rozpoznajPustke({
+        maWpisy: liczbaPozycji(tydzien) > 0,
+        planLekcjiZnany: czyPlanLekcjiZnany(planLekcji),
+        moznaZapisywac,
+        zakres: 'tydzien',
+      })
+    : null;
+  if (pustkaTygodnia) console.log(`kalendarz: ${opisPustkiDoLogu(pustkaTygodnia)}`);
+  if (tydzien.nieumieszczone.length > 0) {
+    console.warn('[PLAN-D-C1] pozycje, których nie umiem położyć w tygodniu:', JSON.stringify(tydzien.nieumieszczone));
+  }
+  console.log(opisTygodniaDoLogu(tydzien));
 
   const resetForm = () => {
     setTitle(''); setNotes(''); setDate(null); setSelectedDays(new Set()); setGoalId('');
@@ -339,15 +471,21 @@ export default function KalendarzScreen() {
     if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
     const goal = e.goal_id ? goals.find((g) => g.id === e.goal_id) : null;
 
+    // ⭐ PLAN-D-C1 — TA SAMA REGUŁA TRZECH STANÓW, CO W WIDOKU TYGODNIA.
+    // Do 14.08 stało tu `loggedEventIds.has(e.id) ? 'Wykonano' : 'Nie wykonano'`
+    // — czyli brak wpisu w dzienniku był renderowany jako informacja o tym,
+    // że zawodnik czegoś NIE ZROBIŁ. To jest domysł podany jako fakt (Z0).
     const badges: string[] = [];
-    if (e.status === 'cancelled') badges.push('Anulowane');
-    // PLAN-D-A7 — `status='completed'` to teraz osobny, WIDOCZNY stan. Bez tej
-    // gałęzi wydarzenie oznaczone jako wykonane rysowałoby się bez żadnej
-    // plakietki i wyglądało dokładnie jak zaplanowane, którego nikt nie ruszył.
-    if (e.status === 'completed') badges.push('Wykonano');
-    if (e.status === 'scheduled' && e.scheduled_date && e.scheduled_date <= todayStr) {
-      badges.push(loggedEventIds.has(e.id) ? 'Wykonano' : 'Nie wykonano');
-    }
+    const stanPrzeszly = rozstrzygnijStanPrzeszly({
+      przeszly: !!e.scheduled_date && e.scheduled_date < todayStr,
+      id: e.id,
+      status: e.status,
+      zRegulyCyklicznej: !!e.recurrence_rule,
+      wpisyDziennika: loggedEventIds,
+    });
+    if (stanPrzeszly) badges.push(PLAKIETKI_STANU_PRZESZLEGO[stanPrzeszly]);
+    else if (e.status === 'cancelled') badges.push('Anulowane');
+    else if (e.status === 'completed') badges.push(PLAKIETKI_STANU_PRZESZLEGO.odbylo_sie);
 
     const meta: string[] = [];
     if (e.scheduled_date) {
@@ -373,7 +511,7 @@ export default function KalendarzScreen() {
         <View style={styles.cardTop}>
           <Text style={styles.cardTitle}>{e.title}</Text>
           {badges.map((b, i) => (
-            <Text key={i} style={[styles.badge, b === 'Nie wykonano' ? styles.badgePriority : b === 'Wykonano' ? styles.badgeCompleted : styles.badgeMuted]}>{b}</Text>
+            <Text key={i} style={[styles.badge, b === PLAKIETKI_STANU_PRZESZLEGO.odbylo_sie ? styles.badgeCompleted : styles.badgeMuted]}>{b}</Text>
           ))}
         </View>
         <Text style={styles.cardSubtitle}>{typeLabel}</Text>
@@ -390,18 +528,325 @@ export default function KalendarzScreen() {
     );
   }
 
-  // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — KTÓRA TO PUSTKA.
-  // ⚠️ `planLekcjiZnany: null` — produkt NIE MA planu lekcji i nie ma go skąd
-  // wziąć (zmierzone 14.08.2026: zero tabel %school% / %szkol% / %lesson%).
-  // Gałąź „brak konfiguracji" jest przez to nieosiągalna i jest to NAZWANE
-  // w lib/trzyPustki.ts, a nie przemilczane. Włącza ją pas A3.
-  const pustkaNadchodzace = rozpoznajPustke({
-    maWpisy: upcoming.length > 0,
-    planLekcjiZnany: null,
-    moznaZapisywac,
-    zakres: 'nadchodzace',
-  });
-  if (pustkaNadchodzace) console.log(`kalendarz: ${opisPustkiDoLogu(pustkaNadchodzace)}`);
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ WIERSZ DNIA — element, na który czekało jedenaście obietnic
+  // ═══════════════════════════════════════════════════════════════════
+  function renderPozycja(p: PozycjaDnia) {
+    const nazwaRodzaju = p.rodzaj.znany ? EVENT_TYPE_LABELS[p.rodzaj.id] : p.rodzaj.komunikat;
+    const przekreslone = p.stanPrzeszly === 'nie_odbylo_sie';
+    return (
+      <View key={`${p.id}-${p.zRegulyCyklicznej ? 'c' : 'j'}`} style={styles.it}>
+        <View style={[styles.dot, KOLOR_KROPKI[p.kropka]]} />
+        <Text style={[styles.itText, przekreslone && styles.itDone]} numberOfLines={2}>
+          {p.tytul}
+        </Text>
+        {/* ⚠️ WT-12 / WG-06 — tag godziny WYŁĄCZNIE wtedy, gdy zawodnik ją podał.
+            `p.godzina` jest `null`, a nie `''` ani `'—'`, właśnie po to, żeby
+            nie dało się przypadkiem narysować pustego tagu wyglądającego na daną. */}
+        {p.godzina ? <Text style={styles.tag}>{p.godzina}</Text> : null}
+        {p.stanPrzeszly ? (
+          <Text style={[styles.tag, p.stanPrzeszly === 'odbylo_sie' && styles.tagOk]}>
+            {PLAKIETKI_STANU_PRZESZLEGO[p.stanPrzeszly]}
+          </Text>
+        ) : null}
+        {!p.rodzaj.znany ? <Text style={styles.tag}>{nazwaRodzaju}</Text> : null}
+      </View>
+    );
+  }
+
+  function renderDzien(d: WierszDnia) {
+    const segmenty = segmentyPaska(d.pasekZajetosci);
+    const zapalone = SEGMENTY_WAGI[d.waga];
+    return (
+      <View key={d.data} style={styles.day}>
+        <View style={styles.dhead}>
+          {/* WT-07 — dzisiejszy dzień kolorem marki. */}
+          <Text style={[styles.dname, d.dzisiaj && styles.dnameToday]}>{d.etykieta}</Text>
+          {/* ⛔ WT-10 — PASEK ZAJĘTOŚCI ZE SZKOŁY. To NIE jest siatka godzinowa:
+              rysuje wyłącznie godziny szkoły, czyli jedyne dane, które godzinę
+              naprawdę mają. Pozycje są listą pod nim (WT-34 zostaje nietknięta). */}
+          <View style={styles.busy}>
+            {segmenty.map((s, i) => (
+              <View key={i} style={[styles.busyFill, { left: `${s.lewo}%`, width: `${s.szerokosc}%` }]} />
+            ))}
+          </View>
+          {d.pasekZajetosci.podpis ? (
+            <Text style={styles.btime}>{d.pasekZajetosci.podpis}</Text>
+          ) : null}
+        </View>
+
+        {/* WG-07 — krótki opis wagi dnia plus jej obraz. Trzy segmenty, bo
+            wag jest trzy ponad zerem; `nie_wiem` nie zapala ani jednego. */}
+        {d.opisWagi ? (
+          <View style={styles.wagaRow}>
+            <View style={styles.wagaPasek}>
+              {[0, 1, 2].map((i) => (
+                <View key={i} style={[styles.wagaSeg, i < zapalone && styles.wagaSegOn]} />
+              ))}
+            </View>
+            <Text style={styles.wagaOpis}>{d.opisWagi}</Text>
+          </View>
+        ) : null}
+
+        {d.pozycje.map(renderPozycja)}
+
+        {/* WT-16 — dzień bez pozycji ma WŁASNY podpis, a nie znika z tygodnia. */}
+        {d.podpisPustegoDnia ? <Text style={styles.empty2}>{d.podpisPustegoDnia}</Text> : null}
+
+        {/* ⛔ WT-11 — ostrzeżenie o kolizji stoi tu WYŁĄCZNIE wtedy, gdy znamy
+            OBIE godziny. Brak którejkolwiek → nie ma ostrzeżenia, jest jawne
+            „nie wiemy, kiedy masz szkołę" nad tygodniem. */}
+        {d.napiecie ? <Text style={styles.tight}>↑ {d.napiecie.tekst}</Text> : null}
+      </View>
+    );
+  }
+
+  function renderTydzien() {
+    return (
+      <View>
+        {/* WT-04 + WT-05 — strzałki i zakres dat. */}
+        <View style={styles.navrow}>
+          <TouchableOpacity
+            style={styles.arrow}
+            onPress={() => { const p = przesunTydzien(poniedzialek, -1); if (p) setPoniedzialek(p); }}
+          >
+            <Text style={styles.arrowTxt}>‹</Text>
+          </TouchableOpacity>
+          <Text style={styles.wk}>{tydzien.zakresDat}</Text>
+          <TouchableOpacity
+            style={styles.arrow}
+            onPress={() => { const p = przesunTydzien(poniedzialek, 1); if (p) setPoniedzialek(p); }}
+          >
+            <Text style={styles.arrowTxt}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ⛔ R5 — NIEUDANY ODCZYT MA WŁASNE ZDANIE. Nie jest pustką i nie
+            udaje pustego kalendarza. */}
+        {!tydzien.odczyt.wydarzenia ? (
+          <Text style={styles.blad}>{NIE_UDALO_SIE_ODCZYTAC_TYGODNIA}</Text>
+        ) : null}
+
+        {/* ⭐ WT-08 + WT-09 — jedno zdanie nad tygodniem. Powstaje WYŁĄCZNIE
+            z policzonych wierszy; przy braku danych nie ma go wcale. */}
+        {tydzien.zdanie ? (
+          <View style={styles.lede}>
+            <Text style={styles.ledeMain}>{tydzien.zdanie.podsumowanie}</Text>
+            {tydzien.zdanie.napiecie ? (
+              <Text style={styles.ledeSub}>{tydzien.zdanie.napiecie}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* WT-31 — „nie wiemy, kiedy masz szkołę". Stoi też wtedy, gdy tydzień
+            MA pozycje: pasek zajętości jest wtedy pusty u każdego dnia i bez
+            tego zdania wygląda to jak tydzień bez szkoły. Przy pustym tygodniu
+            mówi to samo `rozpoznajPustke` niżej — nie dublujemy. */}
+        {tydzien.planLekcjiZnany === false && pustkaTygodnia === null ? (
+          <View style={styles.konfig}>
+            <Text style={styles.konfigTxt}>{PUSTKA_BRAK_KONFIGURACJI_TEKST}</Text>
+            <TouchableOpacity onPress={() => router.push('/profil')}>
+              <Text style={styles.pustkaCta}>{PUSTKA_BRAK_KONFIGURACJI_CTA} →</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* ⚠️ PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI ZAMIAST
+            JEDNEJ. Stało tu „Brak zaplanowanych wydarzeń." — jedno zdanie na
+            trzy różne sytuacje. Zawodnik, któremu wygasł dostęp, czytał, że
+            NIC NIE MA, zamiast dowiedzieć się, że produkt przestał przyjmować
+            jego wpisy. Rozstrzygnięcie jest czystą funkcją (lib/trzyPustki.ts);
+            ten ekran je WYKONUJE, nie podejmuje. */}
+        {pustkaTygodnia ? (
+          <View>
+            <Text style={styles.empty}>{pustkaTygodnia.tekst}</Text>
+            {/* WT-33 — pustka kończy się DOKŁADNIE JEDNĄ akcją, i to taką,
+                która TĘ pustkę zamyka. „Dodaj trening" prowadzi do formularza,
+                „Wpisz swój plan lekcji" i „Przedłuż dostęp" — do Profilu, bo
+                tam mieszka jedno i drugie. Pustka z wyjściem donikąd jest
+                ślepym zaułkiem, a nie wyjściem. */}
+            <TouchableOpacity onPress={() => {
+              if (pustkaTygodnia.rodzaj === 'brak_danych') setZakladka('listy');
+              else router.push('/profil');
+            }}>
+              <Text style={styles.pustkaCta}>{pustkaTygodnia.cta} →</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* ⭐ SIEDEM WIERSZY DNI — zawsze siedem, także w pustym tygodniu.
+            Tydzień, który kurczy się do dni z treścią, przestaje być tygodniem
+            (WT-06, WG-02). */}
+        {tydzien.dni.map(renderDzien)}
+
+        {/* WT-18 — legenda kropek. Brzmienia co do znaku z makiety. */}
+        <Text style={styles.sectionLabel}>Legenda</Text>
+        {LEGENDA_KROPEK.map((l) => (
+          <View key={l.kropka} style={styles.it}>
+            <View style={[styles.dot, KOLOR_KROPKI[l.kropka]]} />
+            <Text style={styles.itText}>{l.opis}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  }
+
+  function renderListy() {
+    // ⛔ PLAN-D-C1 — SEKCJE POWSTAJĄ TYLKO Z ODCZYTANYCH DANYCH. Przy `null`
+    // nie budujemy pustych list, tylko mówimy, że odczyt się nie udał.
+    if (events === null) {
+      return <Text style={styles.blad}>{NIE_UDALO_SIE_ODCZYTAC_TYGODNIA}</Text>;
+    }
+    const byDateAsc = (a: CalEvent, b: CalEvent) =>
+      (a.scheduled_date! < b.scheduled_date! ? -1 : a.scheduled_date! > b.scheduled_date! ? 1 : 0);
+    const recurring = events.filter((e) => e.status === 'scheduled' && e.recurrence_rule);
+    // ⚠️ PLAN-D-A7 08.2026 — DO 14.08.2026 STAŁO TU `e.status === 'scheduled'`.
+    // Migracja A1 (wykonana 14.08) dopuściła `status = 'completed'`, a pas A1
+    // ustawia go z Dziennika przy zaliczeniu sesji Bloku. Ten ekran filtrował
+    // po `'scheduled'` w KAŻDEJ z trzech sekcji, więc pierwsze wydarzenie
+    // oznaczone jako wykonane ZNIKNĘŁOBY z kalendarza bez śladu — razem
+    // z każdym meczem, który od tej rundy zapisuje ekran Mecz. Zapis by się
+    // udał, ekran by milczał: „cichy brak" w czystej postaci.
+    // Kryterium jest teraz DATA, nie status; status idzie na plakietkę niżej.
+    const scheduledWithDate = events.filter(
+      (e) => (e.status === 'scheduled' || e.status === 'completed') && e.scheduled_date,
+    );
+    const upcoming = scheduledWithDate.filter((e) => e.scheduled_date! >= todayStr).sort(byDateAsc);
+    const past = scheduledWithDate.filter((e) => e.scheduled_date! < todayStr).sort((a, b) => -byDateAsc(a, b));
+    const cancelled = events.filter((e) => e.status === 'cancelled');
+
+    return (
+      <View>
+        <View style={styles.block}>
+          <Text style={styles.label}>Rodzaj</Text>
+          <View style={styles.pickerWrap}>
+            <Picker selectedValue={eventType} onValueChange={setEventType}>
+              {Object.entries(EVENT_TYPE_LABELS).map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
+            </Picker>
+          </View>
+
+          <Text style={styles.label}>Tytuł</Text>
+          <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} value={title} onChangeText={setTitle} placeholder="np. Trening siłowy" />
+
+          <Text style={styles.label}>Notatka (opcjonalnie)</Text>
+          <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={notes} onChangeText={setNotes} multiline placeholder="Dodatkowe informacje" />
+
+          <View style={styles.toggle}>
+            <TouchableOpacity style={[styles.toggleBtn, frequency === 'once' && styles.toggleBtnActive]} onPress={() => setFrequency('once')}>
+              <Text style={[styles.toggleTxt, frequency === 'once' && styles.toggleTxtActive]}>Jednorazowe</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.toggleBtn, frequency === 'recurring' && styles.toggleBtnActive]} onPress={() => setFrequency('recurring')}>
+              <Text style={[styles.toggleTxt, frequency === 'recurring' && styles.toggleTxtActive]}>Cykliczne</Text>
+            </TouchableOpacity>
+          </View>
+
+          {frequency === 'once' ? (
+            <>
+              <Text style={styles.label}>Data</Text>
+              <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
+                <Text style={{ color: date ? colors.textPrimary : colors.textSecondary }}>
+                  {date ? date.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Wybierz datę'}
+                </Text>
+              </TouchableOpacity>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={date ?? new Date()}
+                  mode="date"
+                  onChange={(_event, selected) => {
+                    setShowDatePicker(false);
+                    if (selected) setDate(selected);
+                  }}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Dni tygodnia</Text>
+              <View style={styles.daysRow}>
+                {DAYS_OF_WEEK.map(([code, label]) => (
+                  <TouchableOpacity key={code} style={styles.dayCheck} onPress={() => toggleDay(code)}>
+                    <Checkbox value={selectedDays.has(code)} onValueChange={() => toggleDay(code)} />
+                    <Text style={styles.dayCheckLabel}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* PLAN-D-A7 08.2026 — GODZINA, KTÓREJ WOLNO NIE BYĆ.
+              Stoi POZA gałęzią „jednorazowe / cykliczne" świadomie: trening
+              klubowy w każdy wtorek o 18:00 ma godzinę tak samo jak pojedynczy
+              mecz. Pole jest tekstowe, a nie zegarkowe — `DateTimePicker` w trybie
+              `time` zawsze JAKĄŚ godzinę pokazuje, więc nie umie wyrazić „nie
+              podałem", a to jest tu stan poprawny i najczęstszy. */}
+          <Text style={styles.label}>Godzina (opcjonalnie)</Text>
+          <TextInput
+            style={styles.input}
+            placeholderTextColor={colors.textSecondary}
+            value={godzina}
+            onChangeText={setGodzina}
+            keyboardType="numbers-and-punctuation"
+            placeholder="np. 18:00 — zostaw puste, jeśli nie wiesz"
+          />
+
+          <Text style={styles.label}>Powiąż z wąskim gardłem (opcjonalnie)</Text>
+          <View style={styles.pickerWrap}>
+            <Picker selectedValue={goalId} onValueChange={setGoalId}>
+              <Picker.Item label="— nie dotyczy —" value="" />
+              {activeGoals.map((g) => (
+                <Picker.Item
+                  key={g.id}
+                  label={(SEG_LABELS[g.segment_id] || g.segment_id) + (g.refinement_note ? ' — ' + g.refinement_note : '')}
+                  value={String(g.id)}
+                />
+              ))}
+            </Picker>
+          </View>
+
+          <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={createCalendarEvent}>
+            <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Dodaj do kalendarza'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ marginTop: 24 }}>
+          <Text style={styles.sectionLabel}>Cykliczne</Text>
+          {recurring.length === 0 && <Text style={styles.empty}>Brak cyklicznych wpisów.</Text>}
+          {recurring.map(renderEventCard)}
+        </View>
+
+        <View style={{ marginTop: 20 }}>
+          <Text style={styles.sectionLabel}>Nadchodzące</Text>
+          {upcoming.length === 0 && pustkaTygodnia ? (
+            <View>
+              <Text style={styles.empty}>{pustkaTygodnia.tekst}</Text>
+              <Text style={styles.pustkaCta}>{pustkaTygodnia.cta} →</Text>
+            </View>
+          ) : null}
+          {upcoming.map(renderEventCard)}
+        </View>
+
+        {past.length > 0 && (
+          <View style={{ marginTop: 20 }}>
+            <TouchableOpacity onPress={() => setShowPast((v) => !v)}>
+              <Text style={styles.sectionLabel}>{showPast ? '▾' : '▸'} Minione ({past.length})</Text>
+            </TouchableOpacity>
+            {showPast && past.map(renderEventCard)}
+          </View>
+        )}
+
+        <View style={{ marginTop: 20 }}>
+          <TouchableOpacity onPress={() => setShowCancelled((v) => !v)}>
+            <Text style={styles.sectionLabel}>{showCancelled ? '▾' : '▸'} Anulowane</Text>
+          </TouchableOpacity>
+          {showCancelled && (
+            cancelled.length === 0
+              ? <Text style={styles.empty}>Brak anulowanych wpisów.</Text>
+              : cancelled.map(renderEventCard)
+          )}
+        </View>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -414,139 +859,25 @@ export default function KalendarzScreen() {
       {error && <Text style={styles.error}>{error}</Text>}
       {ok && <Text style={styles.ok}>{ok}</Text>}
 
-      <View style={styles.block}>
-        <Text style={styles.label}>Rodzaj</Text>
-        <View style={styles.pickerWrap}>
-          <Picker selectedValue={eventType} onValueChange={setEventType}>
-            {Object.entries(EVENT_TYPE_LABELS).map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
-          </Picker>
-        </View>
-
-        <Text style={styles.label}>Tytuł</Text>
-        <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} value={title} onChangeText={setTitle} placeholder="np. Trening siłowy" />
-
-        <Text style={styles.label}>Notatka (opcjonalnie)</Text>
-        <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={notes} onChangeText={setNotes} multiline placeholder="Dodatkowe informacje" />
-
-        <View style={styles.toggle}>
-          <TouchableOpacity style={[styles.toggleBtn, frequency === 'once' && styles.toggleBtnActive]} onPress={() => setFrequency('once')}>
-            <Text style={[styles.toggleTxt, frequency === 'once' && styles.toggleTxtActive]}>Jednorazowe</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.toggleBtn, frequency === 'recurring' && styles.toggleBtnActive]} onPress={() => setFrequency('recurring')}>
-            <Text style={[styles.toggleTxt, frequency === 'recurring' && styles.toggleTxtActive]}>Cykliczne</Text>
-          </TouchableOpacity>
-        </View>
-
-        {frequency === 'once' ? (
-          <>
-            <Text style={styles.label}>Data</Text>
-            <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
-              <Text style={{ color: date ? colors.textPrimary : colors.textSecondary }}>
-                {date ? date.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Wybierz datę'}
-              </Text>
-            </TouchableOpacity>
-            {showDatePicker && (
-              <DateTimePicker
-                value={date ?? new Date()}
-                mode="date"
-                onChange={(_event, selected) => {
-                  setShowDatePicker(false);
-                  if (selected) setDate(selected);
-                }}
-              />
-            )}
-          </>
-        ) : (
-          <>
-            <Text style={styles.label}>Dni tygodnia</Text>
-            <View style={styles.daysRow}>
-              {DAYS_OF_WEEK.map(([code, label]) => (
-                <TouchableOpacity key={code} style={styles.dayCheck} onPress={() => toggleDay(code)}>
-                  <Checkbox value={selectedDays.has(code)} onValueChange={() => toggleDay(code)} />
-                  <Text style={styles.dayCheckLabel}>{label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        )}
-
-        {/* PLAN-D-A7 08.2026 — GODZINA, KTÓREJ WOLNO NIE BYĆ.
-            Stoi POZA gałęzią „jednorazowe / cykliczne" świadomie: trening
-            klubowy w każdy wtorek o 18:00 ma godzinę tak samo jak pojedynczy
-            mecz. Pole jest tekstowe, a nie zegarkowe — `DateTimePicker` w trybie
-            `time` zawsze JAKĄŚ godzinę pokazuje, więc nie umie wyrazić „nie
-            podałem", a to jest tu stan poprawny i najczęstszy. */}
-        <Text style={styles.label}>Godzina (opcjonalnie)</Text>
-        <TextInput
-          style={styles.input}
-          placeholderTextColor={colors.textSecondary}
-          value={godzina}
-          onChangeText={setGodzina}
-          keyboardType="numbers-and-punctuation"
-          placeholder="np. 18:00 — zostaw puste, jeśli nie wiesz"
-        />
-
-        <Text style={styles.label}>Powiąż z wąskim gardłem (opcjonalnie)</Text>
-        <View style={styles.pickerWrap}>
-          <Picker selectedValue={goalId} onValueChange={setGoalId}>
-            <Picker.Item label="— nie dotyczy —" value="" />
-            {activeGoals.map((g) => (
-              <Picker.Item
-                key={g.id}
-                label={(SEG_LABELS[g.segment_id] || g.segment_id) + (g.refinement_note ? ' — ' + g.refinement_note : '')}
-                value={String(g.id)}
-              />
-            ))}
-          </Picker>
-        </View>
-
-        <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={createCalendarEvent}>
-          <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Dodaj do kalendarza'}</Text>
+      {/* ⭐ WT-03 — zakładki Tydzień / Listy WEWNĄTRZ ekranu Kalendarz.
+          Nie piąta zakładka w pasku (WT-01 zostaje nietknięta) — przełącznik
+          wewnątrz ekranu, dokładnie jak w makiecie. */}
+      <View style={styles.seg}>
+        <TouchableOpacity
+          style={[styles.segBtn, zakladka === 'tydzien' && styles.segBtnOn]}
+          onPress={() => setZakladka('tydzien')}
+        >
+          <Text style={[styles.segTxt, zakladka === 'tydzien' && styles.segTxtOn]}>Tydzień</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.segBtn, zakladka === 'listy' && styles.segBtnOn]}
+          onPress={() => setZakladka('listy')}
+        >
+          <Text style={[styles.segTxt, zakladka === 'listy' && styles.segTxtOn]}>Listy</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={{ marginTop: 24 }}>
-        <Text style={styles.sectionLabel}>Cykliczne</Text>
-        {recurring.length === 0 && <Text style={styles.empty}>Brak cyklicznych wpisów.</Text>}
-        {recurring.map(renderEventCard)}
-      </View>
-
-      <View style={{ marginTop: 20 }}>
-        <Text style={styles.sectionLabel}>Nadchodzące</Text>
-        {/* ⚠️ PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI ZAMIAST
-            JEDNEJ. Stało tu „Brak zaplanowanych wydarzeń." — jedno zdanie na
-            trzy różne sytuacje. Zawodnik, któremu wygasł dostęp, czytał, że
-            NIC NIE MA, zamiast dowiedzieć się, że produkt przestał przyjmować
-            jego wpisy. Rozstrzygnięcie jest czystą funkcją (lib/trzyPustki.ts);
-            ten ekran je WYKONUJE, nie podejmuje. */}
-        {pustkaNadchodzace ? (
-          <View>
-            <Text style={styles.empty}>{pustkaNadchodzace.tekst}</Text>
-            <Text style={styles.pustkaCta}>{pustkaNadchodzace.cta} →</Text>
-          </View>
-        ) : null}
-        {upcoming.map(renderEventCard)}
-      </View>
-
-      {past.length > 0 && (
-        <View style={{ marginTop: 20 }}>
-          <TouchableOpacity onPress={() => setShowPast((v) => !v)}>
-            <Text style={styles.sectionLabel}>{showPast ? '▾' : '▸'} Minione ({past.length})</Text>
-          </TouchableOpacity>
-          {showPast && past.map(renderEventCard)}
-        </View>
-      )}
-
-      <View style={{ marginTop: 20 }}>
-        <TouchableOpacity onPress={() => setShowCancelled((v) => !v)}>
-          <Text style={styles.sectionLabel}>{showCancelled ? '▾' : '▸'} Anulowane</Text>
-        </TouchableOpacity>
-        {showCancelled && (
-          cancelled.length === 0
-            ? <Text style={styles.empty}>Brak anulowanych wpisów.</Text>
-            : cancelled.map(renderEventCard)
-        )}
-      </View>
+      {zakladka === 'tydzien' ? renderTydzien() : renderListy()}
     </ScrollView>
     </SafeAreaView>
   );
@@ -556,7 +887,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
   label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 }, // W1: ink3
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 12 }, // W1: ink3
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 12, marginTop: 18 }, // W1: ink3
   // PLAN-D-T (T6) — wyjście z pustki. Te same wartości co `cardAction` na
   // „Dziś": to jest ta sama rzecz co „zobacz" na innych kartach.
   pustkaCta: { ...typography.bodyMedium, fontSize: 13, color: colors.brand, marginTop: 6 },
@@ -586,10 +917,46 @@ const styles = StyleSheet.create({
   cardMeta: { fontSize: 12, color: colors.textSecondary, marginBottom: 10 },
   badge: { fontSize: 11, letterSpacing: 0.5, marginLeft: 8, borderRadius: radii.sm, paddingHorizontal: 8, paddingVertical: 3, overflow: 'hidden' },
   // W1: tła odznak z tokenów (koniec rgba na sztywno; lib/theme.ts)
-  badgePriority: { backgroundColor: colors.warnSoft, color: colors.warning },
   badgeCompleted: { backgroundColor: colors.okSoft, color: colors.success },
   badgeMuted: { backgroundColor: colors.surfaceElevated, color: colors.textSecondary },
   actionsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   secondaryBtn: { paddingVertical: 10, paddingHorizontal: 18, minHeight: minTouchHeight, justifyContent: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, alignSelf: 'flex-start' },
   secondaryBtnText: { ...typography.bodyMedium, fontSize: 13, color: colors.textPrimary, letterSpacing: 0.5 },
+
+  // ── PLAN-D-C1 — WIDOK TYGODNIA ────────────────────────────────────
+  seg: { flexDirection: 'row', backgroundColor: colors.surfaceElevated, borderRadius: radii.md, padding: 3, marginBottom: 14 },
+  segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: minTouchHeight, borderRadius: radii.sm },
+  segBtnOn: { backgroundColor: colors.surface },
+  segTxt: { ...typography.bodyMedium, fontSize: 13, color: colors.textSecondary },
+  segTxtOn: { ...typography.bodySemiBold, color: colors.textPrimary },
+  navrow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  arrow: { width: minTouchHeight, height: minTouchHeight, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  arrowTxt: { fontSize: 18, color: colors.textSecondary },
+  wk: { ...typography.display, fontSize: 19, letterSpacing: 0.4, color: colors.textPrimary },
+  lede: { backgroundColor: colors.surfaceElevated, borderRadius: radii.md, padding: 12, marginBottom: 14, borderLeftWidth: 3, borderLeftColor: colors.brand },
+  ledeMain: { ...typography.body, fontSize: 14, color: colors.textPrimary },
+  ledeSub: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
+  blad: { fontSize: 13, color: colors.warning, marginBottom: 12 },
+  konfig: { borderWidth: 1, borderColor: colors.border, borderLeftWidth: 3, borderLeftColor: colors.caution, borderRadius: radii.md, padding: 12, marginBottom: 14 },
+  konfigTxt: { fontSize: 13, color: colors.textPrimary },
+  day: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, paddingBottom: 10 },
+  dhead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  dname: { ...typography.display, fontSize: 16, letterSpacing: 0.6, minWidth: 74, color: colors.textPrimary },
+  dnameToday: { color: colors.brand },
+  busy: { flex: 1, height: 7, backgroundColor: colors.track, borderRadius: 4, overflow: 'hidden' },
+  busyFill: { position: 'absolute', top: 0, bottom: 0, backgroundColor: colors.textTertiary },
+  btime: { fontSize: 11, color: colors.textTertiary },
+  wagaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, paddingLeft: 4 },
+  wagaPasek: { flexDirection: 'row', gap: 2 },
+  wagaSeg: { width: 10, height: 3, borderRadius: 2, backgroundColor: colors.track },
+  wagaSegOn: { backgroundColor: colors.brand },
+  wagaOpis: { fontSize: 11, letterSpacing: 0.5, color: colors.textTertiary },
+  it: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 3, paddingLeft: 4 },
+  itText: { flex: 1, fontSize: 13, color: colors.textPrimary },
+  itDone: { color: colors.textTertiary, textDecorationLine: 'line-through' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  tag: { fontSize: 10, color: colors.textSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden' },
+  tagOk: { color: colors.success, borderColor: colors.okSoft, backgroundColor: colors.okSoft },
+  empty2: { fontSize: 12, color: colors.textTertiary, fontStyle: 'italic', paddingLeft: 4, paddingVertical: 2 },
+  tight: { fontSize: 12, color: colors.brand, paddingLeft: 19, paddingTop: 2 },
 });
