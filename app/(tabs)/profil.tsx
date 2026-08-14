@@ -112,12 +112,23 @@ const CURRENT_LEVELS = [
   'Amator / rekreacyjnie', 'Juniorski klub', 'Seniorski klub amatorski',
   'Półprofesjonalny', 'Profesjonalny',
 ];
+// ── PLAN-D-Q 08.2026 (13.08.2026) — ETYKIETY CELU: CZTERY KOPIE JEDNEJ LISTY ──
+// Zmieniasz tutaj — zmień w POZOSTAŁYCH TRZECH, w tej samej kolejności:
+//   • Asystent Gamechange/app/(tabs)/cele.tsx    — GOAL_DIRECTION_LABELS
+//   • Asystent Gamechange/app/(tabs)/profil.tsx  — GOAL_DIRECTION_LABELS, kreator etap 2 ← TEN PLIK
+//   • gamechange-app/asystent_app.html           — GOAL_DIRECTION_LABELS
+//   • gamechange-diagnoza/index.html             — #goal-buttons + CTX_LABELS.goal + GOAL_DIRECTION_KEYS
+// KOLEJNOŚĆ JEST CZĘŚCIĄ DECYZJI: `zawodowo` PIERWSZE, `other` OSTATNIE. Nie sortuj.
+// `other` wpada do istniejącego pola `goal_direction_note` — nie ma osobnego pola.
+// Strażnik: Asystent Gamechange/lib/etykietyCelu.selftest.ts (porównuje ZBIORY KLUCZY).
+// 12.08.2026 dokładnie ten kształt — jedna kopia zmieniona, trzy nie — zabił Mapę drogi.
 const GOAL_DIRECTION_LABELS: Record<string, string> = {
-  more_minutes: 'Więcej minut w meczach',
-  move_up: 'Awans na wyższy poziom',
-  improve_element: 'Poprawa konkretnego elementu gry',
-  avoid_relegation_from_team: 'Utrzymanie miejsca w składzie',
-  other: 'Inne',
+  zawodowo: 'Dojść do futbolu zawodowego',
+  najwyzej_jak_moge: 'Zajść tak wysoko, jak zdołam',
+  nie_do_pominiecia: 'Być zawodnikiem, którego trudno pominąć',
+  jedna_rzecz: 'Doprowadzić do końca jedną rzecz w swojej grze',
+  w_grze_na_dlugo: 'Zostać w grze na długo',
+  other: 'Coś innego — napiszę własnymi słowami',
 };
 const EQUIPMENT_LABELS: Record<string, string> = {
   silownia: 'Siłownia',
