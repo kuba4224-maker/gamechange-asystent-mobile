@@ -151,7 +151,10 @@ import {
   minimumPossibleAge,
   hintKindLabel,
   hintEyebrow,
-  HINT_EYEBROW,
+  // ⚠️ PLAN-D-T 08.2026 — `HINT_EYEBROW` stracił tu konsumenta razem
+  // z kafelkiem stanów R5 podpowiedzi. Stała ZOSTAJE w lib/componentHints.ts:
+  // czyta ją `hintEyebrow()`, którego ten ekran nadal używa dla treści zawsze
+  // widocznej. Zniknął import, nie stała.
   HINT_TABLE_MISSING_TEXT,
   HINT_ERROR_TEXT,
   HINT_EMPTY_TEXT,
@@ -216,11 +219,38 @@ import {
 import {
   czytajOgraniczenia,
   coPokazacNaDzis,
+  czyOslonaAktywna,
   opisOgraniczenDoLogu,
   isMissingOgraniczeniaColumnError,
   KOLUMNA_OGRANICZEN,
   type StanOgraniczen,
 } from '../../lib/ograniczenia';
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — KRĘGOSŁUP.
+//
+// Ten ekran był KOLAŻEM SZEŚCIU NIEZALEŻNYCH PRODUCENTÓW: kafelek Bloku ·
+// karta rekomendacji · podpowiedź dnia · karta głosu tygodnia · punkt pomocy ·
+// piętnaście rytmów push. Każdy powstał w innej rundzie i żaden nie wiedział
+// o pozostałych. Trzy pierwsze łączą się od tej rundy w JEDNĄ ODPOWIEDŹ
+// o trzech częściach: CO DZIŚ ZROBIĆ · DLACZEGO AKURAT TO · CO TO ZMIENI.
+//
+// ⚠️ DECYZJA JEST CZYSTĄ FUNKCJĄ (`lib/jednaOdpowiedz.ts`); ten ekran ją
+// WYKONUJE, nie podejmuje. ZERO NOWYCH ZAPYTAŃ DO BAZY — wszystkie trzy części
+// biorą się z danych, które ekran i tak już miał.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  zbudujJednaOdpowiedz,
+  NAGLOWEK_CO_ZROBIC,
+  NAGLOWEK_DLACZEGO,
+  NAGLOWEK_CO_ZMIENI,
+} from '../../lib/jednaOdpowiedz';
+// PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI.
+// Karta „Dziś w kalendarzu" mówiła „Nic zaplanowanego na dziś." zawodnikowi,
+// który nic nie zaplanował, I zawodnikowi, któremu wygasł dostęp i którego
+// wpisu baza i tak by nie przyjęła. To są dwie różne rzeczy i od tej rundy
+// mają dwa różne zdania. Rozstrzygnięcie: `lib/trzyPustki.ts`.
+import { rozpoznajPustke, opisPustkiDoLogu } from '../../lib/trzyPustki';
+import { czytajStanDostepu, RPC_STAN_DOSTEPU } from '../../lib/dostepKonta';
 // ZADANIE E2 12.08.2026 — punkt pomocy wyżej w kontuzji i ścieżce wyjścia.
 // Stąd idzie WYŁĄCZNIE prośba o otwarcie tego samego, jedynego modala
 // zamontowanego w app/_layout.tsx. Zero drugiego egzemplarza.
@@ -292,6 +322,9 @@ export default function DzisScreen() {
   // `cisza`: przed odczytem nie wiadomo, czy arbiter policzył ten tydzień, a
   // cisza jest DECYZJĄ arbitra i nie wolno jej udawać. Patrz lib/glosTygodnia.ts.
   const [glos, setGlos] = useState<StanGlosu>({ rodzaj: 'brak_wiersza' });
+
+  // PLAN-D-T (T6) — `null` znaczy „nie odczytałem", a NIE „nie ma dostępu".
+  const [moznaZapisywac, setMoznaZapisywac] = useState<boolean | null>(null);
 
   // PLAN-D-J 08.2026 — stan nałożony przez arbitra. Stan początkowy to
   // `nie_odczytane`, a NIE „nic nie obowiązuje": przed odczytem nie wiadomo,
@@ -537,6 +570,17 @@ export default function DzisScreen() {
     );
     setTodayEvents(forToday);
 
+    // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — STAN DOSTĘPU DO ZAPISU.
+    // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE: gdyby RPC `stan_dostepu` padło
+    // albo nie istniało, ekran „Dziś" ma działać dalej. Nieudany odczyt daje
+    // `null`, czyli „nie wiem" — a „nie wiem" NIE mówi zawodnikowi, że
+    // stracił dostęp (kierunek błędu jak przy ograniczeniach).
+    const dostepRes = await supabase.rpc(RPC_STAN_DOSTEPU);
+    const stanDostepu = czytajStanDostepu(
+      dostepRes.data, dostepRes.error ? dostepRes.error.message : null,
+    );
+    setMoznaZapisywac(stanDostepu.rodzaj === 'znany' ? stanDostepu.maDostep : null);
+
     // ─── Wskaźnik pracy (patrz nagłówek pliku, punkt 4) ───────────────
     // Cała logika (i uzasadnienie każdej decyzji) siedzi w
     // lib/focusBlockProgress.ts — czysta funkcja, uruchamiana i sprawdzana bez
@@ -595,62 +639,63 @@ export default function DzisScreen() {
   // w components/RecommendationCard.tsx. Cztery stany, każdy JAWNY — reguła R5:
   // pusty wynik i brak tabeli to dwie różne rzeczy i zawodnik ma je rozróżniać
   // po tekście, nie zgadywać z ciszy.
-  const renderHint = () => {
-    // PLAN-D-J 08.2026 — podpowiedź z materiałów jest treścią O PRACY NAD CELEM,
-    // więc przy `systemMilczyOCelach` i `wszystkoMilczy` znika razem z resztą.
-    // Świadomie sprawdzane TU, a nie tylko w miejscu wywołania: `renderHint`
-    // jest wołane z dwóch miejsc i drugie łatwo przeoczyć.
+  // ⚠️ PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — `renderHint()` PRZESTAŁ
+  // BYĆ SZÓSTYM PRODUCENTEM I ZOSTAŁ TREŚCIĄ ZAWSZE WIDOCZNĄ.
+  //
+  // Do tej rundy ta funkcja rysowała DWIE rzeczy naraz:
+  //   (a) treść ZAWSZE WIDOCZNĄ (`zawsze_widoczna`, m.in. telefon zaufania) —
+  //       to jest funkcja BEZPIECZEŃSTWA i zostaje nietknięta;
+  //   (b) podpowiedź dnia z rotacji — czyli trzeciego z sześciu producentów,
+  //       który mówił zawodnikowi, co ma zrobić, nie wiedząc o dwóch
+  //       pozostałych.
+  //
+  // (b) WCHODZI DO JEDNEJ ODPOWIEDZI (`lib/jednaOdpowiedz.ts`) i przestaje
+  // istnieć jako osobny kafelek. Zostaje wyłącznie (a).
+  //
+  // ⚠️ ZNIKA TEŻ NAGŁÓWEK „Warto wiedzieć" nad podpowiedzią dnia — a razem
+  // z nim znika stan, w którym 114 z 297 treści kończyło się na wiedzy (M4).
+  // W jednej odpowiedzi ta sama treść stoi pod nagłówkiem „Co dziś zrobić".
+  // Przy treści ZAWSZE WIDOCZNEJ nagłówek ZOSTAJE: tam „warto wiedzieć" jest
+  // prawdą — to są granice bezpieczeństwa, nie zadania na dziś.
+  const renderTrescZawszeWidoczna = () => {
+    // Treść zawsze widoczna jest bezpieczeństwem, nie treścią o pracy —
+    // ale przy ścieżce wyjścia milczy WSZYSTKO poza kartą głosu i punktem
+    // pomocy, więc warunek zostaje bez zmiany.
     if (!widokDzis.pokazacPodpowiedz) return null;
-    if (hintState.state === 'no_goal') return null;
-    if (hintState.state === 'loading') return null; // nic nie migocze pod przyciskami
-
-    // ZAPIS B7 08.08.2026 (M19) — treść zawsze widoczna (m.in. bezpieczeństwo:
-    // telefon zaufania) stoi NAD rotacyjną i nie znika żadnego dnia. Dziś
-    // (kolumna świeżo wklejona, zero wierszy `true`) ta lista jest pusta,
-    // więc ekran wygląda co do piksela jak przed tą zmianą.
-    const always = hintState.alwaysVisible.map((p) => (
-      <View key={p.hint.klucz} style={styles.hintBox}>
-        <Text style={styles.hintEyebrow}>
-          {hintEyebrow(p.source)}
-          {p.source ? <Text style={styles.hintSource}>{'  ·  ' + p.source}</Text> : null}
-        </Text>
-        <Text style={styles.hintKind}>{hintKindLabel(p.hint.rodzaj)}</Text>
-        <Text style={styles.hintText}>{p.hint.hint}</Text>
-      </View>
-    ));
-    if (hintState.state === 'always_only') return <>{always}</>;
-
-    if (hintState.state === 'ready') {
-      return (
-        <>
-          {always}
-          <View style={styles.hintBox}>
+    if (hintState.state === 'no_goal' || hintState.state === 'loading') return null;
+    if (hintState.alwaysVisible.length === 0) return null;
+    return (
+      <>
+        {hintState.alwaysVisible.map((p) => (
+          <View key={p.hint.klucz} style={styles.hintBox}>
             {/* Nadtytuł mówi PRAWDĘ o pochodzeniu zdania: „Z materiałów Gamechange"
-                tylko wtedy, gdy da się pokazać źródło. Jedyny wiersz bez źródła
+                tylko wtedy, gdy da się pokazać źródło. Wiersz bez źródła
                 (zdanie kierujące po dawki do rodzica, decyzja A9) dostaje
                 „Zasada Gamechange" — patrz `hintEyebrow` w lib/componentHints.ts. */}
             <Text style={styles.hintEyebrow}>
-              {hintEyebrow(hintState.source)}
-              {hintState.source ? <Text style={styles.hintSource}>{'  ·  ' + hintState.source}</Text> : null}
+              {hintEyebrow(p.source)}
+              {p.source ? <Text style={styles.hintSource}>{'  ·  ' + p.source}</Text> : null}
             </Text>
-            <Text style={styles.hintKind}>{hintKindLabel(hintState.hint.rodzaj)}</Text>
-            <Text style={styles.hintText}>{hintState.hint.hint}</Text>
+            <Text style={styles.hintKind}>{hintKindLabel(p.hint.rodzaj)}</Text>
+            <Text style={styles.hintText}>{p.hint.hint}</Text>
           </View>
-        </>
-      );
-    }
-
-    const quietText =
-      hintState.state === 'table_missing' ? HINT_TABLE_MISSING_TEXT
-        : hintState.state === 'error' ? HINT_ERROR_TEXT
-          : HINT_EMPTY_TEXT;
-    return (
-      <View style={styles.hintBox}>
-        <Text style={styles.hintEyebrow}>{HINT_EYEBROW}</Text>
-        <Text style={styles.hintQuiet}>{quietText}</Text>
-      </View>
+        ))}
+      </>
     );
   };
+
+  // ⚠️ PLAN-D-T (T1) — STANY R5 PODPOWIEDZI („nie ma tabeli" / „błąd odczytu" /
+  // „pusto") NIE RYSUJĄ JUŻ WŁASNEGO KAFELKA. Rozróżnienie NIE ZGINĘŁO: idzie
+  // do konsoli razem z powodem odpowiedzi. Powód jest twardy — te trzy zdania
+  // mówiły zawodnikowi o STANIE NASZEJ BAZY („materiały są w przygotowaniu"),
+  // czyli o nas, a nie o nim, i zajmowały miejsce jednej odpowiedzi. Gdy nie
+  // mamy czego zaproponować, mówi to `BRAK_PROPOZYCJI` — jednym zdaniem,
+  // w jednym miejscu.
+  const powodBrakuPodpowiedzi =
+    hintState.state === 'table_missing' ? HINT_TABLE_MISSING_TEXT
+      : hintState.state === 'error' ? HINT_ERROR_TEXT
+        : hintState.state === 'empty' ? HINT_EMPTY_TEXT
+          : null;
 
   // PLAN-D-J 08.2026 — CO OBOWIĄZUJE. Decyzja jest czystą funkcją
   // (`lib/ograniczenia.ts`), tu zostaje wyłącznie jej wykonanie.
@@ -659,6 +704,49 @@ export default function DzisScreen() {
   // co się dzieje. To ZDEJMUJE z ekranu to, co w tych stanach jest wyrzutem:
   // licznik zrobionych sesji, zaproszenie do planowania i rekomendację.
   const widokDzis = coPokazacNaDzis(ograniczenia);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — JEDNA ODPOWIEDŹ.
+  // Decyzja jest CZYSTĄ FUNKCJĄ (`lib/jednaOdpowiedz.ts`); ten ekran ją
+  // WYKONUJE, nie podejmuje. Wszystkie trzy części biorą się z rzeczy, które
+  // ekran już miał — zero nowych zapytań do bazy.
+  // ═══════════════════════════════════════════════════════════════════
+  const odpowiedz = zbudujJednaOdpowiedz({
+    widok: widokDzis,
+    laduje: loading,
+    maGardlo: !!priorityGoal,
+    etykietaGardla: goalSegmentLabel,
+    maAktywnyBlok: !!workProgress,
+    nowaPorcjaCzeka: newDoseWaiting,
+    rekomendacja: { jest: !!focusRec && !!currentUser, powiazanaZGardlem: isRecLinkedToGoal },
+    podpowiedz: hintState,
+    // ⚠️ Osłona liczona z DWÓCH kluczy naraz (`czyOslonaAktywna`), nigdy
+    // z samego `blokNieZwiekszaObjetosci` — bo ten zapala także kontuzja,
+    // a wtedy zdanie „Twój Blok nie zwiększa objętości" sugerowałoby wzrost
+    // komuś, kto leży z urazem. To jest Z0.
+    oslona: czyOslonaAktywna(ograniczenia),
+  });
+
+  // ⚠️ ROZRÓŻNIENIE R5 NIE ZGINĘŁO — ZESZŁO DO KONSOLI. „Nie ma tabeli",
+  // „błąd odczytu" i „pusto" to nadal trzy różne rzeczy i nadal da się je
+  // odróżnić przy pytaniu „dlaczego ekran wyglądał wtedy tak". Przestały być
+  // trzema różnymi zdaniami NA EKRANIE, bo mówiły zawodnikowi o stanie NASZEJ
+  // bazy („materiały dla tego obszaru są w przygotowaniu"), a nie o jego
+  // pracy — i zajmowały miejsce jednej odpowiedzi.
+  if (powodBrakuPodpowiedzi) console.log(`dzis: podpowiedź niedostępna — ${powodBrakuPodpowiedzi}`);
+  console.log(`dzis: jedna odpowiedź — ${odpowiedz.powod}`);
+
+  // PLAN-D-T (T6) — KTÓRA TO PUSTKA w karcie „Dziś w kalendarzu".
+  // ⚠️ `planLekcjiZnany: null` — planu lekcji nie ma w bazie (zmierzone
+  // 14.08.2026: zero tabel %school% / %szkol% / %lesson%), więc gałąź
+  // „brak konfiguracji" jest nieosiągalna. Włącza ją pas A3.
+  const pustkaDzis = rozpoznajPustke({
+    maWpisy: todayEvents.length > 0,
+    planLekcjiZnany: null,
+    moznaZapisywac,
+    zakres: 'dzis',
+  });
+  if (pustkaDzis) console.log(`dzis: ${opisPustkiDoLogu(pustkaDzis)}`);
 
   const allRecsLinkLabel = otherUnreadCount > 0
     ? `Wszystkie rekomendacje (${otherUnreadCount} nowe) →`
@@ -721,6 +809,17 @@ export default function DzisScreen() {
                   „3 z 6 sesji zrobione". Słowa „Bloku Skupienia" zeszły razem
                   z resztą kontekstu do szczegółów Celu; pod nazwą Celu nie ma
                   wątpliwości, o jakich sesjach mowa. */}
+              {/* ⚠️ PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — Z TEGO KAFELKA
+                  ZNIKNĘŁY DWA WEZWANIA DO PRACY: „Nowa porcja w Twoim Bloku →"
+                  i „Zaplanuj Blok →". Oba były rzeczami DO ZROBIENIA, wypowiadanymi
+                  przez kafelek, który miał mówić wyłącznie, NAD CZYM zawodnik
+                  pracuje. To był pierwszy z sześciu producentów mówiących naraz.
+                  Oba brzmienia przeniosły się CO DO ZNACZENIA do jednej odpowiedzi
+                  (`lib/jednaOdpowiedz.ts`, stałe BLOK_NOWA_PORCJA
+                  i ZAPROSZENIE_ZAPLANUJ_BLOK) — nie zginęły, zmieniły miejsce
+                  na to, w którym zawodnik szuka odpowiedzi „co dziś zrobić".
+                  ⚠️ KAFELEK ZOSTAJE PIERWSZY (decyzja Kuby z 06.08.2026) i nadal
+                  jest w całości przyciskiem do szczegółów wąskiego gardła. */}
               {workProgress && widokDzis.pokazacPostepPracy ? (
                 <>
                   <Text style={styles.workText}>
@@ -729,22 +828,7 @@ export default function DzisScreen() {
                   <View style={styles.workTrack}>
                     <View style={[styles.workFill, { width: `${Math.round((workProgress.done / workProgress.total) * 100)}%` }]} />
                   </View>
-                  {/* ZAPIS B7 08.08.2026 (M23/B35) — dawka była dotąd za dwoma
-                      kliknięciami i nic na Dziś o niej nie mówiło. Jedna linia,
-                      tylko gdy najnowsza dawka jest NIEOTWARTA; cały kafelek
-                      i tak prowadzi do Celu, więc zero nowych tras. */}
-                  {newDoseWaiting && widokDzis.pokazacWezwanieDoPracy ? (
-                    <Text style={styles.heroAction}>Nowa porcja w Twoim Bloku →</Text>
-                  ) : null}
                 </>
-              ) : widokDzis.pokazacWezwanieDoPracy ? (
-                // Brak Bloku pod ten Cel → ŻADNEJ zastępczej liczby (nigdy
-                // „0 z 0"), tylko zaproszenie. Zwykły tekst, nie osobny
-                // przycisk: cały kafelek prowadzi w to samo miejsce.
-                // PLAN-D-J: przy kontuzji i ścieżce wyjścia zaproszenia NIE MA.
-                // Kafelek zostaje — zawodnik ma prawo zobaczyć, nad czym
-                // pracował. Nie ma obowiązku zobaczyć, ile z tego nie zrobił.
-                <Text style={styles.heroAction}>Zaplanuj Blok →</Text>
               ) : null}
             </>
           ) : (
@@ -755,91 +839,34 @@ export default function DzisScreen() {
           )}
         </TouchableOpacity>
 
-        {/* Rekomendacja dnia — od 08.08.2026 PEŁNA, z przyciskami. Jedyna akcja
-            decyzyjna na ekranie domowym.
-            PLAN-D-J 08.2026 — CAŁA SEKCJA ZNIKA przy `systemMilczyOCelach`
-            (kontuzja) i `wszystkoMilczy` (ścieżka wyjścia). Spec 1.2: przy
-            kontuzji „system milczy o celach", przy ścieżce wyjścia „wszystko
-            inne milczy: zero przypomnień, zero liczników, zero porównań".
-            Nie zastępujemy jej niczym — zastępczy komunikat zamieniłby decyzję
-            o milczeniu w kolejne odezwanie. */}
-        {widokDzis.pokazacRekomendacje && (
-        <View style={{ marginTop: 24 }}>
-          <Text style={styles.sectionLabel}>Co dziś zrobić</Text>
-          {/* WIEDZA B4 08.08.2026 — dług N2: pierwsze wejście nie udaje już, że
-              rekomendacji nie ma. Patrz nagłówek pliku. */}
-          {loading ? (
-            <View style={styles.card}>
-              <Text style={styles.cardBody}>Wczytuję…</Text>
-            </View>
-          ) : focusRec && currentUser ? (
-            <>
-              <RecommendationCard
-                rec={focusRec}
-                currentUserId={currentUser.id}
-                isUnread={unreadSnapshotRef.current.has(focusRec.id)}
-                headerSlot={isRecLinkedToGoal && goalSegmentLabel
-                  ? <Text style={styles.linkedToGoal}>Pomaga Ci przy: {goalSegmentLabel}</Text>
-                  : null}
-                // WIEDZA B4 08.08.2026 — SEDNO TEJ RUNDY: konkret z materiałów
-                // Kuby ze źródłem, pod przyciskami. Patrz `footerSlot`
-                // w components/RecommendationCard.tsx.
-                footerSlot={renderHint()}
-                onSubmitted={load}
-              />
-              <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/centrum-decyzji')}>
-                <Text style={styles.cardAction}>{allRecsLinkLabel}</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <View style={styles.card}>
-              <Text style={styles.cardBody}>
-                {/* PODMIANA 08.08.2026, zatwierdzona przez Kubę. Poprzednie
-                    brzmienie: „Jeszcze nie mamy dla Ciebie gotowej rekomendacji
-                    — pojawi się tu, gdy silnik Centrum Decyzji zacznie działać."
-                    Trzy powody zmiany, wszystkie widoczne na żywym telefonie:
-                    (1) SPRZECZNOŚĆ — tuż pod tym zdaniem `renderHint()` podaje
-                        zawodnikowi konkretne zadanie z materiału, więc karta
-                        mówiła „nie mamy nic" i natychmiast dawała coś;
-                    (2) ŻARGON — „silnik" to nasze słowo, nie słowo zawodnika;
-                    (3) MARTWY ODSYŁACZ — „Centrum Decyzji" po przebudowie
-                        nawigacji (B2/B3, 08.08.2026) nie istnieje już nigdzie
-                        w interfejsie; ekran nazywa się „Wszystkie rekomendacje",
-                        więc tekst odsyłał do miejsca, którego nie da się znaleźć.
-                    Każdy nowy tester widzi ten stan pierwszego dnia, przed
-                    pierwszą rekomendacją — dlatego to nie jest kosmetyka. */}
-                {/* PIERWSZE URUCHOMIENIE 10.08.2026 — trzeci wariant, brzmienie
-                    zatwierdzone przez Kubę. Zdanie o „następnym dniu rano" NIE
-                    jest ozdobne: `cron-onboard-diagnosis` chodzi raz na dobę
-                    (vercel.json: `0 4 * * *`), więc bez tego zawodnik wypełnia
-                    diagnozę, wraca na Dziś, nic się nie zmienia i uznaje, że
-                    appka się zawiesiła. Druga część zdania jest po to, żeby nie
-                    zabrać mu możliwości ruszenia od razu. */}
-                {showFirstStep
-                  ? 'Twoje pierwsze wąskie gardło wyliczy się z diagnozy i pojawi się tu następnego dnia rano. Możesz też wskazać je sam, jeśli już wiesz, nad czym chcesz pracować.'
-                  : hasAnyGoal
-                    ? 'Twoja pierwsza rekomendacja pojawi się tu, gdy system przetrawi Twoją diagnozę i pierwsze wpisy. Na razie zacznij od tego, co niżej.'
-                    : 'Wskaż swoje pierwsze wąskie gardło, żeby system zaczął podpowiadać, na czym się skupić.'}
-              </Text>
-              {/* Brak rekomendacji NIE oznacza braku wiedzy: podpowiedź z materiału
-                  wisi na segmencie Celu, więc zawodnik z Celem, ale bez gotowej
-                  rekomendacji, i tak dostaje dziś konkret. Bez Celu `renderHint()`
-                  zwraca `null` i karta wygląda jak dotąd. */}
-              {renderHint()}
-              {/* PIERWSZE URUCHOMIENIE 10.08.2026 — bez tego wiersza kafelek
-                  mówiłby o diagnozie, a przycisk prowadził do Celów. */}
-              <TouchableOpacity
-                style={styles.inlineLink}
-                onPress={() => router.push(showFirstStep ? '/diagnoza' : hasAnyGoal ? '/centrum-decyzji' : '/cele')}
-              >
-                <Text style={styles.cardAction}>
-                  {showFirstStep ? 'Zrób diagnozę →' : hasAnyGoal ? allRecsLinkLabel : 'Przejdź do wąskich gardeł →'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-        )}
+        {/* ═══════════════════════════════════════════════════════════
+            PLAN-D-T 08.2026 (13.08.2026), zadanie T3 — PORZĄDEK EKRANU
+            WYNIKA ZE STANU.
+
+            REGUŁA: element, który stan WYCISZA, nie może stać wyżej niż
+            karta MÓWIĄCA o wyciszeniu.
+
+            Do tej rundy było odwrotnie: jedna odpowiedź (wtedy: sekcja
+            „Co dziś zrobić") stała NAD kartą głosu tygodnia. Przy kontuzji
+            zawodnik widział więc najpierw dziurę po wyciszonej sekcji,
+            a dopiero pod nią zdanie „Wracasz po urazie", które tę dziurę
+            tłumaczyło. Kolejność kazała mu domyślić się przyczyny, zanim ją
+            podaliśmy — i wyglądało to jak awaria, a nie jak decyzja.
+
+            Od tej rundy KARTA GŁOSU I PUNKT POMOCY STOJĄ NAD JEDNĄ
+            ODPOWIEDZIĄ. Zysk jest w każdym z pięciu stanów:
+              • normalny        — karta głosu zwykle się nie rysuje, więc
+                                  jedna odpowiedź i tak jest pierwsza;
+              • Osłona          — powód („Blok nie zwiększa objętości") stoi
+                                  nad odpowiedzią, która z niego wynika;
+              • kontuzja        — „Wracasz po urazie" stoi tam, gdzie ekran
+                                  zamilkł, zamiast pod pustym miejscem;
+              • ścieżka wyjścia — to samo, plus punkt pomocy tuż pod spodem;
+              • cisza           — arbiter policzył i nie ma nic do
+                                  powiedzenia; karta się nie rysuje i jedna
+                                  odpowiedź jest pierwsza, tak jak w stanie
+                                  normalnym.
+            ═══════════════════════════════════════════════════════════ */}
 
         {/* PLAN-D-F 08.2026 — GŁOS TYGODNIA.
             Karta pojawia się WYŁĄCZNIE wtedy, gdy arbiter dał głos jednemu
@@ -893,6 +920,103 @@ export default function DzisScreen() {
           </TouchableOpacity>
         )}
 
+        {/* ═══════════════════════════════════════════════════════════
+            PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — JEDNA ODPOWIEDŹ.
+
+            TU STAŁY TRZY NIEZALEŻNE KARTY: kafelek Bloku (jego wezwania do
+            pracy), karta rekomendacji i podpowiedź dnia. Każda powstała
+            w innej rundzie i żadna nie wiedziała o pozostałych. Teraz jest
+            JEDNA ODPOWIEDŹ o trzech częściach:
+
+                CO DZIŚ ZROBIĆ · DLACZEGO AKURAT TO · CO TO ZMIENI
+
+            ⚠️ TO NIE JEST CZWARTA KARTA OBOK TRZECH. Kafelek stracił oba
+            wezwania, podpowiedź dnia przestała być osobnym kafelkiem, a stany
+            R5 („nie ma tabeli" / „błąd" / „pusto") przestały rysować własny
+            komunikat o stanie NASZEJ bazy. Elementów na ekranie jest MNIEJ,
+            nie więcej — i to jest kryterium tej rundy.
+
+            ⚠️ „CO TO ZMIENI" JEST PUSTE W ~93% PRZYPADKÓW I TAK MA BYĆ:
+            wychodzi wyłącznie, gdy istnieje dowód Z ŹRÓDŁEM (zmierzone
+            14.08.2026: `component_hints.dowody` wypełnione w 21 z 297 wierszy).
+            Wypełniacz w rodzaju „to pomoże Ci się rozwijać" łamałby Z0.
+            ═══════════════════════════════════════════════════════════ */}
+        {odpowiedz.pokazac && (
+          <View style={{ marginTop: 24 }}>
+            <View style={styles.odpowiedzCard}>
+              <View style={styles.odpowiedzStripe} />
+
+              {/* ── CZĘŚĆ 1: CO DZIŚ ZROBIĆ — DOKŁADNIE JEDNA RZECZ ───── */}
+              <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZROBIC}</Text>
+              {odpowiedz.coZrobic.zrodlo === 'rekomendacja' && focusRec && currentUser ? (
+                /* Treść i przyciski niesie TEN SAM komponent, który renderuje
+                   Centrum decyzji — zero drugiej kopii kodu karty. To jedyna
+                   akcja decyzyjna na tym ekranie i dlatego rekomendacja, gdy
+                   istnieje, jest ważniejsza od zdania z materiału. */
+                <RecommendationCard
+                  rec={focusRec}
+                  currentUserId={currentUser.id}
+                  isUnread={unreadSnapshotRef.current.has(focusRec.id)}
+                  headerSlot={null}
+                  footerSlot={null}
+                  onSubmitted={load}
+                />
+              ) : (
+                <Text style={styles.odpowiedzTresc}>{odpowiedz.coZrobic.tekst}</Text>
+            )}
+
+              {/* Jedno dotknięcie prowadzi tam, gdzie ta jedna rzecz się dzieje.
+                  ⚠️ Trasa wynika ZE ŹRÓDŁA odpowiedzi, nie z osobnej decyzji
+                  ekranu — dzięki temu nie da się pokazać zdania o Bloku
+                  i wysłać zawodnika do wąskich gardeł. */}
+              {odpowiedz.coZrobic.zrodlo === 'blok' || odpowiedz.coZrobic.zrodlo === 'zaproszenie' ? (
+                <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/cele')}>
+                  <Text style={styles.cardAction}>{odpowiedz.coZrobic.tekst} →</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {/* ── CZĘŚĆ 2: DLACZEGO AKURAT TO — JEDNO ZDANIE ────────── */}
+              {/* ⚠️ `null` znaczy „nie mam uzasadnienia, którego bym nie zmyślił".
+                  Zmyślone uzasadnienie jest gorsze niż jego brak, bo brzmi
+                  wiarygodnie. Dlatego ta część potrafi zniknąć w całości. */}
+              {odpowiedz.dlaczego ? (
+                <View style={styles.odpowiedzCzesc}>
+                  <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_DLACZEGO}</Text>
+                  <Text style={styles.odpowiedzDlaczego}>{odpowiedz.dlaczego}</Text>
+                </View>
+              ) : null}
+
+              {/* ── CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM ─── */}
+              {/* ⛔ Tej części NIE DA SIĘ zbudować bez źródła: pilnuje tego typ
+                  `CoToZmieni` w lib/jednaOdpowiedz.ts, nie ten komentarz. */}
+              {odpowiedz.coToZmieni ? (
+                <View style={styles.odpowiedzCzesc}>
+                  <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZMIENI}</Text>
+                  <Text style={styles.odpowiedzDowod}>{odpowiedz.coToZmieni.tekst}</Text>
+                  <Text style={styles.hintSource}>{odpowiedz.coToZmieni.zrodlo}</Text>
+                </View>
+              ) : null}
+
+              {/* Treść ZAWSZE WIDOCZNA (bezpieczeństwo) — NIE jest podpowiedzią
+                  dnia i nie konkuruje z jedną odpowiedzią. Stoi na dole tej samej
+                  karty, żeby nie stać się kolejnym kafelkiem. */}
+              {renderTrescZawszeWidoczna()}
+            </View>
+
+            {/* Jedyne wyjście do reszty rekomendacji. Zostaje, bo jest DROGĄ,
+                nie treścią — i dlatego nie liczy się jako drugi producent. */}
+            {hasAnyGoal ? (
+              <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/centrum-decyzji')}>
+                <Text style={styles.cardAction}>{allRecsLinkLabel}</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.inlineLink} onPress={() => router.push(showFirstStep ? '/diagnoza' : '/cele')}>
+                <Text style={styles.cardAction}>{showFirstStep ? 'Zrób diagnozę →' : 'Przejdź do wąskich gardeł →'}</Text>
+              </TouchableOpacity>
+          )}
+          </View>
+        )}
+
         {/* Diagnoza żywa — Funkcja 10, część 2 (INTEGRACJA_DIAGNOZA_ZYWA.md).
             Renderuje się sama w null, gdy pulse nie jest dziś należny.
             ⛔ Zamrożona 06.08.2026 (LIVING_DIAGNOSIS_PULSE_ENABLED = false) —
@@ -915,8 +1039,16 @@ export default function DzisScreen() {
         <View style={{ marginTop: 24 }}>
           <Text style={styles.sectionLabel}>Dziś w kalendarzu</Text>
           <TouchableOpacity style={styles.card} onPress={() => router.push('/kalendarz')}>
-            {todayEvents.length === 0 ? (
-              <Text style={styles.cardBody}>Nic zaplanowanego na dziś.</Text>
+            {/* ⚠️ PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI.
+                Stało tu jedno zdanie („Nic zaplanowanego na dziś.") na trzy
+                różne sytuacje. Zawodnik z wygasłym dostępem czytał, że nic nie
+                ma — zamiast dowiedzieć się, że produkt przestał przyjmować
+                jego wpisy. */}
+            {pustkaDzis ? (
+              <>
+                <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
+                <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
+              </>
             ) : (
               todayEvents.map((e) => (
                 <Text key={e.id} style={styles.eventLine}>
@@ -1000,7 +1132,35 @@ const styles = StyleSheet.create({
   // lewa krawędź prostowana clipem toru (overflow hidden). Wysokość bez zmian.
   workTrack: { height: 4, borderRadius: 2, backgroundColor: colors.track, overflow: 'hidden' },
   workFill: { height: 4, backgroundColor: colors.brand, transform: [{ skewX: skew.angle }] },
+  // ═══════════════════════════════════════════════════════════════
+  // PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — JEDNA ODPOWIEDŹ.
+  //
+  // Ta sama rodzina co `glosCard` i `heroGoal`: krecha 12° z logo, bo to jest
+  // karta „to jest o Tobie", a nie pozycja listy. ⚠️ ŚWIADOMIE JEDNA RAMKA
+  // NA TRZY CZĘŚCI — gdyby każda część miała własną, na ekranie stałyby trzy
+  // kafelki zamiast trzech akapitów jednej odpowiedzi, czyli dokładnie to,
+  // co ta runda likwiduje.
+  odpowiedzCard: {
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.md, padding: 16, overflow: 'hidden',
+  },
+  odpowiedzStripe: { ...skew.stripe, height: 6, backgroundColor: colors.brand, marginBottom: 12 },
+  // Nadtytuły trzech części. Te same wartości co `sectionLabel`, bo to JEST
+  // etykieta sekcji — tyle że wewnątrz karty, nie nad nią.
+  odpowiedzNaglowek: {
+    ...typography.bodyMedium, fontSize: 11, letterSpacing: 1,
+    textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6,
+  },
+  // Jedna rzecz do zrobienia. Największy tekst w karcie — bo to jest
+  // odpowiedź na pytanie, z którym zawodnik na ten ekran wchodzi.
+  odpowiedzTresc: { ...typography.bodySemiBold, fontSize: 16, lineHeight: 23, color: colors.textPrimary },
+  odpowiedzCzesc: { marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border },
+  odpowiedzDlaczego: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
+  odpowiedzDowod: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textPrimary, marginBottom: 4 },
   // WIEDZA B4 08.08.2026 — PODPOWIEDŹ Z MATERIAŁU.
+  // ⚠️ PLAN-D-T 08.2026 — od tej rundy `hintBox` rysuje WYŁĄCZNIE treść
+  // ZAWSZE WIDOCZNĄ (bezpieczeństwo, m.in. telefon zaufania). Podpowiedź dnia
+  // weszła do jednej odpowiedzi i nie ma już własnego kafelka.
   // Kreska u góry zamiast własnej ramki: to jest część TEJ karty, a nie druga
   // karta pod nią. Zawodnik ma przeczytać „to należy do tej rekomendacji", nie
   // „doszedł kolejny kafelek".

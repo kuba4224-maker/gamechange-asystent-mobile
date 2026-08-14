@@ -453,7 +453,34 @@ export type HintState =
   | { state: 'empty'; alwaysVisible: HintPresentation[] }
   /** Rotacja pusta, ale jest treść zawsze widoczna — rysujemy samą ją. */
   | { state: 'always_only'; alwaysVisible: HintPresentation[] }
-  | { state: 'ready'; hint: ComponentHintRow; source: string | null; alwaysVisible: HintPresentation[] };
+  | {
+    state: 'ready';
+    hint: ComponentHintRow;
+    source: string | null;
+    alwaysVisible: HintPresentation[];
+    /**
+     * ⭐ PLAN-D-T 08.2026 (13.08.2026), zadanie T7 — NAJBLIŻSZA PODPOWIEDŹ
+     * `rodzaj = 'zrobic'` Z TEJ SAMEJ PULI.
+     *
+     * PO CO: 114 z 297 podpowiedzi ma `rodzaj = 'zrozumiec'` (zmierzone na
+     * żywej bazie 14.08.2026: 114 / 183 / 297) i renderowało się jako karta
+     * „Warto wiedzieć" — czyli wypowiedź kończąca się na wiedzy, wprost
+     * przeciw M4 („żaden materiał nie kończy się na wiedzy").
+     *
+     * ⚠️ SPROSTOWANIE, KTÓRE ZMIENIA CAŁE ROZWIĄZANIE: te treści W WIĘKSZOŚCI
+     * ZAWIERAJĄ POLECENIE („wydech musi być dłuższy niż wdech", „cel to
+     * jasnosłomkowy kolor moczu"). Problemem nie była treść, tylko szablon,
+     * który podawał je pod nagłówkiem „Warto wiedzieć" zamiast „Co dziś
+     * zrobić". ⛔ DLATEGO NIE PRZEPISUJEMY 114 TREŚCI — zmieniamy szablon,
+     * a to pole jest zapasem na wypadek, gdyby wylosowana podpowiedź naprawdę
+     * nie niosła nic do zrobienia.
+     *
+     * `null` znaczy: w całej puli tego zawodnika nie ma ani jednej podpowiedzi
+     * `'zrobic'`. Wtedy ekran bierze wylosowaną — bo jej treść i tak najczęściej
+     * jest poleceniem — i mówi o tym jawnie w logu, zamiast udawać, że ma zapas.
+     */
+    doZrobienia: HintPresentation | null;
+  };
 
 export function buildHintState(params: {
   hasGoal: boolean;
@@ -479,7 +506,8 @@ export function buildHintState(params: {
   // stałoby się obejściem bramki wiekowej.
   const eligible = selectHintsForPlayer({ rows, componentId, age });
   const alwaysVisible = selectAlwaysVisibleHints(eligible).map(present);
-  const picked = pickHintOfDay(selectRotatingHints(eligible), day);
+  const rotacja = selectRotatingHints(eligible);
+  const picked = pickHintOfDay(rotacja, day);
 
   if (!picked) {
     return alwaysVisible.length > 0
@@ -491,7 +519,43 @@ export function buildHintState(params: {
     hint: picked,
     source: formatHintSource(picked.zrodlo, picked.strony),
     alwaysVisible,
+    // ⭐ PLAN-D-T (T7) — patrz opis pola przy `HintState`.
+    doZrobienia: najblizszaDoZrobienia(rotacja, day),
   };
+}
+
+/**
+ * ⭐ PLAN-D-T 08.2026 (13.08.2026), zadanie T7 — NAJBLIŻSZA PODPOWIEDŹ
+ * `rodzaj = 'zrobic'` z tej samej, już przefiltrowanej puli.
+ *
+ * „Najbliższa" znaczy: idąc OD WYLOSOWANEJ NA DZIŚ, cyklicznie w przód, po tej
+ * samej posortowanej liście. Dwa powody, oba praktyczne:
+ *   • wynik jest funkcją dnia i listy, więc w obrębie dnia jest STAŁY —
+ *     odświeżenie ekranu nie podmienia tekstu pod palcem (ta sama własność,
+ *     na której stoi `pickHintOfDay`);
+ *   • idąc od wylosowanej, trzymamy się tego samego sąsiedztwa treści —
+ *     podpowiedzi są posortowane po trafności (Element → źródło → pozycja),
+ *     więc sąsiad jest bliższy tematycznie niż pierwszy z brzegu.
+ *
+ * ⚠️ Gdy wylosowana JEST `'zrobic'`, zwraca ją samą — wtedy ekran nie ma czego
+ * dokładać i nie dokłada. Zero drugiej linii bez powodu.
+ *
+ * Wejście: WYNIK `selectRotatingHints(selectHintsForPlayer(...))`, czyli pula
+ * po bramce wiekowej A9, filtrze odbiorcy i dopasowaniu do Elementu. Ta funkcja
+ * NIE FILTRUJE NICZEGO — i to jest celowe, żeby nie dało się jej użyć zamiast
+ * tamtych filtrów (ten sam powód, co przy `selectAlwaysVisibleHints`).
+ */
+export function najblizszaDoZrobienia(
+  rotacja: ComponentHintRow[],
+  day: number,
+): HintPresentation | null {
+  if (rotacja.length === 0) return null;
+  const start = ((day % rotacja.length) + rotacja.length) % rotacja.length;
+  for (let i = 0; i < rotacja.length; i++) {
+    const kandydat = rotacja[(start + i) % rotacja.length];
+    if (kandydat.rodzaj === 'zrobic') return present(kandydat);
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────

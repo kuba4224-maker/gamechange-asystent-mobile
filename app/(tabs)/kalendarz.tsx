@@ -50,6 +50,28 @@ import { toLocalDateStr, DAYS_OF_WEEK, DAY_LABELS_PL } from '../../lib/date-util
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
 // JEDNA DROGA B2 08.08.2026 — jedno źródło nazw segmentów (lib/labels.ts).
 import { SEGMENT_LABELS } from '../../lib/labels';
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI I KOMUNIKAT
+// O BRAKU DOSTĘPU.
+//
+// Do tej rundy ten ekran robił dwie rzeczy źle i obie po cichu:
+//   • przy pustej liście mówił „Brak zaplanowanych wydarzeń" — to samo
+//     zdanie zawodnikowi, który nic nie zaplanował, i temu, któremu
+//     WYGASŁ DOSTĘP i baza i tak nie przyjęłaby jego wpisu;
+//   • przy odrzuconym zapisie pokazywał surowy błąd bazy („new row
+//     violates row-level security policy for table «calendar_events»"),
+//     z którego nie da się wyczytać ani co się stało, ani że nic nie zginęło.
+// Oba naprawia ta runda. Rozróżnienie pustek jest CZYSTĄ FUNKCJĄ
+// (`lib/trzyPustki.ts`), a komunikat — tym samym, którym pas K zastąpił
+// błąd w Dzienniku. Zero nowej treści.
+// ═══════════════════════════════════════════════════════════════════
+import { rozpoznajPustke, opisPustkiDoLogu } from '../../lib/trzyPustki';
+import {
+  toJestBrakDostepu,
+  ZAPIS_ODRZUCONY_BRAK_DOSTEPU,
+  czytajStanDostepu,
+  RPC_STAN_DOSTEPU,
+} from '../../lib/dostepKonta';
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   club_training: 'Trening klubowy', own_training: 'Trening własny',
@@ -94,6 +116,11 @@ export default function KalendarzScreen() {
 
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  // PLAN-D-T (T6) — `null` znaczy „nie odczytałem", a NIE „nie ma dostępu".
+  // Kierunek błędu wybrany świadomie: powiedzenie „skończył Ci się okres
+  // próbny" komuś, komu się nie skończył, jest gorsze niż niepokazanie tego
+  // zdania. Patrz `moznaZapisywac` w lib/trzyPustki.ts.
+  const [moznaZapisywac, setMoznaZapisywac] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
 
   const loadGoals = useCallback(async () => {
@@ -126,6 +153,17 @@ export default function KalendarzScreen() {
       .eq('user_id', currentUser.id)
       .not('calendar_event_id', 'is', null);
     setLoggedEventIds(new Set((logRows ?? []).map((l: any) => l.calendar_event_id)));
+
+    // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — STAN DOSTĘPU DO ZAPISU.
+    // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE, POZA paczką wyżej: gdyby RPC
+    // `stan_dostepu` nie istniało albo padło, kalendarz ma działać dalej.
+    // Nieudany odczyt daje `null`, czyli „nie wiem" — a „nie wiem" NIE mówi
+    // zawodnikowi, że stracił dostęp (patrz lib/trzyPustki.ts).
+    const dostepRes = await supabase.rpc(RPC_STAN_DOSTEPU);
+    const stanDostepu = czytajStanDostepu(
+      dostepRes.data, dostepRes.error ? dostepRes.error.message : null,
+    );
+    setMoznaZapisywac(stanDostepu.rodzaj === 'znany' ? stanDostepu.maDostep : null);
   }, [currentUser, loadGoals]);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -201,7 +239,10 @@ export default function KalendarzScreen() {
       resetForm();
       await loadEvents();
     } catch (e: any) {
-      setError('Nie udało się dodać wydarzenia: ' + e.message);
+      // PLAN-D-T (T6) — ⚠️ TO NIE JEST ŚCIEŻKA ODZYSKU: nie ponawiamy zapisu
+      // i nie zmieniamy jego treści. Zmienia się WYŁĄCZNIE zdanie, które
+      // zawodnik czyta, gdy baza odmówiła z powodu wygasłego dostępu.
+      setError(toJestBrakDostepu(e) ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : 'Nie udało się dodać wydarzenia: ' + e.message);
     } finally {
       setSaving(false);
     }
@@ -210,7 +251,11 @@ export default function KalendarzScreen() {
   async function cancelEvent(id: number) {
     setError(null);
     const { error: err } = await supabase.from('calendar_events').update({ status: 'cancelled' }).eq('id', id);
-    if (err) { setError('Nie udało się anulować wydarzenia: ' + err.message); return; }
+    if (err) {
+      // PLAN-D-T (T6) — jak wyżej.
+      setError(toJestBrakDostepu(err) ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : 'Nie udało się anulować wydarzenia: ' + err.message);
+      return;
+    }
     await loadEvents();
   }
 
@@ -253,6 +298,19 @@ export default function KalendarzScreen() {
       </View>
     );
   }
+
+  // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — KTÓRA TO PUSTKA.
+  // ⚠️ `planLekcjiZnany: null` — produkt NIE MA planu lekcji i nie ma go skąd
+  // wziąć (zmierzone 14.08.2026: zero tabel %school% / %szkol% / %lesson%).
+  // Gałąź „brak konfiguracji" jest przez to nieosiągalna i jest to NAZWANE
+  // w lib/trzyPustki.ts, a nie przemilczane. Włącza ją pas A3.
+  const pustkaNadchodzace = rozpoznajPustke({
+    maWpisy: upcoming.length > 0,
+    planLekcjiZnany: null,
+    moznaZapisywac,
+    zakres: 'nadchodzace',
+  });
+  if (pustkaNadchodzace) console.log(`kalendarz: ${opisPustkiDoLogu(pustkaNadchodzace)}`);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -348,7 +406,18 @@ export default function KalendarzScreen() {
 
       <View style={{ marginTop: 20 }}>
         <Text style={styles.sectionLabel}>Nadchodzące</Text>
-        {upcoming.length === 0 && <Text style={styles.empty}>Brak zaplanowanych wydarzeń.</Text>}
+        {/* ⚠️ PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI ZAMIAST
+            JEDNEJ. Stało tu „Brak zaplanowanych wydarzeń." — jedno zdanie na
+            trzy różne sytuacje. Zawodnik, któremu wygasł dostęp, czytał, że
+            NIC NIE MA, zamiast dowiedzieć się, że produkt przestał przyjmować
+            jego wpisy. Rozstrzygnięcie jest czystą funkcją (lib/trzyPustki.ts);
+            ten ekran je WYKONUJE, nie podejmuje. */}
+        {pustkaNadchodzace ? (
+          <View>
+            <Text style={styles.empty}>{pustkaNadchodzace.tekst}</Text>
+            <Text style={styles.pustkaCta}>{pustkaNadchodzace.cta} →</Text>
+          </View>
+        ) : null}
         {upcoming.map(renderEventCard)}
       </View>
 
@@ -381,6 +450,9 @@ const styles = StyleSheet.create({
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
   label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 }, // W1: ink3
   sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 12 }, // W1: ink3
+  // PLAN-D-T (T6) — wyjście z pustki. Te same wartości co `cardAction` na
+  // „Dziś": to jest ta sama rzecz co „zobacz" na innych kartach.
+  pustkaCta: { ...typography.bodyMedium, fontSize: 13, color: colors.brand, marginTop: 6 },
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary, minHeight: minTouchHeight, justifyContent: 'center' },
   textarea: { minHeight: 72, textAlignVertical: 'top' },
   pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: 8 },

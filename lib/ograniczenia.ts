@@ -66,26 +66,42 @@ export const WERSJA_OGRANICZEN_ZNANA = 1;
 //     `exit_mode.state = 'paused_decision'`, którego nie dało się nigdzie
 //     włączyć i który został skasowany razem z gałęzią (pas P, zadanie P8).
 //
+// ⚠️ PLAN-D-T 08.2026 (13.08.2026) — PIĘĆ KLUCZY ZESZŁO DO TRZECH (decyzja D6,
+// `claude/DECYZJE_13_08_2026_DELEGOWANE.md`). Zniknęły `mapaTylkoWTwoichRekach`
+// i `pokazacLiczbeSystemowa` — RAZEM ze swoimi konsumentami w `lib/mapaDrogi.ts`.
+// Pas P zostawił je jako jawnie zawsze `false` i zapisał ten stan w strażniku
+// backendu jako trzecią kategorię (`BEZ_PRZESLANKI`), z notą „ta lista ma się
+// kurczyć, nigdy rosnąć". Ta runda ją opróżniła.
+//
+// POWÓD: klucz, który nie może być prawdziwy, jest kłamstwem w rejestrze.
+// Koperta odpowiada na pytanie „co obowiązuje" — a wpis odpowiadający „nie"
+// ZAWSZE, niezależnie od czegokolwiek, nie jest odpowiedzią, tylko szumem,
+// który następna sesja weźmie za działający mechanizm.
+//
+// CO PRZEZ TO ZNIKA Z EKRANU: Mapa drogi wraca do zachowania sprzed pasa J —
+// sekcja „Co jest tłem" jest ZAWSZE widoczna, liczby systemowej nie ma.
+// ⚠️ Sama liczba o rotacji 24,5–41% NIE ZGINĘŁA z produktu: żyje dalej
+// w `lib/sciezkaWyjscia.ts` (`WYJSCIE_LICZBY`), czyli w stanie, w którym
+// naprawdę ma coś do powiedzenia.
+//
 // ⚠️ `WERSJA_OGRANICZEN` ŚWIADOMIE NIE ROŚNIE. Wersja mówi o KSZTAŁCIE koperty
 // (`{wersja, aktywne[], nieznane_ograniczenia[], nieznane[]}`), a kształt się nie
 // zmienił — zmienił się zbiór kluczy, które w tych tablicach mogą stać. Podbicie
 // wersji kazałoby appce odpowiedzieć `nie_wiem` na KAŻDE ograniczenie z każdego
 // wiersza zapisanego przed tą rundą, czyli wyłączyłoby Osłonę u wszystkich do
 // czasu najbliższego przebiegu crona. Klucz, którego appka nie zna, i tak ma
-// jawne wyjście: ląduje w `nieznaneKlucze` (patrz `czytajOgraniczenia`).
+// jawne wyjście: ląduje w `nieznaneKlucze` (patrz `czytajOgraniczenia`) — więc
+// wiersze sprzed 13.08.2026, niosące dwa skasowane klucze, zostają NAZWANE
+// w logu i nie włączają niczego.
 export type KluczOgraniczenia =
   | 'wszystkoMilczy'
   | 'systemMilczyOCelach'
-  | 'blokNieZwiekszaObjetosci'
-  | 'mapaTylkoWTwoichRekach'
-  | 'pokazacLiczbeSystemowa';
+  | 'blokNieZwiekszaObjetosci';
 
 export const KLUCZE_OGRANICZEN: readonly KluczOgraniczenia[] = [
   'wszystkoMilczy',
   'systemMilczyOCelach',
   'blokNieZwiekszaObjetosci',
-  'mapaTylkoWTwoichRekach',
-  'pokazacLiczbeSystemowa',
 ];
 
 /** Nazwa kolumny. Stała, bo napis wklepany w trzech plikach cicho przestaje trafiać. */
@@ -338,13 +354,12 @@ export function coPokazacNaDzis(stan: StanOgraniczen): WidokDzis {
 //
 // ⚠️ CZEGO TEN STRAŻNIK NIE ŁAPIE — NAZWANE 13.08.2026 (PLAN-D-P). Sprawdza,
 // że każdy klucz MA KONSUMENTA. Nie sprawdza, że backend jest w stanie ten
-// klucz kiedykolwiek WŁĄCZYĆ. Po skasowaniu stanu `paused_decision` (zadanie
-// P8) dokładnie tak jest z `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`:
-// oba mają żywego konsumenta w `lib/mapaDrogi.ts`, oba są poprawne — i oba są
-// od 13.08.2026 ZAWSZE `false`, bo jedyna przesłanka, która je zapalała,
-// zniknęła. To jest ŚWIADOMY stan, zapisany tutaj, a nie cichy brak: pas P miał
-// zdjąć gałąź bez wejścia, a nie przy okazji wyciąć Mapie dwa zachowania,
-// o których Kuba nie decydował. Rozstrzygnięcie należy do sesji nawigującej.
+// klucz kiedykolwiek WŁĄCZYĆ. Drugą połowę tej reguły pilnuje strażnik po
+// stronie backendu (`gamechange-app/tests/test-ograniczenia-maja-konsumenta.js`,
+// kategoria `BEZ_PRZESLANKI`) — i od 13.08.2026 (PLAN-D-T, decyzja D6) ta
+// kategoria jest PUSTA, bo oba klucze, które w niej stały, zniknęły razem
+// z konsumentami. Rejestr niżej opisuje więc trzy klucze, z których KAŻDY
+// backend potrafi włączyć.
 
 export type WpisRejestru = {
   /** Ścieżka względem katalogu głównego appki. */
@@ -372,14 +387,12 @@ export const REJESTR_OGRANICZEN: Record<KluczOgraniczenia, WpisRejestru> = {
     coRobi: 'Sufit tygodniowy Bloku spada z limitu do tego, co zawodnik już robi — planer nie proponuje ani jednej sesji więcej, a przy zajętym tygodniu proponuje redukcję. '
       + 'DRUGI KONSUMENT od 13.08.2026: `lib/rediagnosis.ts` czyta ten klucz przez `czyOslonaAktywna()`, żeby przy zamknięciu Bloku nie nazwać spadku spadkiem u kogoś, kto akurat szybko rośnie.',
   },
-  mapaTylkoWTwoichRekach: {
-    plik: 'lib/mapaDrogi.ts',
-    symbol: 'zbudujOdcinek',
-    coRobi: 'Mapa drogi przestaje pokazywać sekcję „Co jest tłem" i zostawia wyłącznie to, co jest w rękach zawodnika.',
-  },
-  pokazacLiczbeSystemowa: {
-    plik: 'lib/mapaDrogi.ts',
-    symbol: 'zbudujOdcinek',
-    coRobi: 'Mapa drogi dokłada liczbę systemową (rotacja 24,5–41% rocznie), żeby w dniu decyzji nie była nową informacją.',
-  },
 };
+
+// ⚠️ PLAN-D-T 08.2026 (13.08.2026) — TU STAŁY DWA WPISY, OBA SKASOWANE.
+// `mapaTylkoWTwoichRekach` („Mapa chowa sekcję «Co jest tłem»") oraz
+// `pokazacLiczbeSystemowa` („Mapa dokłada liczbę o rotacji 24,5–41%") miały
+// żywych, poprawnych konsumentów w `lib/mapaDrogi.ts` i ani jednej przesłanki,
+// która mogłaby je zapalić. Zniknęły razem z konsumentami (decyzja D6).
+// Nazywam to tutaj, zamiast po cichu skrócić rejestr — bo rejestr jest tym
+// miejscem, w którym następna sesja będzie ich szukać.

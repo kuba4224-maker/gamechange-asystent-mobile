@@ -46,7 +46,10 @@ import { sufitObjetosci, ograniczLiczbeDni } from './budzetUwagi';
 // PLAN-D-P 08.2026 (13.08.2026) — konsument reguły „spadku nie nazywa się
 // spadkiem u kogoś, kto szybko rośnie" przeniósł się z Kalibracji do rediagnozy.
 import { buildRediagnosisView } from './rediagnosis';
-import { zbudujOdcinek, LICZBA_SYSTEMOWA_ROTACJI, type RoadSegment, type RoadFactor } from './mapaDrogi';
+// ⚠️ PLAN-D-T 08.2026 — `LICZBA_SYSTEMOWA_ROTACJI` zniknęła z `mapaDrogi.ts`
+// razem z ograniczeniem, które ją zapalało. Sam fakt (rotacja 24,5–41%) żyje
+// dalej w `lib/sciezkaWyjscia.ts` i tam jest pilnowany.
+import { zbudujOdcinek, type RoadSegment, type RoadFactor } from './mapaDrogi';
 
 let passed = 0;
 let failed = 0;
@@ -287,8 +290,21 @@ const PUSTE = czytajOgraniczenia(koperta());
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// 8. KONSUMENT: MAPA DROGI — P5, tło i liczba systemowa
+// 8. ⚠️ MAPA DROGI PRZESTAŁA BYĆ KONSUMENTEM — PLAN-D-T 08.2026, ZADANIE T5
 // ═════════════════════════════════════════════════════════════════════
+// TU BYŁO 6 ASERCJI NA REGUŁĘ P5 (`mapaTylkoWTwoichRekach`,
+// `pokazacLiczbeSystemowa`). Oba klucze zostały skasowane decyzją D6 razem
+// z konsumentami w `lib/mapaDrogi.ts` — nie miały ani jednej przesłancy od
+// pasa P, więc pilnowały zachowania, którego nie dało się wywołać.
+//
+// ⚠️ ASERCJE NIE ZNIKAJĄ BEZ ZASTĄPIENIA. W ich miejsce wchodzą trzy nowe,
+// pilnujące dokładnie tego, co jest teraz PRAWDĄ o Mapie — i pilnujące tego
+// MOCNIEJ, bo bezwarunkowo:
+//   1. sekcja „Co jest tłem" jest budowana ZAWSZE, z samej treści;
+//   2. Mapa nie ma jak zawęzić się do rzeczy zależnych od zawodnika — czyli
+//      odciążenie atrybucyjne (spec 2.2, punkt 3) nie da się już wyłączyć;
+//   3. `zbudujOdcinek` przyjmuje TRZY argumenty; czwarty (stan ograniczeń)
+//      zniknął z podpisu, więc nikt nie przywróci odczytu po cichu.
 {
   const odc: RoadSegment = { id: 's1', slug: 's1', label: 'Odcinek', age_from: 13, age_to: 15, sort_order: 1 };
   const f = (slug: string, ctrl: boolean, jutro: boolean): RoadFactor => ({
@@ -298,30 +314,27 @@ const PUSTE = czytajOgraniczenia(koperta());
   });
   const czynniki = [f('jutro', true, true), f('reka', true, false), f('tlo1', false, false), f('tlo2', false, false)];
 
-  const bez = zbudujOdcinek(odc, 'base', czynniki, PUSTE);
-  check('bez P5 Mapa pokazuje tło (odciążenie atrybucyjne, spec 2.2 punkt 3)',
-    bez.stan === 'gotowy' && bez.tlo.length === 2 && bez.tloUkryte === false, JSON.stringify(bez));
-  check('…i nie dokłada liczby systemowej',
-    bez.stan === 'gotowy' && bez.liczbaSystemowa === null, JSON.stringify(bez));
+  const widok = zbudujOdcinek(odc, 'base', czynniki);
+  check('(T5) Mapa pokazuje tło ZAWSZE — odciążenia atrybucyjnego nie da się wyłączyć (spec 2.2 punkt 3)',
+    widok.stan === 'gotowy' && widok.tlo.length === 2, JSON.stringify(widok));
+  check('(T5) widok odcinka nie niesie już pól `tloUkryte` ani `liczbaSystemowa`',
+    !('tloUkryte' in widok) && !('liczbaSystemowa' in widok), JSON.stringify(Object.keys(widok)));
+  check('(T5) `zbudujOdcinek` ma DOKŁADNIE trzy parametry — czwarty (stan ograniczeń) zniknął z podpisu',
+    zbudujOdcinek.length === 3, `arity: ${zbudujOdcinek.length}`);
 
-  const zP5 = zbudujOdcinek(odc, 'base', czynniki,
-    czytajOgraniczenia(koperta(['mapaTylkoWTwoichRekach', 'pokazacLiczbeSystemowa'])));
-  check('P5 → Mapa zostawia wyłącznie to, co jest w rękach zawodnika (spec 6.4)',
-    zP5.stan === 'gotowy' && zP5.tlo.length === 0 && zP5.tloUkryte === true, JSON.stringify(zP5));
-  check('…i tło jest UKRYTE świadomie, a nie puste z braku treści',
-    zP5.stan === 'gotowy' && zP5.tloUkryte === true && czynniki.filter((c) => !c.is_controllable).length === 2, '');
-  check('…i dochodzi liczba systemowa',
-    zP5.stan === 'gotowy' && zP5.liczbaSystemowa === LICZBA_SYSTEMOWA_ROTACJI, JSON.stringify(zP5));
-  check('…a liczba systemowa mówi o SYSTEMIE, nie o zawodniku',
-    LICZBA_SYSTEMOWA_ROTACJI.toLowerCase().includes('o systemie, nie o tobie'), LICZBA_SYSTEMOWA_ROTACJI);
-
-  const nieWiem = zbudujOdcinek(odc, 'base', czynniki, czytajOgraniczenia(null, null));
-  check('nie_wiem nie zabiera zawodnikowi tła',
-    nieWiem.stan === 'gotowy' && nieWiem.tlo.length === 2, JSON.stringify(nieWiem));
-
-  const bezStanu = zbudujOdcinek(odc, 'base', czynniki);
-  check('wywołanie bez stanu (kod sprzed rundy J) zachowuje się jak dotąd',
-    bezStanu.stan === 'gotowy' && bezStanu.tlo.length === 2 && bezStanu.liczbaSystemowa === null, '');
+  // ⚠️ NAJWAŻNIEJSZA Z TEJ TRÓJKI: klucz skasowany po stronie appki, ale wciąż
+  // obecny w STARYM wierszu bazy (koperta sprzed 13.08.2026), nie może niczego
+  // włączyć ani zgasić. Ląduje w `nieznaneKlucze` — jawnie, z nazwą.
+  const staryWiersz = czytajOgraniczenia(koperta(['mapaTylkoWTwoichRekach', 'pokazacLiczbeSystemowa']));
+  check('(T5) stara koperta z dwoma skasowanymi kluczami → NIC nie obowiązuje, a klucze są NAZWANE',
+    staryWiersz.rodzaj === 'znane'
+    && staryWiersz.aktywne.length === 0
+    && staryWiersz.nieznaneKlucze.length === 2,
+    JSON.stringify(staryWiersz));
+  check('(T5) …i widok „Dziś" przy takiej kopercie jest PEŁNY, nie wyciszony',
+    coPokazacNaDzis(staryWiersz).pokazacRekomendacje
+    && coPokazacNaDzis(staryWiersz).pokazacPostepPracy,
+    JSON.stringify(coPokazacNaDzis(staryWiersz)));
 }
 
 // ═════════════════════════════════════════════════════════════════════

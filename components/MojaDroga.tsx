@@ -62,23 +62,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
-// PLAN-D-J 08.2026 (12.08.2026) — CO OBOWIĄZUJE W TYM TYGODNIU. Mapa nigdy nie
-// zabiera głosu (budżet 0 ZAWSZE), ale OBOWIĄZUJE ją stan — to jest dokładnie
-// rozróżnienie A1 ze specyfikacji. Dwa ograniczenia dotyczą tego ekranu:
-// `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`.
-// ⚠️ PLAN-D-P 08.2026 (13.08.2026): oba są od tej rundy ZAWSZE `false`. Ich
-// jedyną przesłanką był stan `exit_mode.state = 'paused_decision'`, którego nie
-// dało się nigdzie włączyć i który został skasowany w całości (zadanie P8).
-// Odczyt ZOSTAJE — jest poprawny, przetestowany i zadziała w dniu, w którym
-// któreś z tych ograniczeń dostanie nową przesłankę. To jest stan ŚWIADOMY
-// i nazwany, nie cichy brak; rozstrzygnięcie należy do sesji nawigującej.
-import {
-  czytajOgraniczenia,
-  isMissingOgraniczeniaColumnError,
-  KOLUMNA_OGRANICZEN,
-  opisOgraniczenDoLogu,
-} from '../lib/ograniczenia';
-import { poniedzialekTygodnia as poniedzialekGlosu } from '../lib/glosTygodnia';
+// ⚠️ PLAN-D-T 08.2026 (13.08.2026) — MAPA PRZESTAŁA CZYTAĆ OGRANICZENIA.
+//
+// Od pasa J (12.08.2026) ten ekran zadawał osobne zapytanie o
+// `weekly_voice.ograniczenia`, żeby wykonać dwa ograniczenia reguły P5:
+// `mapaTylkoWTwoichRekach` (chowa sekcję „Co jest tłem") i
+// `pokazacLiczbeSystemowa` (dokłada liczbę o rotacji 24,5–41%). Oba klucze
+// zostały skasowane decyzją D6 — nie miały ani jednej przesłanki od pasa P.
+//
+// Razem z nimi znika stąd CAŁE zapytanie o `weekly_voice`: import czytnika,
+// odczyt kolumny, ścieżka odzysku przy braku kolumny i log. Mapa czyta znowu
+// wyłącznie to, co rysuje — `road_segments`, `road_factors`, stan konta,
+// rocznik i `exit_mode`.
+//
+// ⚠️ MAPA NADAL NIGDY NIE ZABIERA GŁOSU (budżet 0 ZAWSZE, rozróżnienie A1).
+// Ta zmiana nie dotyka tej reguły — dotyczy tylko tego, że Mapa nie ma już
+// czego wykonywać z koperty stanu.
 import { colors, typography, radii, spacing, minTouchHeight, skew } from '../constants/theme';
 import {
   zbudujStanMapy,
@@ -202,22 +201,10 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
       exitAktywny = ((exitRes.data ?? []) as unknown[]).length > 0;
     }
 
-    // PLAN-D-J 08.2026 — osobne, wąskie zapytanie o ograniczenia. Świadomie
-    // POZA paczką wyżej: dopóki migracja J1 nie jest wykonana, PostgREST odrzuca
-    // CAŁE zapytanie z powodu jednej nieznanej kolumny — a Mapa ma działać
-    // niezależnie od tego, bo jest jedynym narzędziem działającym w koncie
-    // OGRANICZONYM. Brak kolumny to jawne „nie wiem", nie „nic nie obowiązuje".
-    const ogrRes = await supabase
-      .from('weekly_voice')
-      .select(`week_start, ${KOLUMNA_OGRANICZEN}`)
-      .eq('user_id', userId)
-      .eq('week_start', poniedzialekGlosu(new Date()))
-      .limit(1);
-    const wierszOgr = (ogrRes.data ?? [])[0] as Record<string, unknown> | undefined;
-    const ograniczenia = ogrRes.error && isMissingOgraniczeniaColumnError(ogrRes.error)
-      ? czytajOgraniczenia(undefined, `kolumny „${KOLUMNA_OGRANICZEN}" nie ma jeszcze w bazie`)
-      : czytajOgraniczenia(wierszOgr ? wierszOgr[KOLUMNA_OGRANICZEN] : null, ogrRes.error ? ogrRes.error.message : null);
-    console.log(`[mapa] ${opisOgraniczenDoLogu(ograniczenia)}`);
+    // ⚠️ PLAN-D-T 08.2026 (13.08.2026) — TU STAŁO OSOBNE ZAPYTANIE O KOPERTĘ
+    // `weekly_voice.ograniczenia` (pas J). Zniknęło razem z dwoma kluczami,
+    // które je czytały (decyzja D6) — Mapa nie ma już czego z niej wykonać,
+    // więc pytanie o nią byłoby kosztem bez skutku. Wyjaśnienie w nagłówku.
 
     setStan(zbudujStanMapy({
       laduje: false,
@@ -227,7 +214,6 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
       accountState,
       birthYear,
       exitAktywny,
-      ograniczenia,
     }));
   }, [userId]);
 
@@ -347,33 +333,29 @@ export default function MojaDroga({ visible, onClose, userId }: Props) {
                       czynników nie zależy od zawodnika, jest samo w sobie
                       działaniem — przenosi przyczynę niepowodzenia z niego na
                       system. Dlatego ma własny podpis, a nie samą listę. */}
-                  {/* PLAN-D-J 08.2026 — przy `mapaTylkoWTwoichRekach` (stan
-                      „czekam na decyzję", spec 6.4) CAŁA sekcja tła znika razem
-                      z nagłówkiem. To jedyny przypadek, w którym jej brak NIE
-                      jest defektem treści — i dlatego rozróżnia go osobne pole
-                      `tloUkryte`, a nie pusta lista. */}
-                  {!stan.widok.tloUkryte ? (
-                    <View style={{ marginTop: spacing.lg }}>
-                      <Text style={styles.sectionLabel}>{SEKCJA_TLO}</Text>
-                      <Text style={styles.tloPodpis}>{SEKCJA_TLO_PODPIS}</Text>
-                      {stan.widok.tlo.length > 0
-                        ? stan.widok.tlo.map(czynnik)
-                        // Pusta trzecia sekcja to defekt treści, nie „nic tu nie ma".
-                        // Mówimy to, zamiast chować nagłówek i udawać, że tak miało być.
-                        : <Text style={styles.quiet}>Tło tego odcinka nie jest jeszcze wgrane do bazy.</Text>}
-                    </View>
-                  ) : null}
+                  {/* ⚠️ PLAN-D-T 08.2026 (13.08.2026) — SEKCJA TŁA JEST ZNOWU
+                      BEZWARUNKOWA. Od pasa J stał tu warunek `!tloUkryte`,
+                      wykonujący ograniczenie `mapaTylkoWTwoichRekach`.
+                      Ograniczenie zostało skasowane (decyzja D6): nie miało
+                      przesłanki od pasa P, więc warunek był ZAWSZE prawdziwy.
+                      Pusta lista `tlo` znaczy znów dokładnie jedno — treści nie
+                      ma w bazie — i dokładnie to mówi zdanie niżej. */}
+                  <View style={{ marginTop: spacing.lg }}>
+                    <Text style={styles.sectionLabel}>{SEKCJA_TLO}</Text>
+                    <Text style={styles.tloPodpis}>{SEKCJA_TLO_PODPIS}</Text>
+                    {stan.widok.tlo.length > 0
+                      ? stan.widok.tlo.map(czynnik)
+                      // Pusta trzecia sekcja to defekt treści, nie „nic tu nie ma".
+                      // Mówimy to, zamiast chować nagłówek i udawać, że tak miało być.
+                      : <Text style={styles.quiet}>Tło tego odcinka nie jest jeszcze wgrane do bazy.</Text>}
+                  </View>
 
-                  {/* PLAN-D-J 08.2026 — liczba systemowa przy `pokazacLiczbeSystemowa`.
-                      Spec 6.4: ma się pojawić, ŻEBY W DNIU DECYZJI NIE BYŁA NOWĄ
-                      INFORMACJĄ. Świadomie zamiast pocieszenia, nie obok niego.
-                      ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ — stała
-                      LICZBA_SYSTEMOWA_ROTACJI w lib/mapaDrogi.ts. */}
-                  {stan.widok.liczbaSystemowa ? (
-                    <View style={{ marginTop: spacing.lg }}>
-                      <Text style={styles.tloPodpis}>{stan.widok.liczbaSystemowa}</Text>
-                    </View>
-                  ) : null}
+                  {/* ⚠️ PLAN-D-T 08.2026 — TU STAŁA LICZBA SYSTEMOWA (rotacja
+                      24,5–41%), dokładana przy `pokazacLiczbeSystemowa`.
+                      Ograniczenie skasowane razem z poprzednim; ten blok nie
+                      mógł się wyświetlić od 13.08.2026. Sam fakt ŻYJE DALEJ
+                      w ścieżce wyjścia (`lib/sciezkaWyjscia.ts`, WYJSCIE_LICZBY)
+                      — czyli tam, gdzie ma odbiorcę. */}
                 </>
               )}
 

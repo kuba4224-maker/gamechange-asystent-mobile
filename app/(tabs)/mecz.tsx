@@ -30,6 +30,10 @@ import { SEGMENT_LABELS, BODY_LOCATIONS, NON_LATERAL_LOCATIONS } from '../../lib
 import { MATCH_QUESTION_BANK } from '../../lib/matchQuestionBank';
 import { selectSegmentForMatch, resolveWordingKey, SegmentSelection, RecoveryState } from '../../lib/matchCascade';
 import { fetchPlayerMatchSelectionContext } from '../../lib/matchSegmentSelection';
+// PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — komunikat o braku dostępu
+// zamiast surowego błędu RLS. Ten sam, którym pas K zastąpił błąd
+// w Dzienniku (`lib/dostepKonta.ts`). Zero nowej treści.
+import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
 
 const GAME_TYPE_LABELS: Record<string, string> = {
   official_match: 'Mecz oficjalny', friendly: 'Sparing',
@@ -352,7 +356,15 @@ export default function MeczScreen() {
       resetForm();
       await loadMecz();
     } catch (e: any) {
-      setError('Nie udało się zapisać meczu: ' + e.message);
+      // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — ODMOWA DOSTĘPU NIE JEST
+      // AWARIĄ I NIE MA TAK WYGLĄDAĆ. Do tej rundy zawodnik z wygasłym
+      // okresem próbnym dostawał tu surowy błąd bazy („new row violates
+      // row-level security policy"), z którego nie da się wyczytać ani co się
+      // stało, ani że nic nie zginęło. Ten sam komunikat, którym pas K
+      // zastąpił błąd w Dzienniku — zero nowej treści.
+      // ⚠️ To NIE jest ścieżka odzysku: nie ponawiamy zapisu i nie zmieniamy
+      // jego treści. Zmienia się WYŁĄCZNIE zdanie, które zawodnik czyta.
+      setError(toJestBrakDostepu(e) ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : 'Nie udało się zapisać meczu: ' + e.message);
     } finally {
       setSaving(false);
     }

@@ -35,10 +35,33 @@ import { isMissingTableError, minimumPossibleAge } from './componentHints';
 // 1. KSZTAŁT DANYCH — jeden do jednego z migracją osi decyzji
 // ─────────────────────────────────────────────────────────────────────
 
-// PLAN-D-J 08.2026 — stan nałożony przez arbitra (`mapaTylkoWTwoichRekach`,
-// `pokazacLiczbeSystemowa`). Mapa nigdy nie zabiera głosu, ale OBOWIĄZUJE ją
-// stan — to jest dokładnie rozróżnienie A1 ze specyfikacji.
-import { obowiazuje, type StanOgraniczen } from './ograniczenia';
+// ⚠️ PLAN-D-T 08.2026 (13.08.2026) — MAPA PRZESTAŁA BYĆ KONSUMENTEM OGRANICZEŃ.
+//
+// Do 13.08.2026 ten plik czytał dwa klucze koperty: `mapaTylkoWTwoichRekach`
+// (chowa sekcję „Co jest tłem") i `pokazacLiczbeSystemowa` (dokłada liczbę
+// o rotacji 24,5–41%). Oba miały DOKŁADNIE JEDNĄ przesłankę — stan
+// `exit_mode.state = 'paused_decision'` — skasowany w pasie P (zadanie P8).
+// Od tamtej rundy oba były ZAWSZE `false`: kod poprawny, przetestowany
+// i niemożliwy do uruchomienia. Decyzja D6 skasowała je razem z tym odczytem.
+//
+// ⚠️ CO TO ZNACZY DLA ZAWODNIKA: Mapa wraca do zachowania sprzed pasa J —
+// sekcja „Co jest tłem" jest ZAWSZE widoczna. To jest w porządku, bo pokazanie,
+// że część czynników nie zależy od zawodnika, samo w sobie odciąża (spec 2.2,
+// punkt 3) — a tryb, który to chował, i tak nigdy nie mógł się włączyć.
+//
+// ⚠️ LICZBA O ROTACJI NIE ZGINĘŁA Z PRODUKTU. Żyje w `lib/sciezkaWyjscia.ts`
+// (`WYJSCIE_LICZBY`, pozycja pierwsza) — czyli w stanie, w którym naprawdę ma
+// coś do powiedzenia. Tu była zapowiedzią stanu, którego nie ma.
+//
+// ⚠️ GDYBY KTÓRYŚ Z TYCH TRYBÓW MIAŁ WRÓCIĆ: wraca RAZEM Z PRZESŁANKĄ —
+// klucz w `lib/ograniczenia.ts`, jego zapalacz w drabinie backendu i ten
+// odczyt, w jednej rundzie. Sam odczyt bez przesłanki jest dokładnie tym,
+// co ta runda usuwa.
+//
+// ⚠️ PARAMETR `ograniczenia` ZNIKA Z `zbudujOdcinek` I `zbudujStanMapy`.
+// Zostawienie go jako ignorowanego byłoby tą samą chorobą w mniejszej skali:
+// podpis obiecywałby zachowanie, którego nie ma. Razem z nim znika z ekranu
+// Mapy całe zapytanie o `weekly_voice` — Mapa nie ma już powodu go zadawać.
 
 /**
  * ⚠️ PLAN-D-P 08.2026 (13.08.2026) — DWA WARIANTY, NIE TRZY.
@@ -232,11 +255,12 @@ export type OdcinekWidok =
     wariant: Wariant;
     naJutro: RoadFactor;
     wTwoichRekach: RoadFactor[];
+    // ⚠️ PLAN-D-T 08.2026 — stały tu `tloUkryte` i `liczbaSystemowa` (J1/J2).
+    // Oba opisywały tryb, którego backend nie mógł włączyć od pasa P. Sekcja
+    // „Co jest tłem" jest teraz zawsze widoczna, więc pusta lista `tlo` znów
+    // znaczy dokładnie jedno: TREŚCI NIE MA W BAZIE. Rozróżnienie, którego
+    // pilnowało `tloUkryte`, nie ma czego rozróżniać.
     tlo: RoadFactor[];
-    /** (J1/J2) Sekcja „Co jest tłem" zdjęta przez `mapaTylkoWTwoichRekach`, a nie pusta z braku treści. */
-    tloUkryte: boolean;
-    /** (J1/J2) Liczba systemowa dołożona przez `pokazacLiczbeSystemowa`; `null` = ograniczenie nie obowiązuje. */
-    liczbaSystemowa: string | null;
   }
   | {
     /**
@@ -250,21 +274,15 @@ export type OdcinekWidok =
     powod: string;
     wTwoichRekach: RoadFactor[];
     tlo: RoadFactor[];
-    tloUkryte: boolean;
-    liczbaSystemowa: string | null;
   }
   | { stan: 'brak_tresci'; odcinek: RoadSegment; wariant: Wariant; powod: string };
 
-/**
- * (J2) Liczba systemowa dla stanu „czekam na decyzję" (spec 6.4: „pojawia się
- * liczba systemowa — ŻEBY W DNIU DECYZJI NIE BYŁA NOWĄ INFORMACJĄ").
- * Ta sama liczba, co w `lib/sciezkaWyjscia.ts` (`WYJSCIE_LICZBY`, pozycja
- * pierwsza) — świadomie jedno brzmienie w dwóch stanach, bo to jest ten sam
- * fakt, a nie dwie różne pociechy.
- * ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ (nowe 12.08.2026).
- */
-export const LICZBA_SYSTEMOWA_ROTACJI =
-  'Co roku z akademii odchodzi od 24,5% do 41% zawodników. To jest liczba o systemie, nie o Tobie.';
+// ⚠️ PLAN-D-T 08.2026 (13.08.2026) — STĄD ZNIKNĘŁA `LICZBA_SYSTEMOWA_ROTACJI`.
+// Była brzmieniem dla stanu „czekam na decyzję" (spec 6.4), a tego stanu nie ma
+// od pasa P. Ten SAM FAKT stoi nadal w `lib/sciezkaWyjscia.ts` (`WYJSCIE_LICZBY`,
+// pozycja pierwsza) — tam ma odbiorcę i przesłankę. Kasowanie go tutaj nie
+// zabiera zawodnikowi ani jednej informacji; zabiera drugą kopię zdania,
+// której nie dało się wyświetlić.
 
 export const BRAK_TRESCI_ODCINKA =
   'Treść tego odcinka nie jest jeszcze wgrana do bazy. To nie znaczy, że nic tu nie ma — znaczy, że jeszcze nie została wklejona.';
@@ -284,23 +302,14 @@ export function zbudujOdcinek(
   odcinek: RoadSegment,
   wariant: Wariant,
   wszystkie: RoadFactor[],
-  // PLAN-D-J 08.2026 (12.08.2026) — MAPA JEST KONSUMENTEM DWÓCH OGRANICZEŃ
-  // reguły P5 (spec 6.4): `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`.
-  // Parametr opcjonalny: bez niego Mapa zachowuje się co do znaku tak jak
-  // przed tą rundą, a stan `nie_wiem` niczego nie zmienia.
-  stanOgraniczen: StanOgraniczen | null = null,
+  // ⚠️ PLAN-D-T 08.2026 (13.08.2026) — CZWARTY PARAMETR (`stanOgraniczen`)
+  // ZNIKNĄŁ. Czytał `mapaTylkoWTwoichRekach` i `pokazacLiczbeSystemowa`, czyli
+  // dwa klucze skasowane decyzją D6. Trzy sekcje odcinka są od tej rundy
+  // wyłącznie funkcją treści z bazy — i tylko treści.
 ): OdcinekWidok {
   const moje = wszystkie
     .filter((f) => f.segment_id === odcinek.id && f.variant === wariant)
     .sort((a, b) => a.sort_order - b.sort_order);
-
-  // ⚠️ „Nie wiem" NIE ukrywa tła i NIE dokłada liczby. Ukrycie sekcji na
-  // domyśle zabrałoby zawodnikowi treść, która ma go odciążać atrybucyjnie
-  // (spec 2.2, punkt 3) — a to jest strata, nie ostrożność.
-  const tylkoWRekach = stanOgraniczen !== null
-    && obowiazuje(stanOgraniczen, 'mapaTylkoWTwoichRekach') === 'tak';
-  const zLiczbaSystemowa = stanOgraniczen !== null
-    && obowiazuje(stanOgraniczen, 'pokazacLiczbeSystemowa') === 'tak';
 
   if (moje.length === 0) {
     return { stan: 'brak_tresci', odcinek, wariant, powod: BRAK_TRESCI_ODCINKA };
@@ -309,14 +318,12 @@ export function zbudujOdcinek(
   const juter = moje.filter((f) => f.is_tomorrow);
   const reszta = moje.filter((f) => !f.is_tomorrow);
   const wTwoichRekach = reszta.filter((f) => f.is_controllable);
-  const tlo = tylkoWRekach ? [] : reszta.filter((f) => !f.is_controllable);
-  const liczbaSystemowa = zLiczbaSystemowa ? LICZBA_SYSTEMOWA_ROTACJI : null;
+  // Sekcja „Co jest tłem" jest ZAWSZE budowana z treści. Do 13.08.2026 mogła
+  // być zdjęta ograniczeniem; nie może już — patrz nagłówek pliku.
+  const tlo = reszta.filter((f) => !f.is_controllable);
 
   if (juter.length === 1) {
-    return {
-      stan: 'gotowy', odcinek, wariant, naJutro: juter[0], wTwoichRekach, tlo,
-      tloUkryte: tylkoWRekach, liczbaSystemowa,
-    };
+    return { stan: 'gotowy', odcinek, wariant, naJutro: juter[0], wTwoichRekach, tlo };
   }
   return {
     stan: 'wadliwy',
@@ -325,8 +332,6 @@ export function zbudujOdcinek(
     powod: juter.length === 0 ? WADLIWY_BEZ_JUTRA : WADLIWY_WIELE_JUTER,
     wTwoichRekach,
     tlo,
-    tloUkryte: tylkoWRekach,
-    liczbaSystemowa,
   };
 }
 
@@ -366,8 +371,8 @@ export function zbudujStanMapy(params: {
   birthYear: number | null;
   exitAktywny: boolean | null;
   teraz?: Date;
-  /** (J2) Stan nałożony przez arbitra. `null` = ekran go nie podał; wtedy Mapa wygląda jak przed rundą J. */
-  ograniczenia?: StanOgraniczen | null;
+  // ⚠️ PLAN-D-T 08.2026 — stało tu `ograniczenia?: StanOgraniczen | null` (J2).
+  // Zniknęło razem z dwoma kluczami, które je czytały (decyzja D6).
 }): StanMapy {
   if (params.laduje) return { stan: 'ladowanie' };
 
@@ -403,7 +408,7 @@ export function zbudujStanMapy(params: {
 
   return {
     stan: 'gotowa',
-    widok: zbudujOdcinek(wybor.odcinek, wariant, czynniki, params.ograniczenia ?? null),
+    widok: zbudujOdcinek(wybor.odcinek, wariant, czynniki),
     odcinki,
     przyblizenie: wybor.stan === 'przyblizony' ? wybor.powod : null,
   };

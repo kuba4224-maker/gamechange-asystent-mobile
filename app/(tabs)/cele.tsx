@@ -142,6 +142,24 @@ const EVIDENCE_LABELS: Record<string, string> = {
 
 const GOAL_VALIDATION_API_URL = 'https://gamechange-app.vercel.app/api/validate-goal-refinement';
 
+// ═══════════════════════════════════════════════════════════════════
+// PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — KOMUNIKAT O BRAKU DOSTĘPU.
+//
+// Do tej rundy ten ekran pokazywał zawodnikowi z wygasłym okresem próbnym
+// surowy błąd bazy: „Nie udało się dodać wąskiego gardła: new row violates
+// row-level security policy for table «goals»". Z tego zdania nie da się
+// wyczytać ani co się stało, ani że nic nie zginęło.
+//
+// ⚠️ ZERO NOWEJ TREŚCI: to jest DOKŁADNIE ten sam komunikat, którym pas K
+// zastąpił błąd w Dzienniku. Trzy ekrany, jedno zdanie.
+// ⚠️ To NIE jest ścieżka odzysku — nie ponawiamy zapisu i nie zmieniamy jego
+// treści. Zmienia się wyłącznie zdanie, które zawodnik czyta.
+//
+// ⚠️ PLIK ZMIENIONY PRZEZ PAS Q 13.08.2026 (etykiety Celu) — odczytany
+// z dysku przed edycją i nietknięty poza trzema miejscami obsługi błędu.
+// ═══════════════════════════════════════════════════════════════════
+import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
+
 // ZMIANA OBRAZU B5 08.08.2026 — rozpoznanie „nie ma takiej kolumny".
 // PostgREST zgłasza to na dwa sposoby zależnie od wersji (`42703` z Postgresa
 // albo `PGRST204` ze schema cache), a kod bywa pusty — dlatego sprawdzamy oba
@@ -572,7 +590,7 @@ export default function CeleScreen() {
       setHorizon(''); setIsPriority(false);
       await loadGoals();
     } catch (e: any) {
-      let message = 'Nie udało się dodać wąskiego gardła: ' + e.message;
+      let message = toJestBrakDostepu(e) ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : 'Nie udało się dodać wąskiego gardła: ' + e.message;
       if (prevPriority) {
         try {
           await patchGoal(prevPriority.id, { is_priority: true, priority_changed_at: new Date().toISOString() });
@@ -597,7 +615,7 @@ export default function CeleScreen() {
       await patchGoal(goalId, { is_priority: makePriority, priority_changed_at: new Date().toISOString() });
       await loadGoals();
     } catch (e: any) {
-      let message = 'Nie udało się zmienić priorytetu: ' + e.message;
+      let message = toJestBrakDostepu(e) ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : 'Nie udało się zmienić priorytetu: ' + e.message;
       if (prevPriority) {
         try {
           await patchGoal(prevPriority.id, { is_priority: true, priority_changed_at: new Date().toISOString() });
@@ -726,7 +744,9 @@ export default function CeleScreen() {
         } else {
           console.error('[gardla] close_goal_with_blocks zwróciło błąd:', rpcErr?.message ?? JSON.stringify(data));
         }
-        setError('Nie udało się zamknąć. Spróbuj ponownie.');
+        // PLAN-D-T (T6) — odmowa dostępu ma własne zdanie, nie „spróbuj ponownie":
+        // ponawianie nic nie da, dopóki dostęp nie wróci.
+        setError(toJestBrakDostepu(rpcErr) ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : 'Nie udało się zamknąć. Spróbuj ponownie.');
         return;
       }
 
@@ -750,7 +770,8 @@ export default function CeleScreen() {
         : 'Zamknięte.');
     } catch (e: any) {
       console.error('[gardla] Wyjątek przy zamykaniu wąskiego gardła:', e?.message);
-      setError('Nie udało się zamknąć. Spróbuj ponownie.');
+      // PLAN-D-T (T6) — jak wyżej.
+      setError(toJestBrakDostepu(e) ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : 'Nie udało się zamknąć. Spróbuj ponownie.');
     }
   };
 
