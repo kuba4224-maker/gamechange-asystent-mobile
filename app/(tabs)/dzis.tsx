@@ -386,6 +386,44 @@ import {
   type WejscieWerdyktow,
   type WystapienieDoLicznika,
 } from '../../lib/wykonanieSesji';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-C4 08.2026 (15.08.2026), zadanie C4.3 — NAGRODA ZA WYKONANĄ PRACĘ.
+//
+// ── DLACZEGO TO STOI OBOK LICZNIKA, A NIE ZAMIAST NIEGO ─────────────
+// To są DWIE RÓŻNE ODPOWIEDZI i obie są potrzebne:
+//   • licznik pasa D1 mówi „ile z zaplanowanych sesji odbyłeś W OSTATNICH
+//     14 DNIACH" — czyli o RYTMIE. Jego okno jest ruchome i tak ma być.
+//   • ten blok mówi „ile pracy wykonałeś W OGÓLE" — czyli o DOROBKU.
+//     ⛔ NIE MA OKNA I NIGDY GO NIE DOSTANIE.
+//
+// ⚠️ ZMIERZONE 15.08.2026, NA PRAWDZIWYCH DANYCH, PRZEZ URUCHOMIENIE FUNKCJI:
+// licznik okna dla zawodnika `0be298a2…` pokazuje 20.08 „0 z 4", 27.08 „0 z 6",
+// a 22.09 — „Nie masz w kalendarzu ani jednej sesji z ostatnich dwóch tygodni".
+// Ten sam komplet danych, żadnej zmiany po stronie zawodnika, SAM UPŁYW CZASU.
+// Przy wejściu z dowodem wykonania maleje też licznik `odbyte`: 4 → 4 → 2 → 1 →
+// znika z ekranu. To jest dokładnie ta rzecz, której zakazuje N1, tylko schowana
+// w oknie zamiast w serii dni. **Blok niżej jest odpowiedzią na ten pomiar.**
+//
+// ⛔ ANI JEDNEGO SŁOWA O DNIACH Z RZĘDU, PASSIE, SERII, „NIE PRZERWIJ".
+// Pilnuje tego asercja `lib/nagrodaZaPrace.selftest.ts`, czytająca TEN plik
+// jako tekst — nie tylko ten blok.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  policzNagrode,
+  jednostkiZDziennika,
+  jednostkiZMeczow,
+  jednostkiZOdpowiedziKontrolnych,
+  zrodloSesji,
+  zrodloNieczytane,
+  opisNagrodyDoLogu,
+  type NagrodaZaPrace,
+  type WejscieNagrody,
+  type SegmentyCelow,
+  type WierszWydarzeniaDoNagrody,
+  type WierszDziennika as WierszDziennikaNagroda,
+  type WierszMeczu as WierszMeczuNagroda,
+  type WierszOdpowiedziKontrolnej,
+} from '../../lib/nagrodaZaPrace';
 
 const SEG_LABELS = SEGMENT_LABELS;
 
@@ -463,6 +501,16 @@ type DaneEkranu = {
    * błąd) · `jest`. ⛔ NIGDY `?? []` — patrz `czytajWerdykty`.
    */
   werdykty: WejscieWerdyktow;
+  /**
+   * ⭐ PLAN-D-C4 — CZTERY ŹRÓDŁA WYKONANEJ PRACY + zbiór segmentów, które
+   * zawodnik sam nazwał celem. Każde źródło ma jawny stan „nie odczytałem".
+   *
+   * ⛔ TU NIE MA GOTOWEJ LICZBY I TO JEST DECYZJA. `DaneEkranu` niesie
+   * WEJŚCIA, a nie wynik: gdyby stała tu policzona nagroda, byłaby stanem —
+   * a stan da się nie zaktualizować albo wyzerować. Odznaki liczy `useMemo`
+   * przy każdym renderze, z wierszy, które już są w bazie.
+   */
+  wejsciaNagrody: WejscieNagrody;
 };
 
 type WierszBolu = {
@@ -745,6 +793,74 @@ const LICZNIK_NIEODCZYTANE = (ile: number) =>
 const LICZNIK_ROBOTA_ZAZNACZ = 'Zaznacz w Kalendarzu, których nie odbyłeś →';
 const LICZNIK_ROBOTA_ZAPLANUJ = 'Zaplanuj kolejną sesję w Kalendarzu →';
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-C4 — BRZMIENIA NAGRODY ZA PRACĘ.
+// ⚠️ WSZYSTKIE PONIŻSZE SĄ NOWE I WSZYSTKIE SĄ **DO PRZEJRZENIA PRZEZ KUBĘ**.
+// Komplet zebrany w jednym bloku noty `PRZEKAZANIE_PAS_C4_15_08_2026.md` §9.
+//
+// ⛔ CZEGO W TYCH ZDANIACH NIE MA I NIE BĘDZIE: dni z rzędu · passy · serii ·
+// „nie przerwij" · „wróć jutro" · „zaloguj się codziennie" · jakiegokolwiek
+// słowa, które nagradza obecność zamiast pracy (N1).
+// ═══════════════════════════════════════════════════════════════════
+const BRZMIENIE_DO_PRZEJRZENIA_C4_EKRAN = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-C4, 15.08.2026)';
+
+/** Nagłówek bloku. Ten sam kształt, co pozostałe nadtytuły tej karty. */
+const NAGRODA_NAGLOWEK = 'TWÓJ DOROBEK';
+
+/**
+ * ⭐ ŁĄCZNA WYKONANA PRACA — liczba, która NIGDY NIE MALEJE.
+ *
+ * ⚠️ TRZECIA OSOBA, tak samo jak w liczniku pasa B5: produkt opisuje SWOJĄ
+ * WIEDZĘ o pracy, a nie wystawia zawodnikowi ocenę.
+ * ⛔ ŚWIADOMIE BEZ ZAKRESU CZASU. Zdanie „w ostatnich N dniach" jest tym, co
+ * pozwala liczbie zmaleć — a ta liczba zmaleć nie może.
+ */
+const NAGRODA_PUNKTY = (punkty: number, jednostki: number) =>
+  `${punkty} punktów pracy · ${jednostki} zapisanych rzeczy`;
+
+/**
+ * ⭐ STAN „JESZCZE NIC" — ⛔ INNA STAŁA NIŻ „NIE UDAŁO SIĘ POLICZYĆ" (R5).
+ * To jest pomiar: policzyłem i wyszło zero. Tamto jest awarią odczytu.
+ */
+const NAGRODA_JESZCZE_NIC =
+  'Jeszcze nic tu nie ma. Pierwszy zapisany trening albo wpis w Dzienniku zaczyna liczyć.';
+
+/**
+ * ⭐ STAN „NIE UDAŁO SIĘ POLICZYĆ" — ⛔ TU NIE MA I NIE MOŻE BYĆ ZERA.
+ * Zero podane po nieudanym odczycie mówi dziecku, że nic nie zrobiło.
+ */
+const NAGRODA_NIE_POLICZONA = (powod: string) =>
+  `Nie udało mi się policzyć Twojego dorobku (${powod}). To nie znaczy, że go nie masz — pociągnij w dół.`;
+
+/** Nadtytuł listy odznak. */
+const NAGRODA_ODZNAKI_NAGLOWEK = 'Zdobyte';
+/** ⭐ M4 — przy każdej odznace stoi zdanie, ZA JAKĄ PRACĘ. Bez niego to naklejka. */
+const NAGRODA_ODZNAKA = (nazwa: string, zaJakaPrace: string) => `${nazwa} — ${zaJakaPrace}`;
+
+/**
+ * ⭐ NASTĘPNY PRÓG WYRAŻONY W PRACY, NIGDY W DNIACH.
+ * ⛔ Nie ma tu „jeszcze 3 dni", „do końca tygodnia" ani „codziennie przez X".
+ */
+const NAGRODA_NASTEPNY = (nazwa: string, brakuje: number, miara: string) =>
+  `Do „${nazwa}" brakuje Ci ${brakuje} ${miara}.`;
+
+/** Nazwy miar w dopełniaczu, do zdania wyżej. ⚠️ BRZMIENIA — DO PRZEJRZENIA. */
+const NAGRODA_MIARA: Record<string, string> = {
+  punkty: 'punktów pracy',
+  odpowiedzi_kontrolne: 'rzeczy domkniętych odpowiedzią (RPE, czas trwania albo odpowiedź na pytanie Bloku)',
+  punkty_w_celu: 'punktów pracy nad tym, co sam nazwałeś celem',
+};
+
+/** Wszystkie progi zdobyte — ⛔ i mówimy to wprost, zamiast milczeć. */
+const NAGRODA_WSZYSTKO = 'Masz wszystko, co ta skala ma do zdobycia. Kolejne progi dołożymy.';
+
+/** ⭐ R5 — odznaka, której NIE UMIEM policzyć, ma własne zdanie i własny powód. */
+const NAGRODA_NIEUMIEM = (nazwa: string, powod: string) =>
+  `„${nazwa}" — nie umiem tego policzyć (${powod}).`;
+
+/** ⭐ M4 — dorobek kończy się rzeczą do zrobienia, nie samą liczbą. */
+const NAGRODA_ROBOTA_ZAPISZ = 'Zapisz dzisiejszy trening w Dzienniku →';
+
 /** Dzień tygodnia bez pozycji w skróconym tygodniu na karcie. */
 const KARTA_TYDZIEN_DZIEN_PUSTY = '—';
 /** Gdy nie udało się odczytać wydarzeń — ⛔ NIE „nic nie masz". */
@@ -993,8 +1109,12 @@ export default function DzisScreen() {
     // Nadal JEDNA paczka `Promise.all`, więc kosztują jedną rundę sieci, nie trzy.
     // ⭐ PLAN-D-B5 — DWA NOWE ZAPYTANIA (`tydzienRes`, `werdyktyRes`), DOŁOŻONE
     // DO TEJ SAMEJ PACZKI. Koszt: zero dodatkowych rund sieci.
+    // ⭐ PLAN-D-C4 — TRZY NOWE ZAPYTANIA (`celeWszystkieRes`, `blokiWszystkieRes`,
+    // `checkinyRes`), DOŁOŻONE DO TEJ SAMEJ PACZKI. Koszt: zero dodatkowych
+    // rund sieci. Uzasadnienie każdego stoi przy nim niżej.
     const [goalsRes, dziennikRes, recsRes, eventsRes, blocksRes, bolRes, zadaniaRes, userRes, diagRes, glosRes,
-      meczeRes, katalogRes, odcinkiRes, tydzienRes, werdyktyRes] = await Promise.all([
+      meczeRes, katalogRes, odcinkiRes, tydzienRes, werdyktyRes,
+      celeWszystkieRes, blokiWszystkieRes, checkinyRes] = await Promise.all([
       supabase.from('goals').select('id,segment_id,is_priority,status,created_at,origin,suggestion_note,refinement_note')
         .eq('user_id', currentUser.id).eq('status', 'active')
         .order('is_priority', { ascending: false }).order('created_at', { ascending: false }),
@@ -1139,6 +1259,50 @@ export default function DzisScreen() {
       supabase.from('session_verdicts')
         .select('calendar_event_id,occurred_on,verdict,withdrawn_at')
         .eq('user_id', currentUser.id),
+      // ⭐ PLAN-D-C4, NOWE ZAPYTANIE nr 1 — CELE **BEZ FILTRA STATUSU**.
+      //
+      // ⚠️ TO NIE JEST DUBLET `goalsRes` I POWÓD JEST ZMIERZONY, NIE ESTETYCZNY.
+      // Tamto ma `.eq('status','active')` i musi je mieć: karmi kafelek wąskiego
+      // gardła, rankera, Mapę drogi i cztery inne miejsca, z których każde pyta
+      // „nad czym pracujesz TERAZ".
+      //
+      // ⛔ ODZNAKA MUSI WIDZIEĆ TAKŻE CELE DOMKNIĘTE. Zmierzone 15.08.2026 na
+      // produkcji: `goals` ma 6 wierszy, z czego **2 mają `status='completed'`**,
+      // a wiersze NIE SĄ KASOWANE. Zawodnik `0be298a2…` ma cel `wytrzymalosc`
+      // domknięty. Gdyby „praca nad Twoim celem" liczyła się ze zbioru
+      // filtrowanego po `active`, odznaka **przepadłaby w dniu domknięcia celu**
+      // — czyli licznik cofnąłby się z powodu SUKCESU. To jest ten sam defekt,
+      // co seria dni, tylko lepiej ukryty (N1).
+      //
+      // ⚠️ ROZSZERZENIE `goalsRes` O CELE NIEAKTYWNE BYŁO ROZWAŻONE I ODRZUCONE:
+      // siedmiu konsumentów tamtej odpowiedzi zakłada wąskość, a pierwszy, który
+      // o niej zapomni, zepsuje się CICHO. Osobna, wąska odpowiedź (jedna
+      // kolumna) nie ma tej wady i kosztuje zero dodatkowych rund sieci — jedzie
+      // w tej samej paczce `Promise.all`.
+      supabase.from('goals').select('segment_id').eq('user_id', currentUser.id),
+      // ⭐ PLAN-D-C4, NOWE ZAPYTANIE nr 2 — BLOKI SKUPIENIA **BEZ FILTRA STATUSU**.
+      // Ten sam powód: `blocksRes` ma `.eq('status','active')`, a mapa
+      // `focus_block_id → segment_id` musi obejmować też bloki ZAMKNIĘTE —
+      // inaczej praca wykonana w domkniętym Bloku traci segment i przestaje
+      // liczyć się do celu. Zmierzone 15.08.2026: `focus_blocks` = 2 wiersze,
+      // z czego **1 ma `status='completed'`**. Dwie kolumny, zero nowych rund.
+      supabase.from('focus_blocks').select('id,segment_id').eq('user_id', currentUser.id),
+      // ⭐ PLAN-D-C4, NOWE ZAPYTANIE nr 3 — ODPOWIEDZI KONTROLNE BLOKU.
+      //
+      // ⚠️ `focus_block_checkins` NIE MA KOLUMNY `user_id` (zmierzone
+      // 15.08.2026 na `information_schema.columns`), więc nie ma czego filtrować
+      // — zawęża RLS: polityka `focus_block_checkins_select_own` przepuszcza
+      // wiersze, których `focus_block_id` wskazuje Blok należący do `auth.uid()`.
+      // Sprawdzone w `pg_policies`, nie założone.
+      //
+      // ⛔ TO ZAPYTANIE JEST OBOWIĄZKOWE, A NIE OZDOBNE. Odpowiedź kontrolna
+      // jest jednym z czterech źródeł wykonanej pracy, a `policzNagrode`
+      // z założenia ODMAWIA policzenia dorobku, gdy któregokolwiek źródła nie
+      // przeczytano. Gdyby ten ekran deklarował „nie czytam odpowiedzi
+      // kontrolnych", dorobek nie policzyłby się NIGDY i U NIKOGO.
+      // ⚠️ Dziś ta tabela ma 1 wiersz i 0 odpowiedzianych — czyli wnosi zero
+      // i tak ma być. Zero z odczytu to nie to samo, co zero z milczenia.
+      supabase.from('focus_block_checkins').select('id,focus_block_id,answered_at'),
     ]);
 
     // PLAN-D-F 08.2026 — trzy różne powody, dla których tu może nic nie być:
@@ -1416,6 +1580,102 @@ export default function DzisScreen() {
     if (werdyktyWe.rodzaj !== 'jest') console.warn(`dzis: [PLAN-D-D1] ${werdyktyWe.powod}`);
     // ⬆⬆⬆ WEJŚCIA TYGODNIA I LICZNIKA — KONIEC ⬆⬆⬆
 
+    // ═══════════════════════════════════════════════════════════════
+    // ⬇⬇⬇ WEJŚCIA NAGRODY ZA PRACĘ — POCZĄTEK ⬇⬇⬇  (PLAN-D-C4, C4.3)
+    //
+    // ⛔ W TEJ SEKCJI NIE MA PRAWA PAŚĆ ANI JEDNO `?? []` ANI `|| []`.
+    // Cztery źródła pracy i mapa segmentów — każde z jawnym stanem
+    // „nie odczytałem", odróżnialnym od „nic tam nie ma". Sklejenie ich
+    // zamieniłoby awarię sieci w zdanie „nic nie zrobiłeś", a dorobek, który
+    // maleje po nieudanym odczycie, kłamie tak samo jak licznik zerowany po
+    // opuszczonym dniu.
+    //
+    // ⚠️ ŚWIADOMIE NIE UŻYWAM `events` policzonego wyżej: tamto powstaje
+    // z `(eventsRes.data ?? [])`, więc po nieudanym odczycie oddaje pustą
+    // listę NIEODRÓŻNIALNĄ od „nie masz wydarzeń". Dla dorobku ta różnica
+    // jest cała. Tamtej linii nie ruszam (należy do innej liczby); tutaj
+    // liczę to samo drugi raz, uczciwie — ten sam ruch, co przy
+    // `wpisyDziennikaIds` w sekcji wyżej.
+    // ═══════════════════════════════════════════════════════════════
+    const wydarzeniaDoNagrody: WierszWydarzeniaDoNagrody[] | null =
+      eventsRes.error || !Array.isArray(eventsRes.data)
+        ? null
+        : (eventsRes.data as unknown as CalEvent[]).map((e) => ({
+          id: e.id,
+          scheduled_date: e.scheduled_date,
+          status: e.status,
+          recurrence_rule: e.recurrence_rule,
+          focus_block_id: e.focus_block_id,
+        }));
+    if (wydarzeniaDoNagrody === null) {
+      console.warn(`dzis: [PLAN-D-C4] nie odczytałem wydarzeń — ${powodBledu(eventsRes.error)}`);
+    }
+
+    // ⚠️ `null` NIE BLOKUJE dorobku i to jest decyzja: nieznany segment odbiera
+    // pracy przynależność do celu, ale nie odbiera jej istnienia. Odwrotnie
+    // byłoby kasowaniem wykonanej pracy z powodu brakującego przypisania.
+    const segmentBloku: ReadonlyMap<string, string> | null =
+      blokiWszystkieRes.error || !Array.isArray(blokiWszystkieRes.data)
+        ? null
+        : new Map((blokiWszystkieRes.data as unknown as { id: string; segment_id: string }[])
+          .filter((b) => b && typeof b.id === 'string' && typeof b.segment_id === 'string')
+          .map((b) => [b.id, b.segment_id] as const));
+
+    // ⭐ DWA STANY, NIE JEDEN. Zbiór niepełny NIE UDAJE pełnego: odznaka „praca
+    // nad swoim celem" wtedy NIE POWSTAJE i mówi dlaczego — zamiast powstać
+    // z niepełnych danych i zniknąć, gdy dane się uzupełnią.
+    const segmentyCelow: SegmentyCelow =
+      celeWszystkieRes.error || !Array.isArray(celeWszystkieRes.data)
+        ? { rodzaj: 'niepelne', powod: `nie odczytałem listy Twoich celów — ${powodBledu(celeWszystkieRes.error)}` }
+        : {
+          rodzaj: 'pelne',
+          segmenty: new Set((celeWszystkieRes.data as unknown as { segment_id: string | null }[])
+            .map((g) => g?.segment_id)
+            .filter((s): s is string => typeof s === 'string' && s.length > 0)),
+        };
+
+    const wejsciaNagrody: WejscieNagrody = {
+      // ⛔ „Co jest dowodem wykonanej sesji" NIE MIESZKA NA TYM EKRANIE.
+      // Rozstrzyga to `zrodloSesji` w `lib/nagrodaZaPrace.ts`, jedną kopią
+      // reguły pasa D1 — bo druga kopia rozjechałaby się przy pierwszej
+      // poprawce i oba miejsca wyglądałyby poprawnie.
+      sesje: zrodloSesji({
+        wydarzenia: wydarzeniaDoNagrody,
+        werdykty: werdyktyWe,
+        wpisyDziennika: wpisyDziennikaIds,
+        segmentBloku,
+      }),
+      dziennik: dziennikRes.error || !Array.isArray(dziennikRes.data)
+        ? zrodloNieczytane(`Dziennik: ${powodBledu(dziennikRes.error)}`)
+        : {
+          rodzaj: 'jest',
+          jednostki: jednostkiZDziennika(dziennikRes.data as unknown as WierszDziennikaNagroda[]),
+        },
+      odpowiedziKontrolne: checkinyRes.error || !Array.isArray(checkinyRes.data)
+        ? zrodloNieczytane(`odpowiedzi kontrolne Bloku: ${powodBledu(checkinyRes.error)}`)
+        : {
+          rodzaj: 'jest',
+          jednostki: jednostkiZOdpowiedziKontrolnych(
+            (checkinyRes.data as unknown as { id: string; focus_block_id: string | null; answered_at: string | null }[])
+              .map((c): WierszOdpowiedziKontrolnej => ({
+                id: c?.id,
+                answered_at: c?.answered_at ?? null,
+                segment: segmentBloku === null || typeof c?.focus_block_id !== 'string'
+                  ? null
+                  : segmentBloku.get(c.focus_block_id) ?? null,
+              })),
+          ),
+        },
+      mecze: meczeRes.error || !Array.isArray(meczeRes.data)
+        ? zrodloNieczytane(`mecze: ${powodBledu(meczeRes.error)}`)
+        : {
+          rodzaj: 'jest',
+          jednostki: jednostkiZMeczow(meczeRes.data as unknown as WierszMeczuNagroda[]),
+        },
+      segmentyCelow,
+    };
+    // ⬆⬆⬆ WEJŚCIA NAGRODY ZA PRACĘ — KONIEC ⬆⬆⬆
+
     setDane({
       wejscia: {
         dzis: todayStr,
@@ -1448,6 +1708,8 @@ export default function DzisScreen() {
       wydarzeniaTygodnia,
       wpisyDziennika: wpisyDziennikaIds,
       werdykty: werdyktyWe,
+      // ⭐ PLAN-D-C4 — WEJŚCIA, NIE WYNIK. Liczby powstają w `useMemo` niżej.
+      wejsciaNagrody,
     });
     // ⬆⬆⬆ WEJŚCIA KOLEJKI — KONIEC ⬆⬆⬆
   }, [currentUser, markShownAsViewed, loadHint, loadNewDose]);
@@ -1577,6 +1839,28 @@ export default function DzisScreen() {
   }, [dane, dzisNapis, tygodnie]);
 
   if (licznik !== null) console.log(`dzis: ${opisLicznikaDoLogu(licznik)}`);
+
+  /**
+   * ⭐ PLAN-D-C4 — DOROBEK. **WYLICZANY PRZY KAŻDYM RENDERZE, NIGDY CZYTANY
+   * Z KOLUMNY STANU.**
+   *
+   * ── DLACZEGO TO JEST CAŁA ARCHITEKTURA TEGO PASA ────────────────
+   * Licznika PRZECHOWYWANEGO można nie zwiększyć albo wyzerować — wyliczanego
+   * nie. Zakaz „licznik nigdy nie wraca do zera" przestaje więc zależeć od
+   * dyscypliny kolejnej sesji i staje się kształtem kodu: nie ma tabeli, którą
+   * dałoby się nadpisać, ani kolumny, którą dałoby się cofnąć. Odznaka jest
+   * czystą funkcją z wierszy, które JUŻ SĄ w bazie.
+   *
+   * ⛔ JEDEN ARGUMENT. Drugi (`ZasadyNagrody`) jest punktem wpięcia MUTACJI
+   * i należy wyłącznie do strażnika — podany stąd znaczyłby, że ekran ma
+   * własną, schowaną kopię reguł i że mutacja ma drogę na ekran zawodnika.
+   */
+  const nagroda: NagrodaZaPrace | null = useMemo(
+    () => (dane === null ? null : policzNagrode(dane.wejsciaNagrody)),
+    [dane],
+  );
+
+  if (nagroda !== null) console.log(`dzis: ${opisNagrodyDoLogu(nagroda)}`);
 
   // PIERWSZE URUCHOMIENIE 10.08.2026 — stan „zawodnik zero": ani diagnozy,
   // ani Celu. Świadomie WYMAGA OBU warunków: kto zdążył założyć Cel sam,
@@ -1967,6 +2251,89 @@ export default function DzisScreen() {
         )}
         <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/kalendarz')}>
           <Text style={styles.cardAction}>{doZrobienia}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-C4, C4.3 — DOROBEK NA EKRANIE. Cztery rzeczy, ani jednej więcej:
+  //
+  //  1. ŁĄCZNA WYKONANA PRACA — liczba, która NIGDY NIE MALEJE. ⛔ Bez zakresu
+  //     czasu, bo zakres czasu jest tym, co pozwala liczbie zmaleć.
+  //  2. ODZNAKI ZDOBYTE, każda z jednym zdaniem: ZA JAKĄ PRACĘ (M4).
+  //     Odznaka bez tego zdania jest naklejką, a nie informacją o kompetencji.
+  //  3. NASTĘPNY PRÓG wyrażony W PRACY — ⛔ NIGDY W DNIACH. „Brakuje Ci
+  //     15 punktów pracy", nigdy „trenuj jeszcze 3 dni".
+  //  4. STAN „NIE UDAŁO SIĘ POLICZYĆ", ODRÓŻNIALNY od „jeszcze nic nie
+  //     zrobiłeś" (R5) — dwie różne stałe, nie ta sama z zerem.
+  //
+  // ⛔ ANI JEDNEGO SŁOWA O DNIACH Z RZĘDU, PASSIE, SERII, „NIE PRZERWIJ".
+  // ⛔ ZERO POWIADOMIEŃ. Odznaka jest DO ZOBACZENIA, gdy zawodnik wejdzie —
+  // nie do zawołania go z powrotem. Nagroda, która zaczepia, jest nagrodą
+  // za obecność w przebraniu.
+  // ⛔ ZERO PORÓWNANIA Z KIMKOLWIEK (N3). Progi są takie same dla wszystkich
+  // i nie mówią, ilu ludzi je zdobyło.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderNagrodaZaPrace() {
+    if (nagroda === null) return null;
+
+    if (nagroda.rodzaj === 'nie_policzona') {
+      return (
+        <View style={styles.licznikCzesc}>
+          <Text style={styles.odpowiedzNaglowek}>{NAGRODA_NAGLOWEK}</Text>
+          <Text style={styles.licznikBrakPodstawy}>{NAGRODA_NIE_POLICZONA(nagroda.powod)}</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.licznikCzesc}>
+        <Text style={styles.odpowiedzNaglowek}>{NAGRODA_NAGLOWEK}</Text>
+
+        {/* (1) ŁĄCZNA WYKONANA PRACA — albo jawne „jeszcze nic", NIE „0". */}
+        {nagroda.punkty > 0 ? (
+          <Text style={styles.licznikLiczba}>{NAGRODA_PUNKTY(nagroda.punkty, nagroda.jednostki)}</Text>
+        ) : (
+          <Text style={styles.licznikBrakPodstawy}>{NAGRODA_JESZCZE_NIC}</Text>
+        )}
+
+        {/* (2) ODZNAKI — każda ze zdaniem, za jaką pracę. */}
+        {nagroda.odznaki.length > 0 ? (
+          <>
+            <Text style={styles.nagrodaPodnaglowek}>{NAGRODA_ODZNAKI_NAGLOWEK}</Text>
+            {nagroda.odznaki.map((o) => (
+              <Text key={o.id} style={styles.nagrodaOdznaka}>
+                {NAGRODA_ODZNAKA(o.nazwa, o.zaJakaPrace)}
+              </Text>
+            ))}
+          </>
+        ) : null}
+
+        {/* (3) NASTĘPNY PRÓG — w pracy, nie w dniach. */}
+        {nagroda.nastepnyProg !== null ? (
+          <Text style={styles.nagrodaNastepny}>
+            {NAGRODA_NASTEPNY(
+              nagroda.nastepnyProg.nazwa,
+              nagroda.nastepnyProg.brakuje,
+              NAGRODA_MIARA[nagroda.nastepnyProg.miara] ?? nagroda.nastepnyProg.miara,
+            )}
+          </Text>
+        ) : (
+          <Text style={styles.nagrodaNastepny}>{NAGRODA_WSZYSTKO}</Text>
+        )}
+
+        {/* (4) ⭐ R5 — czego NIE UMIEM policzyć, z powodem. ⛔ Nie milczymy. */}
+        {nagroda.nieumiemPoliczyc.map((b) => (
+          <Text key={b.id} style={styles.licznikPodpis}>{NAGRODA_NIEUMIEM(b.nazwa, b.powod)}</Text>
+        ))}
+
+        {/* ⭐ M4 — liczba kończy się rzeczą do zrobienia. Dziennik, bo to jest
+            dziś jedyne miejsce w appce, w którym zawodnik może zapisać pracę
+            tak, żeby ją policzono (`session_verdicts` 0 wierszy,
+            `status='completed'` 0 z 24 — zmierzone 15.08.2026). */}
+        <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/dziennik')}>
+          <Text style={styles.cardAction}>{NAGRODA_ROBOTA_ZAPISZ}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -2428,6 +2795,13 @@ export default function DzisScreen() {
                 czy patrzę na dziś, czy na tydzień. ⛔ Zero dotknięć (P0). */}
             {renderLicznikPracy()}
 
+            {/* ── ⭐ C4.3: DOROBEK — NAGRODA ZA WYKONANĄ PRACĘ (N1) ─────
+                Stoi POD licznikiem okna i mówi coś innego: tamten opisuje
+                RYTM ostatnich dwóch tygodni, ten — DOROBEK od początku.
+                ⛔ Zero dotknięć (P0): zawodnik, który wrócił po tygodniu
+                choroby, ma zobaczyć BEZ KLIKANIA, że nic nie stracił. */}
+            {renderNagrodaZaPrace()}
+
             {/* NAWIGACJA B3 08.08.2026 — to jest JEDYNE wejście do Kalendarza
                 po zabraniu jego zakładki z paska, więc link musi nazywać obie
                 rzeczy, które są po drugiej stronie: przeglądanie i dodawanie.
@@ -2603,4 +2977,13 @@ const styles = StyleSheet.create({
   // przypisem do liczby, której nie ma.
   licznikBrakPodstawy: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary },
   licznikPodpis: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 4 },
+  // ⭐ PLAN-D-C4 — DOROBEK. Trzy style, wszystkie w istniejącej skali karty.
+  nagrodaPodnaglowek: { ...typography.bodySemiBold, fontSize: 12, lineHeight: 18, letterSpacing: 0.4, color: colors.textSecondary, marginTop: 10, textTransform: 'uppercase' },
+  // ⛔ CELOWO PEŁNY ROZMIAR TEKSTU, A NIE PRZYPIS. Zdanie „za jaką pracę"
+  // jest treścią odznaki — bez niego zostaje sama naklejka (M4).
+  nagrodaOdznaka: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textPrimary, marginTop: 4 },
+  // ⛔ TEN SAM ROZMIAR, CO LICZBA. „Ile pracy Ci brakuje" jest pełnoprawną
+  // odpowiedzią, a nie dopiskiem — i jest jedyną rzeczą na tym bloku, która
+  // mówi zawodnikowi, co ma zrobić dalej.
+  nagrodaNastepny: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary, marginTop: 10 },
 });
