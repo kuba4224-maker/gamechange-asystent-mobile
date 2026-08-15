@@ -34,6 +34,8 @@ import { fetchPlayerMatchSelectionContext } from '../../lib/matchSegmentSelectio
 // zamiast surowego błędu RLS. Ten sam, którym pas K zastąpił błąd
 // w Dzienniku (`lib/dostepKonta.ts`). Zero nowej treści.
 import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
+// ⭐ PLAN-D-C3 15.08.2026 — cztery pustki na ścieżkach odczytu tego ekranu.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 // ═══════════════════════════════════════════════════════════════════
 // PLAN-D-A7 08.2026 (14.08.2026) — MECZ WCHODZI DO KALENDARZA, JEDNYM TOREM.
 //
@@ -202,6 +204,8 @@ export default function MeczScreen() {
 
   const [routing, setRouting] = useState<{ label: string; segments: Record<string, string> } | null>(null);
   const [history, setHistory] = useState<MatchRow[]>([]);
+  // ⭐ PLAN-D-C3 15.08.2026 — trzy wartości, nie dwie. `null` = jeszcze nie czytałem.
+  const [odczytHistoriiUdanySie, setOdczytHistoriiUdanySie] = useState<boolean | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -227,6 +231,15 @@ export default function MeczScreen() {
     } catch (e) {
       // Status trybu kontuzji to dodatkowa informacja — jego brak nie
       // powinien blokować reszty ekranu.
+      //
+      // ⚠️ PLAN-D-C3 15.08.2026 — ZOSTAJE, ALE PRZESTAJE BYĆ CICHE. Ten `catch`
+      // zlewa „nie udało się odczytać profilu" z „zawodnik nie jest w trybie
+      // kontuzji": w obu przypadkach `routing` jest `null` i zawodnik dostaje
+      // ZWYKŁY formularz meczowy. Dla kogoś w trybie kontuzji to jest inny
+      // zestaw pytań — czyli decyzja o nim podjęta bez danych o nim.
+      // ⛔ Tu NIE MA listy ani zdania o pustce, więc trzy pustki nie mają czego
+      // zamienić; jedyne, co ten pas może zrobić, to nie pozwolić temu zniknąć.
+      console.warn(opisBleduOdczytuDoLogu('mecz.loadMecz → player_profiles (tryb kontuzji)', e));
       setRouting(null);
     }
 
@@ -236,7 +249,18 @@ export default function MeczScreen() {
       .eq('user_id', currentUser.id)
       .order('created_at', { ascending: false })
       .limit(20);
-    if (histErr) return; // load* nie pokazuje banera błędu — konwencja z web
+    if (histErr) {
+      // ⭐ PLAN-D-C3 15.08.2026 — było: `if (histErr) return;` z komentarzem
+      // „load* nie pokazuje banera błędu — konwencja z web". Konwencja zostaje
+      // (nie ma tu banera), ale jej SKUTEK już nie: `history` zostawało puste
+      // i ekran pisał „Brak zapisanych meczów — dodaj pierwszy powyżej."
+      // zawodnikowi, który ma ich dwadzieścia. Wiersze sprzed nieudanego
+      // odświeżenia zostają nietknięte.
+      console.warn(opisBleduOdczytuDoLogu('mecz.loadMecz → match_contexts (historia)', histErr));
+      setOdczytHistoriiUdanySie(false);
+      return;
+    }
+    setOdczytHistoriiUdanySie(true);
     setHistory((rows ?? []) as MatchRow[]);
   }, [currentUser]);
 
@@ -267,6 +291,15 @@ export default function MeczScreen() {
     } catch (e) {
       // Brak pytań segmentowych nie powinien blokować reszty formularza —
       // zawodnik nadal może zapisać mecz z polami rdzenia.
+      //
+      // ⚠️ PLAN-D-C3 15.08.2026 — ZOSTAJE, ALE PRZESTAJE BYĆ CICHE.
+      // `setSegmentSlots([])` po nieudanym odczycie kontekstu wygląda dokładnie
+      // tak samo jak „kaskada nie miała czego wybrać". Skutek jest podwójny:
+      // formularz jest krótszy, a walidacja „minimum jeden sygnał"
+      // (`hasSegmentAnswer`) liczy z pustej listy. Ekran nie stawia tu zdania
+      // o zawodniku, więc trzy pustki nie mają czego zamienić — ale defekt
+      // przestaje być niewidoczny.
+      console.warn(opisBleduOdczytuDoLogu('mecz.loadSegmentSlots → kontekst kaskady', e));
       setSegmentSlots([]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -274,14 +307,25 @@ export default function MeczScreen() {
 
   const loadThirdQuestion = useCallback(async () => {
     if (!currentUser) return;
-    const ctx = await fetchPlayerMatchSelectionContext(currentUser.id, enteredRecoveryState);
-    const exclude = segmentSlots.map((s) => s.segmentId);
-    const third = selectSegmentForMatch(ctx, exclude);
-    if (third) {
-      setSegmentSlots((prev) => [
-        ...prev,
-        { ...third, wordingKey: resolveWordingKey(positionPlayedToday || null, ctx.profilePosition), baseAnswerCode: null, followupAnswerCode: null },
-      ]);
+    // ⭐ PLAN-D-C3 15.08.2026 — ta funkcja NIE MIAŁA `try` w ogóle. Odrzucony
+    // odczyt kontekstu nie dodawał trzeciego pytania i NIE ustawiał
+    // `thirdQuestionOffered`, więc zawodnik klikał w przycisk, po którym nic
+    // się nie działo — i nikt (łącznie z autorem kodu) nie miał jak się
+    // dowiedzieć, że coś padło. To nie jest zdanie o zawodniku, więc trzy
+    // pustki nie mają czego zamienić; jest to CICHY BRAK i tyle wystarczy,
+    // żeby go nazwać.
+    try {
+      const ctx = await fetchPlayerMatchSelectionContext(currentUser.id, enteredRecoveryState);
+      const exclude = segmentSlots.map((s) => s.segmentId);
+      const third = selectSegmentForMatch(ctx, exclude);
+      if (third) {
+        setSegmentSlots((prev) => [
+          ...prev,
+          { ...third, wordingKey: resolveWordingKey(positionPlayedToday || null, ctx.profilePosition), baseAnswerCode: null, followupAnswerCode: null },
+        ]);
+      }
+    } catch (e) {
+      console.warn(opisBleduOdczytuDoLogu('mecz.loadThirdQuestion → kontekst kaskady', e));
     }
     setThirdQuestionOffered(true);
   }, [currentUser, enteredRecoveryState, segmentSlots, positionPlayedToday]);
@@ -307,6 +351,20 @@ export default function MeczScreen() {
     await loadMecz();
     setRefreshing(false);
   }, [loadMecz]);
+
+  // ⭐ PLAN-D-C3 15.08.2026 — jedna funkcja decyzyjna zamiast `history.length === 0`.
+  const pustkaHistorii = rozpoznajPustke({
+    maWpisy: history.length > 0,
+    planLekcjiZnany: null,
+    // Ten ekran ZAPISUJE, ale odmowę dostępu przy zapisie obsługuje już
+    // `toJestBrakDostepu` + `ZAPIS_ODRZUCONY_BRAK_DOSTEPU` (pas K). Tutaj
+    // mówimy wyłącznie o pustce HISTORII, więc gałąź uprawnień zostaje `null`
+    // — dwa zdania o wygasłym dostępie na jednym ekranie to jedno za dużo.
+    moznaZapisywac: null,
+    odczytUdanySie: odczytHistoriiUdanySie,
+    daSieOdswiezyc: true,
+    tekstBrakuDanych: 'Brak zapisanych meczów — dodaj pierwszy powyżej.',
+  });
 
   const resetForm = () => {
     setOwnScore(''); setOpponentScore(''); setRole(''); setMinutes(''); setMatchRpe(undefined);
@@ -821,7 +879,18 @@ export default function MeczScreen() {
 
       <View style={{ marginTop: 40 }}>
         <Text style={styles.sectionLabel}>Historia meczów</Text>
-        {history.length === 0 && <Text style={styles.empty}>Brak zapisanych meczów — dodaj pierwszy powyżej.</Text>}
+        {/* ⭐ PLAN-D-C3 15.08.2026 — brzmienie „Brak zapisanych meczów — dodaj
+            pierwszy powyżej." idzie CO DO ZNAKU (zakaz 4), razem z krokiem,
+            który już w nim siedzi. Zmienia się wyłącznie to, KIEDY zawodnik
+            je czyta: nie wtedy, gdy odczyt padł. */}
+        {pustkaHistorii ? (
+          <>
+            <Text style={styles.empty}>{pustkaHistorii.tekst}</Text>
+            {pustkaHistorii.krokWTekscie ? null : (
+              <Text style={styles.empty}>{pustkaHistorii.cta}</Text>
+            )}
+          </>
+        ) : null}
         {history.map(renderMatchCard)}
       </View>
     </ScrollView>

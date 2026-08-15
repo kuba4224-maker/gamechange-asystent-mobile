@@ -39,6 +39,8 @@ import { higherIsBetterColor, higherIsWorseColor, sleepHoursColor, neutralIntens
 // PLAN-D-K 08.2026 (13.08.2026) — rozpoznanie odmowy dostępu (RLS, kod 42501)
 // i zdanie, które zawodnik wtedy czyta. ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ.
 import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
+// ⭐ PLAN-D-C3 15.08.2026 — trzy pustki na ścieżkach odczytu tego ekranu.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 
 // JEDNA DROGA B2 08.08.2026 — lokalne kopie 17 lokalizacji bólu, ich mapy nazw
 // i listy lokalizacji bez strony ciała usunięte; wszystkie trzy pochodzą teraz
@@ -130,6 +132,8 @@ export default function DziennikScreen() {
   const [ok, setOk] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  // ⭐ PLAN-D-C3 15.08.2026 — trzy wartości, nie dwie. `null` = jeszcze nie czytałem.
+  const [odczytHistoriiUdanySie, setOdczytHistoriiUdanySie] = useState<boolean | null>(null);
 
   const populateCalendarLinkSelect = useCallback(async () => {
     if (!currentUser) return;
@@ -158,8 +162,17 @@ export default function DziennikScreen() {
       console.warn('[PLAN-D-A1] Nie udało się wczytać okna kalendarza do Dziennika: '
         + `${calErr.message} (kod ${calErr.code ?? 'brak'}). Picker i pytanie o sesję `
         + 'Bloku będą puste — to NIE znaczy, że zawodnik nie ma zaplanowanych sesji.');
+      console.warn(opisBleduOdczytuDoLogu('dziennik.populateCalendarLinkSelect → calendar_events', calErr));
     }
-    const opts = (data ?? []).map((e: any) => ({
+    // ⛔ PLAN-D-C3 15.08.2026 — USUNIĘTE Z `populateCalendarLinkSelect()`:
+    //    `(data ?? [])`. Zostaje ten sam skutek widoczny dla zawodnika (pusty
+    //    picker; ten ekran NIE stawia przy nim zdania „nie masz zaplanowanych
+    //    sesji", więc nie ma tu czego zamieniać na trzy pustki) — ale gałąź
+    //    błędu przestaje być wpisana w wyrażenie, w którym da się jej nie
+    //    zauważyć. To jest to samo `?? []`, które pas A1 opisał trzy linie
+    //    wyżej i którego wtedy nie usunął.
+    const wiersze: any[] = calErr ? [] : (data as any[]);
+    const opts = wiersze.map((e: any) => ({
       id: e.id,
       label: `${new Date(e.scheduled_date + 'T00:00:00').toLocaleDateString('pl-PL', { day: 'numeric', month: 'short' })} — ${e.title}`,
       focusBlockId: (e.focus_block_id ?? null) as string | null,
@@ -185,13 +198,36 @@ export default function DziennikScreen() {
       .eq('user_id', currentUser.id)
       .order('created_at', { ascending: false })
       .limit(20);
-    if (err) return; // load* nie pokazuje banera błędu — konwencja z web
+    if (err) {
+      // ⭐ PLAN-D-C3 15.08.2026 — było: `if (err) return;` z komentarzem
+      // „load* nie pokazuje banera błędu — konwencja z web". Konwencja zostaje
+      // (banera nadal nie ma), ale jej skutek już nie: `history` zostawało
+      // puste i ekran pisał „Brak wpisów — dodaj pierwszy powyżej."
+      // zawodnikowi, który prowadzi dziennik od miesiąca. Wiersze sprzed
+      // nieudanego odświeżenia zostają nietknięte.
+      console.warn(opisBleduOdczytuDoLogu('dziennik.loadHistory → daily_logs', err));
+      setOdczytHistoriiUdanySie(false);
+      return;
+    }
+    setOdczytHistoriiUdanySie(true);
     setHistory((data ?? []) as HistoryRow[]);
   }, [currentUser]);
 
   const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(useCallback(() => { populateCalendarLinkSelect(); loadHistory(); }, [populateCalendarLinkSelect, loadHistory]));
+
+  // ⭐ PLAN-D-C3 15.08.2026 — jedna funkcja decyzyjna zamiast `history.length === 0`.
+  const pustkaHistorii = rozpoznajPustke({
+    maWpisy: history.length > 0,
+    planLekcjiZnany: null,
+    // Odmowę dostępu przy ZAPISIE obsługuje już `toJestBrakDostepu` +
+    // `ZAPIS_ODRZUCONY_BRAK_DOSTEPU` (pas K). Tu mówimy o pustce HISTORII.
+    moznaZapisywac: null,
+    odczytUdanySie: odczytHistoriiUdanySie,
+    daSieOdswiezyc: true,
+    tekstBrakuDanych: 'Brak wpisów — dodaj pierwszy powyżej.',
+  });
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -587,7 +623,17 @@ export default function DziennikScreen() {
 
       <View style={{ marginTop: 40 }}>
         <Text style={styles.sectionLabel}>Historia wpisów</Text>
-        {history.length === 0 && <Text style={styles.empty}>Brak wpisów — dodaj pierwszy powyżej.</Text>}
+        {/* ⭐ PLAN-D-C3 15.08.2026 — brzmienie „Brak wpisów — dodaj pierwszy
+            powyżej." idzie CO DO ZNAKU (zakaz 4), razem z krokiem, który już
+            w nim siedzi. Zmienia się wyłącznie to, KIEDY zawodnik je czyta. */}
+        {pustkaHistorii ? (
+          <>
+            <Text style={styles.empty}>{pustkaHistorii.tekst}</Text>
+            {pustkaHistorii.krokWTekscie ? null : (
+              <Text style={styles.empty}>{pustkaHistorii.cta}</Text>
+            )}
+          </>
+        ) : null}
         {history.map((row) => {
           const dateLabel = new Date(row.created_at).toLocaleString('pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
           const typeLabel = row.entry_type === 'morning' ? 'Poranny' : 'Potreningowy';

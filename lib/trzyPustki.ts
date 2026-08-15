@@ -35,8 +35,19 @@
 // gotową do podpięcia w dniu, w którym te pasy dostarczą jej wejścia.
 // ═════════════════════════════════════════════════════════════════════
 
-/** Trzy powody, dla których lista może być pusta. Nigdy dwa. */
+/**
+ * Powody, dla których lista może być pusta. Nigdy dwa naraz.
+ *
+ * ⭐ PLAN-D-C3 15.08.2026 — DOSZEDŁ CZWARTY I JEST NAJWAŻNIEJSZY Z CZTERECH.
+ * Uzasadnienie dołożenia (wymagane przez polecenie C3.2) stoi przy
+ * `PUSTKA_BLAD_ODCZYTU_TEKST`.
+ */
 export type RodzajPustki =
+  /**
+   * ⭐ Odczyt PADŁ. Nie wiemy, czy jest pusto — i nie wolno nam zgadywać.
+   * To jedyny rodzaj, który NIE JEST zdaniem o zawodniku.
+   */
+  | 'blad_odczytu'
   /** Zapytanie przeszło, uprawnienia są, konfiguracja jest — po prostu nic nie ma. */
   | 'brak_danych'
   /** Produkt nie zna czegoś, bez czego pustka jest MYLĄCA (dziś: plan lekcji). */
@@ -48,8 +59,26 @@ export type Pustka = {
   rodzaj: RodzajPustki;
   /** Zdanie dla zawodnika. Mówi, CO SIĘ DZIEJE — nie „brak wydarzeń". */
   tekst: string;
-  /** Jedno wyjście. Każda pustka ma inne — pustka bez wyjścia jest ślepym zaułkiem. */
+  /**
+   * Jedno wyjście. Każda pustka ma inne — pustka bez wyjścia jest ślepym zaułkiem.
+   * ⚠️ Wolno mu być pusty WYŁĄCZNIE wtedy, gdy `krokWTekscie === true`.
+   */
   cta: string;
+  /**
+   * ⭐ PLAN-D-C3 15.08.2026 — `true`, gdy ekran BIERZE NA SIEBIE następny krok:
+   * albo siedzi on już w jego zdaniu („…dodaj pierwszy powyżej", „Materiały
+   * otwierają się, gdy…"), albo ten stan kroku nie wymaga („Nic do sprawdzenia
+   * w tej chwili." — nie ma czego zrobić i to jest prawda, nie ślepy zaułek).
+   *
+   * Bez tego pola ekran musiałby albo dublować krok pod zdaniem, albo pas
+   * musiałby przepisać brzmienie zatwierdzone przez Kubę — a tego zakazuje
+   * punkt 5.4 polecenia C3.
+   *
+   * ⛔ `blad_odczytu` NIGDY nie ma tu `true`. To jedyny rodzaj, w którym
+   * zawodnik ZAWSZE ma co zrobić — i zostawienie go bez wyjścia byłoby
+   * dokładnie tym ślepym zaułkiem, przed którym stoi cały ten plik.
+   */
+  krokWTekscie: boolean;
   /**
    * Czy ta gałąź da się dziś w ogóle osiągnąć.
    * ⚠️ `false` przy `brak_konfiguracji` — patrz `POWOD_NIEOSIAGALNOSCI`.
@@ -86,6 +115,57 @@ export const PUSTKA_BRAK_DANYCH_TEKST_NADCHODZACE = 'Nic nie masz zaplanowane na
 
 /** Znacznik dla Kuby i dla strażnika. Nie usuwać do czasu zatwierdzenia brzmień dziennych. */
 export const BRZMIENIE_DO_PRZEJRZENIA = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-T, 14.08.2026)';
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ CZWARTY RODZAJ — PLAN-D-C3, 15.08.2026
+// ═════════════════════════════════════════════════════════════════════
+//
+// ── DLACZEGO TRZY RODZAJE NIE WYSTARCZYŁY (odpowiedź na C3.2) ────────
+//
+// Wszystkie trzy istniejące rodzaje zakładają, że ODCZYT SIĘ UDAŁ. Widać to
+// wprost w `WejsciePustki`: pierwsze pole nazywa się `maWpisy: boolean` —
+// dwuwartościowe. Nie ma w nim miejsca na „nie wiem, czy ma wpisy".
+//
+// Zmierzone 15.08.2026 na siedmiu ekranach pasa C3: **25 ścieżek odczytu,
+// z czego 15 po nieudanym odczycie renderuje zawodnikowi coś, co on przeczyta
+// jako fakt o sobie.** Ani jednej z tych 15 nie da się opisać istniejącymi
+// trzema rodzajami:
+//
+//   • `brak_danych`      — twierdzi, że sprawdziliśmy i nie ma. Nie sprawdziliśmy.
+//   • `brak_uprawnien`   — twierdzi, że wiemy, iż dostęp wygasł. Nie wiemy.
+//   • `brak_konfiguracji`— twierdzi, że wiemy, czego nam brakuje. Nie wiemy.
+//
+// EKRAN, KTÓRY SIĘ NIE MIEŚCI, Z NAZWY: `app/(tabs)/biblioteka.tsx`. Odczyt
+// `goals` przechodził przez `goalsRes.data ?? []`, więc odmowa RLS dawała zero
+// segmentów, a zawodnik z założonym wąskim gardłem czytał `LIBRARY_EMPTY_TEXT`
+// — „Nic tu jeszcze nie ma" — czyli zdanie z rodzaju `brak_danych` postawione
+// dokładnie wtedy, gdy `brak_danych` NIE ZACHODZI.
+//
+// ── CO ZAWODNIK MA ZROBIĆ PO ZOBACZENIU TEJ PUSTKI (warunek z C3.2) ──
+// Sprawdzić jeszcze raz. Sześć z siedmiu ekranów ma `RefreshControl`, więc
+// wyjściem jest pociągnięcie w dół. `diagnoza.tsx` go NIE MA (zmierzone
+// 15.08.2026: `<ScrollView contentContainerStyle={styles.scrollContent}>`,
+// bez `refreshControl`) — i odświeża się przez `useFocusEffect`, więc jego
+// wyjściem jest ponowne wejście na ekran. Stąd DWA wyjścia, nie jedno.
+//
+// ⚠️ To NIE jest pustka bez następnego kroku. Pustka bez kroku jest ślepym
+// zaułkiem i tego rodzaju nie wolno było dokładać.
+//
+// ⚠️ BRZMIENIA PONIŻEJ SĄ NOWE I NIE PRZESZŁY PRZEZ KUBĘ.
+// Komplet nowych zdań tej rundy stoi w jednym miejscu w
+// `claude/PRZEKAZANIE_PAS_C3_15_08_2026.md`, sekcja „NOWE BRZMIENIA".
+
+/** Co do znaku z polecenia C3, sekcja C3.3 („błąd odczytu → «Nie udało się sprawdzić.»"). */
+export const PUSTKA_BLAD_ODCZYTU_TEKST = 'Nie udało się sprawdzić.';
+
+/** Sześć ekranów z `RefreshControl`. */
+export const PUSTKA_BLAD_ODCZYTU_CTA = 'Pociągnij w dół, żeby sprawdzić jeszcze raz.';
+
+/** `diagnoza.tsx` — jedyny z siedmiu bez `RefreshControl`, odświeża się na wejściu. */
+export const PUSTKA_BLAD_ODCZYTU_CTA_BEZ_ODSWIEZANIA = 'Wejdź tu jeszcze raz za chwilę.';
+
+/** Znacznik dla Kuby i dla strażnika — brzmienia czwartego rodzaju. */
+export const BRZMIENIE_DO_PRZEJRZENIA_C3 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-C3, 15.08.2026)';
 
 /**
  * ⚠️ DLACZEGO GAŁĄŹ „BRAK KONFIGURACJI" JEST DZIŚ NIEOSIĄGALNA.
@@ -132,6 +212,46 @@ export type WejsciePustki = {
   moznaZapisywac: boolean | null;
   /** Zakres czasu, o którym mówi ta lista. Rozstrzyga brzmienie. */
   zakres?: 'dzis' | 'nadchodzace' | 'tydzien';
+
+  // ── ⭐ PLAN-D-C3 15.08.2026 ────────────────────────────────────────
+  /**
+   * Czy odczyt, z którego wzięła się ta lista, PRZESZEDŁ.
+   *
+   * ⚠️ Trzy wartości, nie dwie — ten sam kształt co `moznaZapisywac`:
+   *   `false`               → odczyt padł, mówimy „Nie udało się sprawdzić.";
+   *   `true`                → odczyt przeszedł, lista naprawdę jest pusta;
+   *   `null` / pominięte    → ekran nie powiedział, więc NIE ZGADUJEMY i
+   *                           zachowujemy się dokładnie jak przed tym pasem.
+   *
+   * Ostatni wariant jest tym, co czyni to pole wstecznie zgodnym: `dzis.tsx`
+   * i `kalendarz.tsx` wołają `rozpoznajPustke` bez niego i mają dostać to samo
+   * co dotąd, co do znaku.
+   */
+  odczytUdanySie?: boolean | null;
+  /**
+   * Czy ekran da się odświeżyć pociągnięciem w dół. Rozstrzyga WYJŚCIE
+   * z pustki `blad_odczytu`, nie jej treść. Pominięte = `true` (sześć z siedmiu
+   * ekranów C3 ma `RefreshControl`; wyjątkiem jest `diagnoza.tsx`).
+   */
+  daSieOdswiezyc?: boolean;
+  /**
+   * ⭐ Zdanie „pusto" właściwe dla TEGO ekranu.
+   *
+   * Istnieje po to, żeby pas C3 mógł przepuścić siedem ekranów przez jedną
+   * funkcję decyzyjną, NIE DOTYKAJĄC brzmień, które już przeszły przez Kubę
+   * (zakaz 4 polecenia C3). Bez tego pola `rozpoznajPustke` odpowiadałaby
+   * bibliotece zdaniem o tygodniu w kalendarzu.
+   *
+   * Pominięte → brzmienie z makiety widoku tygodnia, jak dotąd.
+   */
+  tekstBrakuDanych?: string;
+  /**
+   * Wyjście dla własnego zdania ekranu. Pominięte → `krokWTekscie: true`,
+   * czyli „następny krok siedzi już w tym zdaniu".
+   * ⚠️ Podanie własnego zdania BEZ wyjścia i BEZ kroku w zdaniu jest błędem,
+   * który zapala strażnik — patrz `lib/trzyPustki.selftest.ts`, sekcja 7.
+   */
+  ctaBrakuDanych?: string;
 };
 
 function tekstBrakuDanych(zakres: WejsciePustki['zakres']): string {
@@ -145,21 +265,50 @@ function tekstBrakuDanych(zakres: WejsciePustki['zakres']): string {
  * ma o czym mówić.
  *
  * KOLEJNOŚĆ PRIORYTETÓW I JEJ POWÓD:
+ *   0. ⭐ BŁĄD ODCZYTU — bo to jedyny stan, w którym NIE MAMY ŻADNEJ WIEDZY
+ *      o zawodniku, a każdy z trzech pozostałych rodzajów jakąś wiedzę
+ *      twierdzi. Postawienie któregokolwiek z nich po nieudanym odczycie jest
+ *      podaniem prawdopodobnego jako pewnego — czyli złamaniem Z0.
+ *      ⚠️ W szczególności bije BRAK UPRAWNIEŃ, choć ten jest niżej „ważny":
+ *      `moznaZapisywac === false` mówi o ZAPISIE, a tu nie udał się ODCZYT.
+ *      Powiedzenie „skończył Ci się okres próbny" komuś, komu po prostu
+ *      urwało się połączenie, to ten sam błąd, przed którym stoi reguła R3
+ *      strażnika (fail-open), tylko wejściem od drugiej strony.
  *   1. BRAK UPRAWNIEŃ — bo to jedyny stan, w którym problem leży PO NASZEJ
  *      STRONIE i zawodnik nie ma jak sam go rozwiązać przez dodanie wpisu.
  *      Powiedzenie mu „dodaj trening", gdy baza i tak odrzuci zapis, wysyła
  *      go w ślepy zaułek.
  *   2. BRAK KONFIGURACJI — pustka jest MYLĄCA, choć prawdziwa.
  *   3. BRAK DANYCH — pustka jest prawdziwa i niemyląca.
+ *
+ * ⚠️ `maWpisy` NADAL STOI PRZED WSZYSTKIM. Ekran, który ma co pokazać, ma to
+ * pokazać — także wtedy, gdy odświeżenie padło. Lista sprzed chwili jest
+ * prawdziwsza niż komunikat o błędzie zamiast niej.
  */
 export function rozpoznajPustke(w: WejsciePustki): Pustka | null {
   if (w.maWpisy) return null;
+
+  // ⭐ PLAN-D-C3 15.08.2026 — czwarty rodzaj, pierwszy w kolejności.
+  if (w.odczytUdanySie === false) {
+    return {
+      rodzaj: 'blad_odczytu',
+      tekst: PUSTKA_BLAD_ODCZYTU_TEKST,
+      cta: w.daSieOdswiezyc === false
+        ? PUSTKA_BLAD_ODCZYTU_CTA_BEZ_ODSWIEZANIA
+        : PUSTKA_BLAD_ODCZYTU_CTA,
+      krokWTekscie: false,
+      // ⚠️ Jawnie `true` i to jest cała różnica wobec `brak_konfiguracji`:
+      // ta gałąź jest osiągalna DZIŚ, na siedmiu ekranach, 16 ścieżkami.
+      osiagalne: true,
+    };
+  }
 
   if (w.moznaZapisywac === false) {
     return {
       rodzaj: 'brak_uprawnien',
       tekst: PUSTKA_BRAK_UPRAWNIEN_TEKST,
       cta: PUSTKA_BRAK_UPRAWNIEN_CTA,
+      krokWTekscie: false,
       osiagalne: true,
     };
   }
@@ -169,9 +318,24 @@ export function rozpoznajPustke(w: WejsciePustki): Pustka | null {
       rodzaj: 'brak_konfiguracji',
       tekst: PUSTKA_BRAK_KONFIGURACJI_TEKST,
       cta: PUSTKA_BRAK_KONFIGURACJI_CTA,
+      krokWTekscie: false,
       // ⚠️ Jawnie `false` — patrz POWOD_NIEOSIAGALNOSCI. Ekran, który tę
       // gałąź dostanie, ma prawo o tym wiedzieć.
       osiagalne: false,
+    };
+  }
+
+  // ⭐ PLAN-D-C3 — ekran może podać SWOJE zdanie „pusto". Brzmienia
+  // zatwierdzone przez Kubę zostają na swoich ekranach co do znaku; zmienia
+  // się wyłącznie to, że przechodzą przez tę funkcję.
+  if (typeof w.tekstBrakuDanych === 'string' && w.tekstBrakuDanych.length > 0) {
+    const wlasneCta = w.ctaBrakuDanych ?? '';
+    return {
+      rodzaj: 'brak_danych',
+      tekst: w.tekstBrakuDanych,
+      cta: wlasneCta,
+      krokWTekscie: wlasneCta.length === 0,
+      osiagalne: true,
     };
   }
 
@@ -179,6 +343,7 @@ export function rozpoznajPustke(w: WejsciePustki): Pustka | null {
     rodzaj: 'brak_danych',
     tekst: tekstBrakuDanych(w.zakres),
     cta: PUSTKA_BRAK_DANYCH_CTA,
+    krokWTekscie: false,
     osiagalne: true,
   };
 }
@@ -187,4 +352,21 @@ export function rozpoznajPustke(w: WejsciePustki): Pustka | null {
 export function opisPustkiDoLogu(p: Pustka | null): string {
   if (!p) return 'pustka: lista NIE jest pusta';
   return `pustka: ${p.rodzaj}${p.osiagalne ? '' : ' (GAŁĄŹ NIEOSIĄGALNA — ' + POWOD_NIEOSIAGALNOSCI + ')'}`;
+}
+
+/**
+ * ⭐ PLAN-D-C3 15.08.2026 — „+ log z powodem" z kształtu wymaganego przez
+ * polecenie C3.3. Bez tego czwarty rodzaj byłby ładniejszym milczeniem:
+ * zawodnik czyta „Nie udało się sprawdzić.", a NIKT nie wie dlaczego.
+ *
+ * ⚠️ Powód idzie WYŁĄCZNIE do konsoli. Zawodnik nigdy nie czyta komunikatu
+ * bazy — to nie jest jego problem i nie jest w żadnym z trzech rejestrów Z0.
+ */
+export function opisBleduOdczytuDoLogu(gdzie: string, powod: unknown): string {
+  const tresc =
+    powod && typeof powod === 'object' && 'message' in powod
+      ? String((powod as { message: unknown }).message)
+      : String(powod ?? 'bez powodu');
+  return `[trzyPustki] ${gdzie}: ODCZYT PADŁ — ${tresc}. `
+    + `Zawodnik widzi „${PUSTKA_BLAD_ODCZYTU_TEKST}", NIE zdanie o sobie.`;
 }

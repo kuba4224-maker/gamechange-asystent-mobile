@@ -47,12 +47,17 @@ import {
   LIBRARY_NO_DOWNLOAD_TEXT,
   type UnlockedMaterial,
 } from '../../lib/materials';
+// ⭐ PLAN-D-C3 15.08.2026 — patrz blok w `load()` niżej.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 
 export default function BibliotekaScreen() {
   const { currentUser } = useAuth();
   const [library, setLibrary] = useState<UnlockedMaterial[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // ⭐ PLAN-D-C3 15.08.2026 — TRZY WARTOŚCI, NIE DWIE. `null` znaczy „jeszcze
+  // nie czytałem", a nie „odczyt przeszedł".
+  const [odczytUdanySie, setOdczytUdanySie] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     if (!currentUser) return;
@@ -68,20 +73,55 @@ export default function BibliotekaScreen() {
         .eq('user_id', currentUser.id).eq('status', 'active'),
     ]);
 
-    const goalSegmentIds = ((goalsRes.data ?? []) as { segment_id: string }[])
+    // ═══════════════════════════════════════════════════════════════
+    // ⭐ PLAN-D-C3 15.08.2026 — NAJGORSZY PRZYPADEK W CAŁEJ APPCE, NAPRAWIONY
+    //
+    // ⛔ USUNIĘTE Z FUNKCJI `load()`: `(goalsRes.data ?? [])`.
+    //    To jedno `?? []` było całym mechanizmem. Odmowa RLS na `goals` dawała
+    //    zero segmentów, `unlockedMaterials` zwracało pustą listę, a zawodnik
+    //    z założonym wąskim gardłem czytał `LIBRARY_EMPTY_TEXT` — „Nic tu
+    //    jeszcze nie ma" — czyli zdanie o SOBIE, postawione na podstawie
+    //    odczytu, który nigdy nie doszedł. Ten ekran miał ZERO komunikatów
+    //    „nie udało się" na cztery dni przed tym pasem: pusta biblioteka
+    //    i biblioteka, której nie udało się wczytać, wyglądały identycznie.
+    //
+    // ⛔ WYCOFANY WYBÓR Z 08.08.2026 (stał w komentarzu nad `deficitSegmentIds`):
+    //    „lista krótsza niż powinna jest lepsza niż pusty ekran z komunikatem
+    //    o błędzie". Nie jest — bo ta lista NIE JEST NIGDZIE PODPISANA jako
+    //    krótsza. Stoi nad nią `libraryCountLine(n)`: „N materiałów otwartych
+    //    dla Ciebie". Liczba policzona z odczytu, który padł, jest
+    //    twierdzeniem o zawodniku podanym jako pewne — czyli Z0.
+    //
+    // Oba odczyty karmią JEDNĄ liczbę, więc padnięcie któregokolwiek znaczy
+    // dokładnie to samo: nie wiemy, co jest dla niego otwarte.
+    // ═══════════════════════════════════════════════════════════════
+    if (goalsRes.error || diagRes.error) {
+      console.warn(opisBleduOdczytuDoLogu(
+        `biblioteka.load (goals: ${goalsRes.error ? goalsRes.error.message : 'ok'}`
+        + `, diagnostics: ${diagRes.error ? diagRes.error.message : 'ok'})`,
+        goalsRes.error ?? diagRes.error,
+      ));
+      setLibrary([]);
+      setOdczytUdanySie(false);
+      setLoading(false);
+      return;
+    }
+
+    const goalSegmentIds = (goalsRes.data as { segment_id: string }[])
       .map((g) => g.segment_id)
       .filter((s): s is string => !!s);
 
-    // Błąd odczytu diagnozy NIE wywala ekranu — biblioteka opiera się wtedy
-    // wyłącznie na Celach. To ten sam wybór co w „Ja": lista krótsza niż
-    // powinna jest lepsza niż pusty ekran z komunikatem o błędzie.
+    // Diagnoza bez wierszy albo z nieczytelnym `scores` to NIE jest błąd
+    // odczytu — to jest prawda o zawodniku, który diagnozy nie zrobił.
+    // Biblioteka opiera się wtedy wyłącznie na Celach i to jest poprawne.
     let deficitSegmentIds: string[] = [];
-    if (!diagRes.error && diagRes.data?.length) {
+    if (diagRes.data?.length) {
       const scores = parseScores((diagRes.data[0] as { scores: unknown }).scores);
       if (scores) deficitSegmentIds = getRelativeDeficits(scores, 3).map(([id]) => id);
     }
 
     setLibrary(unlockedMaterials({ goalSegmentIds, deficitSegmentIds }));
+    setOdczytUdanySie(true);
     setLoading(false);
   }, [currentUser]);
 
@@ -92,6 +132,23 @@ export default function BibliotekaScreen() {
     await load();
     setRefreshing(false);
   }, [load]);
+
+  // ⭐ PLAN-D-C3 15.08.2026 — jedna funkcja decyzyjna zamiast `library.length === 0`.
+  // `LIBRARY_EMPTY_TEXT` idzie tu CO DO ZNAKU: to brzmienie przeszło przez Kubę
+  // i ten pas go nie przepisuje (zakaz 4 polecenia C3). Zmienia się wyłącznie
+  // to, KIEDY zawodnik je czyta.
+  const pustka = rozpoznajPustke({
+    maWpisy: library.length > 0,
+    planLekcjiZnany: null,
+    // Ekran wyłącznie CZYTA — nie ma tu zapisu, który mógłby zostać odrzucony,
+    // więc gałąź „brak uprawnień" nie ma dla niego sensu i zostaje `null`.
+    moznaZapisywac: null,
+    odczytUdanySie,
+    daSieOdswiezyc: true,
+    // Następny krok („Materiały otwierają się, gdy założysz Cel albo zrobisz
+    // diagnozę…") siedzi już W TYM ZDANIU — stąd brak osobnego `ctaBrakuDanych`.
+    tekstBrakuDanych: LIBRARY_EMPTY_TEXT,
+  });
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -108,9 +165,17 @@ export default function BibliotekaScreen() {
             zawodnikowi z Celem byłoby nieprawdą. */}
         {loading ? (
           <Text style={styles.loading}>Sprawdzam, co jest dla Ciebie otwarte…</Text>
-        ) : library.length === 0 ? (
+        ) : pustka ? (
+          /* ⭐ PLAN-D-C3 15.08.2026 — TEN SAM KAFELEK, DWA RÓŻNE ZDANIA.
+             Układ i style bez zmian (zakaz 5 polecenia C3): zmienia się
+             wyłącznie to, że „nic nie masz" i „nie wiem" przestały być
+             jednym napisem. Wyjście renderowane tylko wtedy, gdy nie siedzi
+             już w samym zdaniu — patrz `krokWTekscie`. */
           <View style={styles.materialCard}>
-            <Text style={styles.materialWhy}>{LIBRARY_EMPTY_TEXT}</Text>
+            <Text style={styles.materialWhy}>{pustka.tekst}</Text>
+            {pustka.krokWTekscie ? null : (
+              <Text style={[styles.materialWhy, { marginTop: 6 }]}>{pustka.cta}</Text>
+            )}
           </View>
         ) : (
           <>

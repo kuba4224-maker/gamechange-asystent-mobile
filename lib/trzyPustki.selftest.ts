@@ -15,6 +15,28 @@
 //   R5. Brzmienia zgadzają się CO DO ZNAKU z makietą widoku tygodnia.
 //   R6. Ekrany naprawdę tę funkcję wołają (asercja na źródło, nie na wiarę).
 //
+// ── ⭐ PLAN-D-C3 15.08.2026 — CO DOSZŁO (sekcje 7–9) ─────────────────
+//   R7.  „Nie wiem" bije KAŻDĄ wiedzę o zawodniku — także brak uprawnień.
+//   R8.  Pustka `blad_odczytu` NIGDY nie jest ślepym zaułkiem, a jej wyjście
+//        zależy od tego, czy ekran w ogóle da się pociągnąć w dół.
+//   R9.  Wsteczna zgodność: wołanie bez `odczytUdanySie` działa jak przed C3
+//        (to jest asercja o `dzis.tsx` i `kalendarz.tsx`, których ten pas
+//        nie dotyka).
+//   R10. Siedem ekranów pasa C3 NAPRAWDĘ woła `rozpoznajPustke`.
+//   R11. Żaden z siedmiu nie ma wzorca „błąd → pusta lista" w ŻADNEJ z jego
+//        dwóch postaci — ani gałęzi błędu, która po cichu czyści listę,
+//        ani `?? []` przy odczycie, o którego błąd nikt nie pyta.
+//   R12. Brzmienia czwartego rodzaju są nowe i oznaczone jako nieprzejrzane.
+//
+// ⚠️ SIEDEM MUTACJI (sekcja 9). Mutacja, która nie podnosi liczby FAIL-i,
+// oznacza asercję, która niczego nie pilnuje. Wszystkie żyją w obiektach
+// `Zasady` — ani jedna nie dotyka dysku, więc cofnięcie jest strukturalne,
+// a nie obietnicą; pilnuje tego osobna asercja na końcu.
+//
+// ⚠️ O68: sekcja 6 czyta `dzis.tsx` i `kalendarz.tsx`, czyli CUDZE pliki.
+// Przy pasach równoległych czerwień w tej sekcji najprawdopodobniej NIE
+// należy do tego strażnika — patrz nota przekazania pasa C3.
+//
 // ⚠️ O53: żadnego `new URL(...)` — `readFileSync` + `fileURLToPath`.
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -33,6 +55,13 @@ import {
   PUSTKA_BRAK_KONFIGURACJI_CTA,
   PUSTKA_BRAK_UPRAWNIEN_TEKST,
   PUSTKA_BRAK_UPRAWNIEN_CTA,
+  // ⭐ PLAN-D-C3 15.08.2026 — czwarty rodzaj pustki.
+  opisBleduOdczytuDoLogu,
+  PUSTKA_BLAD_ODCZYTU_TEKST,
+  PUSTKA_BLAD_ODCZYTU_CTA,
+  PUSTKA_BLAD_ODCZYTU_CTA_BEZ_ODSWIEZANIA,
+  BRZMIENIE_DO_PRZEJRZENIA_C3,
+  type Pustka,
   type WejsciePustki,
 } from './trzyPustki';
 import { ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from './dostepKonta';
@@ -231,6 +260,359 @@ console.log('\n6. (T6) EKRANY NAPRAWDĘ PODPIĘŁY KOMUNIKAT — asercja na źr�
   check('„Dziś w kalendarzu" też — nie ma dwóch różnych odpowiedzi na tę samą pustkę',
     /rozpoznajPustke\(/.test(dzis) && !/Nic zaplanowanego na dziś\./.test(dzis),
     'ekran Dziś nadal ma własne zdanie o pustce');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-C3 15.08.2026 — CZWARTY RODZAJ I SIEDEM EKRANÓW
+// ═════════════════════════════════════════════════════════════════════
+//
+// ── CO PILNUJE (ponad R1–R6 wyżej) ───────────────────────────────────
+//   R7.  „Nie wiem" bije KAŻDĄ wiedzę o zawodniku — także brak uprawnień.
+//   R8.  Pustka `blad_odczytu` NIGDY nie jest ślepym zaułkiem.
+//   R9.  Wsteczna zgodność: wołanie bez `odczytUdanySie` działa jak przed C3.
+//   R10. Siedem ekranów NAPRAWDĘ woła `rozpoznajPustke` (asercja na źródło).
+//   R11. Żaden z siedmiu nie ma gałęzi błędu, która OPRÓŻNIA LISTĘ, nie
+//        nazywając tego ani logiem, ani stanem odczytu.
+//   R12. Brzmienia czwartego rodzaju są oznaczone jako nieprzejrzane.
+
+const SIEDEM_EKRANOW_C3 = [
+  'app/(tabs)/biblioteka.tsx',
+  'app/(tabs)/diagnoza.tsx',
+  'app/(tabs)/centrum-decyzji.tsx',
+  'app/(tabs)/mecz.tsx',
+  'app/(tabs)/ja.tsx',
+  'app/(tabs)/dziennik.tsx',
+  'app/(tabs)/cele.tsx',
+];
+
+/** Kod BEZ komentarzy — inaczej strażnik zapala się na własnej dokumentacji. */
+function zyweZrodlo(zrodlo: string): string {
+  return zrodlo
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+function wczytajZywe(plik: string): string {
+  const sciezka = join(appRoot, plik);
+  return existsSync(sciezka) ? zyweZrodlo(readFileSync(sciezka, 'utf8')) : '';
+}
+
+/**
+ * Wycina ciała gałęzi błędu: każdy `catch (…) { … }` i każdy
+ * `if (<warunek zawierający err/error/Err>) { … }`. Dopasowanie nawiasów, nie
+ * regex na całość — inaczej pierwszy `}` w środku ucinałby blok w połowie.
+ */
+function galezieBledu(zywy: string): string[] {
+  const out: string[] = [];
+  const naglowek = /\bcatch\s*(\([^)]*\))?\s*\{|\bif\s*\(([^)]*(?:err|error|Err|Error)[^)]*)\)\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = naglowek.exec(zywy)) !== null) {
+    let i = zywy.indexOf('{', m.index);
+    let glebokosc = 0;
+    let koniec = -1;
+    for (let k = i; k < zywy.length; k++) {
+      if (zywy[k] === '{') glebokosc++;
+      else if (zywy[k] === '}') {
+        glebokosc--;
+        if (glebokosc === 0) { koniec = k; break; }
+      }
+    }
+    if (koniec > i) out.push(zywy.slice(i, koniec + 1));
+  }
+  return out;
+}
+
+/** Czy ta gałąź błędu OPRÓŻNIA jakąś listę — jawnie albo przez `?? []`. */
+function oprozniaListe(cialo: string): boolean {
+  return /\bset[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż0-9_]*\(\s*\[\s*\]\s*\)/.test(cialo)
+    || /\?\?\s*\[\s*\]/.test(cialo)
+    || /\|\|\s*\[\s*\]/.test(cialo);
+}
+
+/** Czy ta gałąź NAZYWA to, co się stało — logiem albo stanem odczytu. */
+function nazywaOdczyt(cialo: string): boolean {
+  return /opisBleduOdczytuDoLogu\s*\(/.test(cialo)
+    || /setOdczyt[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż0-9_]*\(/.test(cialo);
+}
+
+/**
+ * ⚠️ DRUGA POŁOWA WZORCA „BŁĄD → PUSTA LISTA", I TA GROŹNIEJSZA.
+ *
+ * ZMIERZONE 15.08.2026 na źródłach z `main`: sama analiza gałęzi `catch` /
+ * `if (err)` łapie 4 z 7 ekranów. Trzech nie łapie — `biblioteka.tsx`,
+ * `ja.tsx` i `dziennik.tsx` — bo ich defekt NIE MIAŁ gałęzi błędu. Miał
+ * `goalsRes.data ?? []` w głównym przepływie, przy odczycie, którego `.error`
+ * nikt nigdy nie czytał. Błąd nie był obsłużony źle; był NIEZAUWAŻONY.
+ *
+ * Reguła: wynik zapytania wolno podeprzeć pustą listą tylko wtedy, gdy tuż
+ * przed tym ktoś zapytał o błąd. „Tuż przed" = 600 znaków żywego kodu — gałąź
+ * błędu odczytu zawsze stoi kilka linii nad jego użyciem, a szersze okno
+ * przepuściłoby plik, w którym słowo `error` pada gdziekolwiek indziej.
+ *
+ * ⛔ Wąsko dobrana lista nazw (`data`, `rows`, `…Res`, `…Surowe`) jest
+ * świadoma: `row.pain_entries || []` to zagnieżdżona relacja, która ma prawo
+ * być pusta, a nie wynik odczytu udający pustkę.
+ */
+function niezauwazonyBlad(zywy: string): string[] {
+  const wynikZapytania =
+    /(?:(\w+)\.)?\b(\w*[Dd]ata|\w*[Rr]ows|\w+Res|\w*Surowe)\b\s*(?:\?\?|\|\|)\s*\[\s*\]/g;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = wynikZapytania.exec(zywy)) !== null) {
+    const okno = zywy.slice(Math.max(0, m.index - 600), m.index);
+    if (!/error|Err\b|\bErr/.test(okno)) {
+      out.push(zywy.slice(Math.max(0, m.index - 60), m.index + m[0].length).replace(/\s+/g, ' '));
+    }
+  }
+  return out;
+}
+
+// ── BATERIA — te same asercje na prawdziwych i na zepsutych zasadach ──
+// ⚠️ Mutacja, która nie podnosi liczby FAIL-i, oznacza asercję, która niczego
+// nie pilnuje (ten sam wzorzec co sekcja 8 w `kolejkaPodania.selftest.ts`).
+type Zasady = {
+  decyduj: (w: WejsciePustki) => Pustka | null;
+  zrodla: Record<string, string>;
+};
+
+type WynikBaterii = { label: string; ok: boolean; detail: string };
+
+function bateria(z: Zasady): WynikBaterii[] {
+  const r: WynikBaterii[] = [];
+  const zapisz = (label: string, ok: boolean, detail = '') => r.push({ label, ok, detail });
+  const wc = (over: Partial<WejsciePustki> = {}): WejsciePustki =>
+    ({ maWpisy: false, planLekcjiZnany: null, moznaZapisywac: true, ...over });
+
+  // ── R7 · „nie wiem" bije każdą wiedzę o zawodniku ──────────────────
+  const bladSam = z.decyduj(wc({ odczytUdanySie: false }));
+  zapisz('R7 · nieudany odczyt → rodzaj `blad_odczytu`, nie `brak_danych`',
+    bladSam?.rodzaj === 'blad_odczytu', JSON.stringify(bladSam));
+  zapisz('R7 · …i NIE mówi zawodnikowi „nic nie masz"',
+    bladSam?.tekst === PUSTKA_BLAD_ODCZYTU_TEKST, JSON.stringify(bladSam?.tekst));
+  zapisz('⛔ R7 · nieudany ODCZYT nie jest zgłaszany jako wygasły dostęp',
+    z.decyduj(wc({ odczytUdanySie: false, moznaZapisywac: false }))?.rodzaj === 'blad_odczytu',
+    'brak uprawnień przebił „nie wiem" — appka twierdzi coś, czego nie zmierzyła');
+  zapisz('⛔ R7 · …ani jako brak konfiguracji',
+    z.decyduj(wc({ odczytUdanySie: false, planLekcjiZnany: false }))?.rodzaj === 'blad_odczytu', '');
+  zapisz('R7 · lista NIEpusta bije wszystko — dane sprzed chwili są prawdziwsze niż komunikat',
+    z.decyduj(wc({ maWpisy: true, odczytUdanySie: false })) === null, '');
+
+  // ── R8 · pustka „nie wiem" ma zawsze wyjście ───────────────────────
+  zapisz('R8 · `blad_odczytu` ma wyjście i NIE chowa go w zdaniu ekranu',
+    !!bladSam && bladSam.cta.length > 0 && bladSam.krokWTekscie === false,
+    JSON.stringify(bladSam));
+  zapisz('R8 · ekran z odświeżaniem dostaje wyjście przez pociągnięcie w dół',
+    z.decyduj(wc({ odczytUdanySie: false, daSieOdswiezyc: true }))?.cta === PUSTKA_BLAD_ODCZYTU_CTA, '');
+  zapisz('R8 · ⚠️ ekran BEZ odświeżania (`diagnoza.tsx`) dostaje INNE wyjście',
+    z.decyduj(wc({ odczytUdanySie: false, daSieOdswiezyc: false }))?.cta
+      === PUSTKA_BLAD_ODCZYTU_CTA_BEZ_ODSWIEZANIA,
+    'zawodnik dostaje instrukcję gestu, którego na tym ekranie nie ma');
+  zapisz('R8 · gałąź „nie wiem" jest OSIĄGALNA — inaczej niż „brak konfiguracji"',
+    bladSam?.osiagalne === true, '');
+
+  // ── R9 · wsteczna zgodność z `dzis.tsx` i `kalendarz.tsx` ──────────
+  zapisz('R9 · bez `odczytUdanySie` zachowanie jest takie jak przed pasem C3',
+    z.decyduj(wc())?.rodzaj === 'brak_danych'
+    && z.decyduj(wc())?.tekst === PUSTKA_BRAK_DANYCH_TEKST, '');
+  zapisz('R9 · `odczytUdanySie: null` (nie czytałem) też NIE zgaduje błędu',
+    z.decyduj(wc({ odczytUdanySie: null }))?.rodzaj === 'brak_danych', '');
+  zapisz('R9 · `odczytUdanySie: true` → zwykły brak danych',
+    z.decyduj(wc({ odczytUdanySie: true }))?.rodzaj === 'brak_danych', '');
+
+  // ── własne zdanie ekranu ───────────────────────────────────────────
+  const wlasne = z.decyduj(wc({ tekstBrakuDanych: 'Brak wpisów — dodaj pierwszy powyżej.' }));
+  zapisz('ekran może podać SWOJE zdanie „pusto" — brzmienia Kuby zostają na miejscu',
+    wlasne?.tekst === 'Brak wpisów — dodaj pierwszy powyżej.' && wlasne?.krokWTekscie === true,
+    JSON.stringify(wlasne));
+  zapisz('⛔ własne zdanie NIE przebija „nie wiem"',
+    z.decyduj(wc({ odczytUdanySie: false, tekstBrakuDanych: 'Brak wpisów.' }))?.tekst
+      === PUSTKA_BLAD_ODCZYTU_TEKST,
+    'ekran po nieudanym odczycie nadal mówi zawodnikowi, że nic nie ma');
+
+  // ── R10 · siedem ekranów woła `rozpoznajPustke` ────────────────────
+  for (const plik of SIEDEM_EKRANOW_C3) {
+    zapisz(`R10 · ${plik} woła \`rozpoznajPustke\``,
+      /rozpoznajPustke\s*\(/.test(z.zrodla[plik] ?? ''),
+      'ekran nadal sam decyduje, co znaczy jego pustka');
+  }
+
+  // ── R11 · żadnego wzorca „błąd → pusta lista", w OBU jego postaciach ──
+  // (a) gałąź błędu, która opróżnia listę i nic nie mówi;
+  // (b) wynik zapytania podparty pustą listą tam, gdzie nikt nie pytał o błąd.
+  for (const plik of SIEDEM_EKRANOW_C3) {
+    const zywy = z.zrodla[plik] ?? '';
+    const cicheGalezie = galezieBledu(zywy).filter((c) => oprozniaListe(c) && !nazywaOdczyt(c));
+    const niezauwazone = niezauwazonyBlad(zywy);
+    const winne = [
+      ...cicheGalezie.map((c) => `gałąź: ${c.replace(/\s+/g, ' ').slice(0, 80)}`),
+      ...niezauwazone.map((c) => `niezauważony błąd: …${c.slice(0, 80)}`),
+    ];
+    zapisz(`R11 · ${plik} — ani jednego „błąd → pusta lista"`,
+      winne.length === 0,
+      `${winne.length}: ${winne.join(' | ')}`);
+  }
+
+  return r;
+}
+
+const ZASADY_PRAWDZIWE: Zasady = {
+  decyduj: rozpoznajPustke,
+  zrodla: Object.fromEntries(SIEDEM_EKRANOW_C3.map((p) => [p, wczytajZywe(p)])),
+};
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n7. ⭐ (C3) CZWARTY RODZAJ + SIEDEM EKRANÓW — bateria na prawdziwych zasadach');
+// ═════════════════════════════════════════════════════════════════════
+{
+  check('(strażnik strażnika) mam co przemiatać — siedem plików istnieje',
+    SIEDEM_EKRANOW_C3.every((p) => existsSync(join(appRoot, p))),
+    SIEDEM_EKRANOW_C3.filter((p) => !existsSync(join(appRoot, p))).join(', '));
+
+  for (const w of bateria(ZASADY_PRAWDZIWE)) check(w.label, w.ok, w.detail);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n8. ⭐ (C3) BRZMIENIA CZWARTEGO RODZAJU — nowe, więc oznaczone');
+// ═════════════════════════════════════════════════════════════════════
+{
+  check('zdanie „nie wiem" brzmi co do znaku jak w poleceniu C3',
+    PUSTKA_BLAD_ODCZYTU_TEKST === 'Nie udało się sprawdzić.', PUSTKA_BLAD_ODCZYTU_TEKST);
+  check('⛔ …i NIE pokazuje zawodnikowi komunikatu bazy',
+    !/\{|\}|SQLSTATE|row-level|RLS|\bcode\b/i.test(PUSTKA_BLAD_ODCZYTU_TEKST), PUSTKA_BLAD_ODCZYTU_TEKST);
+  check('⛔ …i NIE mówi „nic nie masz" żadnym słowem',
+    !/nic nie masz|nie masz|brak /i.test(PUSTKA_BLAD_ODCZYTU_TEKST), PUSTKA_BLAD_ODCZYTU_TEKST);
+  // ⚠️ Przez `Set` na napisach, nie `!==` na stałych: `tsc --strict` uznaje
+  // porównanie dwóch różnych typów literalnych za pomyłkę (TS2367) i strażnik
+  // przestałby się kompilować — a strażnik, który nie przechodzi `tsc`,
+  // nie dojedzie do CI (to samo ograniczenie co O53 przy `new URL`).
+  check('dwa wyjścia są RÓŻNE — bo dwa ekrany odświeżają się inaczej',
+    new Set<string>([PUSTKA_BLAD_ODCZYTU_CTA, PUSTKA_BLAD_ODCZYTU_CTA_BEZ_ODSWIEZANIA]).size === 2,
+    `${PUSTKA_BLAD_ODCZYTU_CTA} | ${PUSTKA_BLAD_ODCZYTU_CTA_BEZ_ODSWIEZANIA}`);
+  check('⚠️ znacznik „do przejrzenia przez Kubę" istnieje i wskazuje ten pas',
+    /PLAN-D-C3/.test(BRZMIENIE_DO_PRZEJRZENIA_C3) && /KUB/i.test(BRZMIENIE_DO_PRZEJRZENIA_C3),
+    BRZMIENIE_DO_PRZEJRZENIA_C3);
+
+  // Log — „+ log z powodem" z kształtu wymaganego przez polecenie C3.3.
+  const log = opisBleduOdczytuDoLogu('ekran.load → tabela', { message: 'permission denied' });
+  check('log podaje MIEJSCE i POWÓD — inaczej „nie wiem" jest ładniejszym milczeniem',
+    log.includes('ekran.load → tabela') && log.includes('permission denied'), log);
+  check('log mówi wprost, co zamiast tego czyta zawodnik',
+    log.includes(PUSTKA_BLAD_ODCZYTU_TEKST), log);
+  check('log nie wywraca się na powodzie bez `message`',
+    opisBleduOdczytuDoLogu('x', undefined).length > 0, '');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n9. ⭐ (C3) TEST MUTACYJNY — siedem mutacji, liczba FAIL-i przy każdej');
+// ═════════════════════════════════════════════════════════════════════
+// ⚠️ MUTACJA, KTÓRA NIE PODNOSI LICZBY FAIL-i, OZNACZA ASERCJĘ, KTÓRA NICZEGO
+// NIE PILNUJE. Wtedy trzeba napisać ją od nowa, a nie zgłaszać zielone.
+{
+  const ROZMIAR = bateria(ZASADY_PRAWDZIWE).length;
+  const failePrawdziwe = bateria(ZASADY_PRAWDZIWE).filter((w) => !w.ok).length;
+
+  const bezZrodla = (plik: string, jak: (s: string) => string): Record<string, string> => ({
+    ...ZASADY_PRAWDZIWE.zrodla,
+    [plik]: jak(ZASADY_PRAWDZIWE.zrodla[plik]),
+  });
+
+  const MUTACJE: { nazwa: string; opis: string; zasady: Zasady }[] = [
+    {
+      nazwa: 'M1 · „nie wiem" znowu udaje pustkę',
+      opis: 'decyzja ignoruje `odczytUdanySie` — dokładnie stan sprzed pasa C3',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        decyduj: (w) => rozpoznajPustke({ ...w, odczytUdanySie: null }),
+      },
+    },
+    {
+      nazwa: 'M2 · brak uprawnień przebija „nie wiem"',
+      opis: 'nieudany ODCZYT zgłaszany zawodnikowi jako wygasły okres próbny',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        decyduj: (w) => (w.odczytUdanySie === false && w.moznaZapisywac === false
+          ? rozpoznajPustke({ ...w, odczytUdanySie: null })
+          : rozpoznajPustke(w)),
+      },
+    },
+    {
+      nazwa: 'M3 · pustka „nie wiem" bez wyjścia',
+      opis: 'zawodnik czyta, że nie wyszło, i nie ma co z tym zrobić',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        decyduj: (w) => {
+          const p = rozpoznajPustke(w);
+          return p && p.rodzaj === 'blad_odczytu' ? { ...p, cta: '', krokWTekscie: true } : p;
+        },
+      },
+    },
+    {
+      nazwa: 'M4 · jedno wyjście na wszystkie ekrany',
+      opis: '`diagnoza.tsx` każe pociągnąć w dół ekran, który nie ma odświeżania',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        decyduj: (w) => rozpoznajPustke({ ...w, daSieOdswiezyc: true }),
+      },
+    },
+    {
+      nazwa: 'M5 · ekran znowu sam decyduje o swojej pustce',
+      opis: '`biblioteka.tsx` przestaje wołać `rozpoznajPustke`',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: bezZrodla('app/(tabs)/biblioteka.tsx',
+          (s) => s.replace(/rozpoznajPustke\s*\(/g, 'wlasnaDecyzja(')),
+      },
+    },
+    {
+      nazwa: 'M6 · cicha gałąź „błąd → pusta lista" wraca',
+      opis: '`dziennik.tsx` dostaje `catch`, który czyści historię i nic nie mówi',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: bezZrodla('app/(tabs)/dziennik.tsx',
+          (s) => `${s}\nfunction __mutacja() { try { nic(); } catch (e) { setHistory([]); } }\n`),
+      },
+    },
+    {
+      // ⚠️ TA MUTACJA ODTWARZA DEFEKT SPRZED PASA CO DO ZNAKU — patrz
+      // `niezauwazonyBlad`. Bez niej strażnik pilnowałby tylko tej połowy
+      // wzorca, którą i tak widać w kodzie.
+      nazwa: 'M7 · wraca `?? []` przy odczycie, o którego błąd nikt nie pyta',
+      opis: '`biblioteka.tsx` znowu zamienia odmowę RLS na „Nic tu jeszcze nie ma"',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: bezZrodla('app/(tabs)/biblioteka.tsx',
+          (s) => `${s}\nfunction __mutacja() { const x = (goalsRes.data ?? []).map(g => g.id); return x; }\n`),
+      },
+    },
+  ];
+
+  console.log(`\nbateria ma ${ROZMIAR} asercji · na prawdziwych zasadach FAIL-i: ${failePrawdziwe}\n`);
+  check('⭐ bateria na PRAWDZIWYCH zasadach nie zapala ani jednej asercji',
+    failePrawdziwe === 0, `FAIL-i: ${failePrawdziwe}`);
+
+  let bezEfektu = 0;
+  for (const m of MUTACJE) {
+    const zapalone = bateria(m.zasady).filter((w) => !w.ok);
+    console.log(`${m.nazwa}`);
+    console.log(`   co psuje: ${m.opis}`);
+    console.log(`   FAIL-i przy tej mutacji: ${zapalone.length} / ${ROZMIAR}`);
+    for (const z of zapalone) console.log(`     • ${z.label}`);
+    if (zapalone.length === 0) bezEfektu++;
+    check(`⭐ mutacja „${m.nazwa}" podnosi liczbę FAIL-i`,
+      zapalone.length > 0, 'mutacja przeszła niezauważona — ta bateria niczego nie pilnuje');
+    console.log('');
+  }
+
+  check('⭐ KAŻDA z siedmiu mutacji została złapana — i KAŻDA jest cofnięta',
+    bezEfektu === 0, `mutacji bez efektu: ${bezEfektu}`);
+  // ⚠️ Cofnięcie jest strukturalne, nie deklaratywne: mutacje żyją wyłącznie
+  // w obiektach `Zasady` przekazywanych do `bateria()`. Ani jedna nie dotyka
+  // dysku, `rozpoznajPustke` ani `ZASADY_PRAWDZIWE` — poniższa asercja
+  // sprawdza to pomiarem, a nie obietnicą.
+  check('⭐ po siedmiu mutacjach prawdziwe zasady są nadal nietknięte',
+    bateria(ZASADY_PRAWDZIWE).filter((w) => !w.ok).length === 0,
+    'mutacja wyciekła poza swój obiekt Zasady');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

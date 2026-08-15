@@ -128,10 +128,21 @@ import { WEJSCIE_LISTA_LABEL, zdanieOdczytu } from '../../lib/listaZadan';
 import { otworzPunktPomocy } from '../../components/PunktPomocy';
 import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
 
+// ⭐ PLAN-D-C3 15.08.2026 — patrz `load()` i blok „TRZY PUSTKI" niżej.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
+
 type DiagnosisSummary =
   | { state: 'loading' }
   | { state: 'none' }
   | { state: 'unreadable' }
+  // ⭐ PLAN-D-C3 15.08.2026 — PIĄTY STAN. Do dziś odczyt `diagnostics`, który
+  // padł, wpadał do `'none'` razem z „zawodnik nie zrobił diagnozy" — i karta
+  // mówiła mu wprost „Nie masz jeszcze diagnozy". Komentarz przy tamtym
+  // zlaniu bronił go tym, że ekran „Wynik diagnozy" niżej i tak pokaże
+  // prawdziwy powód. Nie pokaże, dopóki zawodnik tam nie wejdzie — a wejdzie
+  // rzadziej właśnie dlatego, że przed chwilą przeczytał, że nie ma czego
+  // oglądać. Zdanie, które gasi ciekawość, nie może być zgadywaniem.
+  | { state: 'blad_odczytu' }
   | { state: 'ready'; headline: string; desc: string; deficitLabels: string[] };
 
 type MenuRoute = '/diagnoza' | '/centrum-decyzji' | '/cele' | '/biblioteka' | '/profil';
@@ -144,6 +155,10 @@ export default function JaScreen() {
   const [unreadRecs, setUnreadRecs] = useState(0);
   const [openActionableRecs, setOpenActionableRecs] = useState(0);
   const [activeGoals, setActiveGoals] = useState(0);
+  // ⭐ PLAN-D-C3 15.08.2026 — trzy wartości, nie dwie. `null` = jeszcze nie
+  // czytałem. Rozstrzyga podpisy przy „Cele" i przy bibliotece, bo OBA liczą
+  // się z tego samego odczytu `goals`.
+  const [odczytCelowUdanySie, setOdczytCelowUdanySie] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // ZMIANA OBRAZU B5 08.08.2026 — po przeprowadzce biblioteki został tu sam
   // LICZNIK do podpisu wejścia. Liczony z dwóch rzeczy, które ekran i tak już
@@ -203,7 +218,23 @@ export default function JaScreen() {
 
     // WIEDZA B4 08.08.2026 — segmenty aktywnych Celów: podpis przy „Cele"
     // i pierwsze źródło odblokowań w bibliotece.
-    const goalSegmentIds = ((goalsRes.data ?? []) as { segment_id: string }[])
+    //
+    // ⛔ PLAN-D-C3 15.08.2026 — USUNIĘTE Z FUNKCJI `load()`: `(goalsRes.data ?? [])`.
+    //    Odmowa RLS na `goals` dawała zero segmentów, a z tego zera brały się
+    //    DWA zdania o zawodniku naraz: „Wskaż wąskie gardło — to ono napędza
+    //    resztę appki" przy wierszu „Cele" i „Otwiera je Cel albo diagnoza"
+    //    przy bibliotece. Oba czytał ktoś, kto wąskie gardło ma.
+    const odczytCelowOk = !goalsRes.error;
+    if (goalsRes.error) {
+      console.warn(opisBleduOdczytuDoLogu('ja.load → goals', goalsRes.error));
+    }
+    setOdczytCelowUdanySie(odczytCelowOk);
+    // ⚠️ Pusta lista przy `odczytCelowOk === false` NIE JEST już twierdzeniem:
+    // od tej rundy nie ona rozstrzyga podpisy, tylko `odczytCelowUdanySie`.
+    const wierszeCelow: { segment_id: string }[] = odczytCelowOk
+      ? (goalsRes.data as { segment_id: string }[])
+      : [];
+    const goalSegmentIds = wierszeCelow
       .map((g) => g.segment_id)
       .filter((s): s is string => !!s);
     setActiveGoals(goalSegmentIds.length);
@@ -214,18 +245,29 @@ export default function JaScreen() {
     let deficitSegmentIds: string[] = [];
 
     // ─── Skrót profilu z diagnozy ─────────────────────────────────
-    if (diagRes.error || !diagRes.data || diagRes.data.length === 0) {
-      // Błąd odczytu i brak diagnozy dają ten sam ekran świadomie: dla
-      // zawodnika obie sytuacje znaczą „nie mam tu jeszcze nic o sobie",
-      // a wejście „Wynik diagnozy →" niżej i tak prowadzi do ekranu, który
-      // pokaże prawdziwy powód (tam jest osobny stan błędu).
+    // ⭐ PLAN-D-C3 15.08.2026 — ROZDZIELONE. Było jedno `if`:
+    //   `if (diagRes.error || !diagRes.data || diagRes.data.length === 0)`
+    //   → `setSummary({ state: 'none' })` → „Nie masz jeszcze diagnozy".
+    // Uzasadnienie tamtego zlania („wejście niżej i tak pokaże prawdziwy
+    // powód") nie broni się: prowadzi tam link, w który zawodnik właśnie
+    // przestał mieć powód klikać.
+    if (diagRes.error) {
+      console.warn(opisBleduOdczytuDoLogu('ja.load → diagnostics', diagRes.error));
+      setSummary({ state: 'blad_odczytu' });
+    } else if (!diagRes.data || diagRes.data.length === 0) {
       setSummary({ state: 'none' });
     } else {
       const scores = parseScores((diagRes.data[0] as { scores: unknown }).scores);
       if (!scores) {
         setSummary({ state: 'unreadable' });
       } else {
-        const hasPosition = !profileRes.error && !!profileRes.data?.[0]?.position_primary;
+        // ⚠️ PLAN-D-C3 15.08.2026 — ZOSTAJE, ALE PRZESTAJE BYĆ CICHE: nieudany
+      // odczyt profilu daje `hasPosition === false`, czyli INNY scenariusz
+      // nagłówka o zawodniku, nieodróżnialny od „nie ustawił pozycji".
+      if (profileRes.error) {
+        console.warn(opisBleduOdczytuDoLogu('ja.load → player_profiles', profileRes.error));
+      }
+      const hasPosition = !profileRes.error && !!profileRes.data?.[0]?.position_primary;
         const deficits = getRelativeDeficits(scores, 3);
         const scenario = detectScenario(scores, hasPosition);
         const { headline, desc } = scenarioHeadline(scenario, deficits.length);
@@ -246,6 +288,15 @@ export default function JaScreen() {
     // WIEDZA B4 08.08.2026 — dług N3: liczby przychodzą z `count`, nie z
     // policzonych w appce wierszy. Błąd zapytania daje 0, czyli podpis spada na
     // wariant opisowy — nigdy na zmyśloną liczbę.
+    //
+    // ⚠️ PLAN-D-C3 15.08.2026 — ZOSTAJE, ALE PRZESTAJE BYĆ CICHE. Oba `? 0`
+    // zlewają „nie policzyłem" z „nie ma nic nowego": podpis spada wtedy na
+    // wariant opisowy („Wszystko, co system Ci dotąd powiedział") i gaśnie
+    // kropka przy wierszu. Żadne z tych dwóch nie jest ZDANIEM o zawodniku,
+    // więc trzy pustki nie mają czego zamienić — ale cichy zerowy licznik jest
+    // dokładnie tym, przez co defekt potrafi żyć tygodniami.
+    if (unreadRes.error) console.warn(opisBleduOdczytuDoLogu('ja.load → decision_recommendations (nieprzeczytane)', unreadRes.error));
+    if (actionableRes.error) console.warn(opisBleduOdczytuDoLogu('ja.load → decision_recommendations (do sprawdzenia)', actionableRes.error));
     setUnreadRecs(unreadRes.error ? 0 : (unreadRes.count ?? 0));
     setOpenActionableRecs(actionableRes.error ? 0 : (actionableRes.count ?? 0));
 
@@ -272,11 +323,46 @@ export default function JaScreen() {
       ? `${openActionableRecs} do sprawdzenia`
       : 'Wszystko, co system Ci dotąd powiedział';
 
-  const goalsHint = activeGoals > 0
+  // ⭐ PLAN-D-C3 15.08.2026 — DWA PODPISY Z JEDNEGO ODCZYTU, JEDNA FUNKCJA
+  // DECYZYJNA. Oba brzmienia („Wskaż wąskie gardło…", „Otwiera je Cel albo
+  // diagnoza") idą CO DO ZNAKU — ten pas ich nie przepisuje (zakaz 4).
+  // Zmienia się wyłącznie to, że po nieudanym odczycie `goals` zawodnik czyta
+  // „Nie udało się sprawdzić." zamiast zdania o sobie.
+  const pustkaDiagnozy = rozpoznajPustke({
+    maWpisy: false,
+    planLekcjiZnany: null,
+    moznaZapisywac: null,
+    odczytUdanySie: summary.state === 'blad_odczytu' ? false : null,
+    daSieOdswiezyc: true,
+  });
+  const pustkaCelow = rozpoznajPustke({
+    maWpisy: activeGoals > 0,
+    planLekcjiZnany: null,
+    moznaZapisywac: null,
+    odczytUdanySie: odczytCelowUdanySie,
+    daSieOdswiezyc: true,
     // PLAN-D-A 08.2026 — `goals` to WĄSKIE GARDŁO. Słowo „cel" jest od teraz
     // zarezerwowane dla kierunku na lata (`player_profiles.goal_direction`).
-    ? `${activeGoals} ${activeGoals === 1 ? 'aktywne wąskie gardło' : 'aktywne wąskie gardła'} · historia i planowanie pracy`
-    : 'Wskaż wąskie gardło — to ono napędza resztę appki';
+    tekstBrakuDanych: 'Wskaż wąskie gardło — to ono napędza resztę appki',
+  });
+  const pustkaBiblioteki = rozpoznajPustke({
+    maWpisy: libraryCount > 0,
+    planLekcjiZnany: null,
+    moznaZapisywac: null,
+    // ⚠️ TEN SAM odczyt `goals` karmi licznik biblioteki (razem z diagnozą),
+    // więc jego padnięcie znaczy tu dokładnie to samo.
+    odczytUdanySie: odczytCelowUdanySie,
+    daSieOdswiezyc: true,
+    tekstBrakuDanych: libraryEntryHint(0),
+  });
+
+  // Wiersz menu ma JEDNĄ linię podpisu, więc zdanie i wyjście łączymy w nią.
+  const podpisPustki = (p: ReturnType<typeof rozpoznajPustke>) =>
+    (p && !p.krokWTekscie ? `${p.tekst} ${p.cta}` : (p ? p.tekst : ''));
+
+  const goalsHint = pustkaCelow
+    ? podpisPustki(pustkaCelow)
+    : `${activeGoals} ${activeGoals === 1 ? 'aktywne wąskie gardło' : 'aktywne wąskie gardła'} · historia i planowanie pracy`;
 
   // PLAN-D-E 08.2026 — jeden wygląd wiersza, dwa sposoby otwarcia. Bez tego
   // wejście do Mapy wyglądałoby inaczej niż pozostałe i czytałoby się jak
@@ -325,6 +411,17 @@ export default function JaScreen() {
                 Diagnoza pokazuje, co dziś najbardziej Cię ogranicza — i dlaczego. Bez niej system
                 zgaduje, na czym masz się skupić.
               </Text>
+            </>
+          )}
+
+          {/* ⭐ PLAN-D-C3 15.08.2026 — PIĄTY STAN KARTY. Ten sam układ i te same
+              style co pozostałe cztery (zakaz 5): zmienia się wyłącznie to, że
+              „nie mam Twojej diagnozy" i „nie udało mi się jej sprawdzić"
+              przestały być jednym zdaniem. */}
+          {summary.state === 'blad_odczytu' && pustkaDiagnozy && (
+            <>
+              <Text style={styles.heroTitle}>{pustkaDiagnozy.tekst}</Text>
+              <Text style={styles.heroBody}>{pustkaDiagnozy.cta}</Text>
             </>
           )}
 
@@ -401,7 +498,8 @@ export default function JaScreen() {
           {/* ZMIANA OBRAZU B5 08.08.2026 — wejście do biblioteki. Stoi jako
               ostatnie w „Twoim rozwoju": to jest treść do czytania, a nie
               rzecz, po którą zawodnik wchodzi tu codziennie. */}
-          {renderRow('/biblioteka', LIBRARY_SECTION_LABEL, libraryEntryHint(libraryCount))}
+          {renderRow('/biblioteka', LIBRARY_SECTION_LABEL,
+            pustkaBiblioteki ? podpisPustki(pustkaBiblioteki) : libraryEntryHint(libraryCount))}
         </View>
 
         {/* ── USTAWIENIA ───────────────────────────────────────────── */}

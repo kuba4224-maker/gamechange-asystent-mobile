@@ -63,6 +63,8 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
 import DiagnosisProfileView from '../../components/DiagnosisProfileView';
+// ⭐ PLAN-D-C3 15.08.2026 — patrz blok „TRZY PUSTKI" przy `loadDiagnoza`.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 
 const DIAGNOZA_URL = 'https://gamechange-diagnoza.vercel.app';
 const DIAGNOSIS_TYPE_LABELS: Record<string, string> = {
@@ -76,7 +78,6 @@ export default function DiagnozaScreen() {
   const router = useRouter();
   const [status, setStatus] = useState<Status>('loading');
   const [detail, setDetail] = useState('');
-  const [error, setError] = useState<string | null>(null);
   // WYNIK DIAGNOZY 07.08.2026 — nowy stan ekranu.
   const [scoresRaw, setScoresRaw] = useState<unknown>(null);
   const [positionLabel, setPositionLabel] = useState<string | null>(null);
@@ -85,7 +86,6 @@ export default function DiagnozaScreen() {
   const loadDiagnoza = useCallback(async () => {
     if (!currentUser) return;
     setStatus('loading');
-    setError(null);
     try {
       // `diagnostics` to log zdarzeń, nie jeden wiersz na diagnozę — filtr
       // `event=eq.email_submitted` jest konieczny (patrz kontrakt sekcja 3).
@@ -122,6 +122,25 @@ export default function DiagnozaScreen() {
       // ich błąd nie może wywalić całego wyniku diagnozy. Bez pozycji ekran
       // pokazuje 3 grupy zamiast 4 (fallback już obsłużony w
       // groupSegmentsForDisplay), bez Celu — sekcję zachęty do jego założenia.
+      //
+      // ⚠️ PLAN-D-C3 15.08.2026 — TO ZOSTAJE, ALE PRZESTAJE BYĆ CICHE.
+      // Oba `? null :` zlewają „nie udało się odczytać" z „zawodnik tego nie
+      // ma" i oba renderują na tej podstawie zdanie o zawodniku:
+      //   • pozycja  → inne grupowanie 13 obszarów i inny scenariusz nagłówka,
+      //   • cel      → „Nie masz jeszcze wąskiego gardła." w
+      //                `components/DiagnosisProfileView.tsx` (linia sekcji
+      //                „Twoje wąskie gardło a ten profil").
+      // Drugiego z nich NIE DA SIĘ naprawić z tego pliku: zdanie mieszka
+      // w komponencie, którego pas C3 nie ma na liście plików, a prop
+      // `goalSegmentId: string | null` nie ma jak wyrazić „nie wiem".
+      // Patrz `claude/PRZEKAZANIE_PAS_C3_15_08_2026.md`, NOTA ZABLOKOWANIA.
+      // Do czasu odblokowania obie ścieżki mają przynajmniej GŁOŚNY log.
+      if (profileRes.error) {
+        console.warn(opisBleduOdczytuDoLogu('diagnoza.loadDiagnoza → player_profiles', profileRes.error));
+      }
+      if (goalRes.error) {
+        console.warn(opisBleduOdczytuDoLogu('diagnoza.loadDiagnoza → goals', goalRes.error));
+      }
       setPositionLabel(profileRes.error ? null : (profileRes.data?.[0]?.position_primary ?? null));
       setGoalSegmentId(goalRes.error ? null : (goalRes.data?.[0]?.segment_id ?? null));
 
@@ -137,12 +156,33 @@ export default function DiagnozaScreen() {
         setStatus('missing');
       }
     } catch (e: any) {
-      setError('Nie udało się sprawdzić statusu diagnozy: ' + e.message);
+      // ⭐ PLAN-D-C3 15.08.2026 — POWÓD IDZIE DO LOGU, NIE NA EKRAN.
+      // Było: `'Nie udało się sprawdzić statusu diagnozy: ' + e.message`, czyli
+      // surowy komunikat bazy wprost do zawodnika. To nie jest jego problem
+      // i nie mieści się w żadnym z trzech rejestrów Z0 — a jednocześnie
+      // gubiło jedyną rzecz, której zawodnik w tym momencie potrzebuje:
+      // co ma zrobić dalej. Teraz zdanie i wyjście dają trzy pustki, a powód
+      // ląduje w konsoli, gdzie da się na niego odpowiedzieć.
+      console.warn(opisBleduOdczytuDoLogu('diagnoza.loadDiagnoza → diagnostics', e));
       setStatus('error');
     }
   }, [currentUser]);
 
   useFocusEffect(useCallback(() => { loadDiagnoza(); }, [loadDiagnoza]));
+
+  // ⭐ PLAN-D-C3 15.08.2026 — stan `error` przechodzi przez tę samą funkcję
+  // decyzyjną co sześć pozostałych ekranów.
+  // ⚠️ `daSieOdswiezyc: false` — ZMIERZONE 15.08.2026: ten ScrollView jako
+  // JEDYNY z siedmiu ekranów pasa nie ma `refreshControl`. Odświeża się przez
+  // `useFocusEffect`, więc jego wyjściem jest ponowne wejście na ekran,
+  // a nie pociągnięcie w dół, którego tu po prostu nie ma.
+  const pustkaOdczytu = rozpoznajPustke({
+    maWpisy: false,
+    planLekcjiZnany: null,
+    moznaZapisywac: null,
+    odczytUdanySie: status === 'error' ? false : null,
+    daSieOdswiezyc: false,
+  });
 
   const openDiagnoza = () => WebBrowser.openBrowserAsync(DIAGNOZA_URL);
 
@@ -215,7 +255,15 @@ export default function DiagnozaScreen() {
         </View>
       )}
 
-      {status === 'error' && error && <Text style={styles.error}>{error}</Text>}
+      {/* ⭐ PLAN-D-C3 15.08.2026 — dwa zdania zamiast jednego surowego błędu:
+          CO SIĘ STAŁO i CO Z TYM ZROBIĆ. Blok `styles.block` jest tym samym,
+          którego używa stan `missing` — układ ekranu bez zmian (zakaz 5). */}
+      {status === 'error' && pustkaOdczytu && (
+        <View style={styles.block}>
+          <Text style={styles.missingText}>{pustkaOdczytu.tekst}</Text>
+          <Text style={[styles.missingHint, { marginBottom: 0 }]}>{pustkaOdczytu.cta}</Text>
+        </View>
+      )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -237,5 +285,4 @@ const styles = StyleSheet.create({
   btn: { minHeight: minTouchHeight, justifyContent: 'center', borderRadius: radii.md, backgroundColor: colors.brand, alignItems: 'center' },
   btnText: { ...typography.bodySemiBold, color: colors.white, fontSize: 15, letterSpacing: 0.5 },
   empty: { textAlign: 'center', padding: 32, color: colors.textSecondary, fontSize: 14 },
-  error: { color: colors.error, fontSize: 13, marginTop: spacing.sm },
 });

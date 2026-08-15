@@ -44,11 +44,15 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { colors, typography, spacing, minTouchHeight } from '../../constants/theme';
 import RecommendationCard, { RECOMMENDATION_COLUMNS, type Recommendation } from '../../components/RecommendationCard';
+// ⭐ PLAN-D-C3 15.08.2026 — patrz blok w `loadRecommendations` niżej.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 
 export default function CentrumDecyzjiScreen() {
   const { currentUser } = useAuth();
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // ⭐ PLAN-D-C3 15.08.2026 — trzy wartości, nie dwie. `null` = jeszcze nie czytałem.
+  const [odczytUdanySie, setOdczytUdanySie] = useState<boolean | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -91,10 +95,31 @@ export default function CentrumDecyzjiScreen() {
       .eq('user_id', currentUser.id)
       .order('created_at', { ascending: false });
     if (err) {
+      // ═══════════════════════════════════════════════════════════════
+      // ⭐ PLAN-D-C3 15.08.2026 — DWA ZDANIA, KTÓRE MÓWIŁY SOBIE NAWZAJEM
+      //    W OCZY, ŻE KŁAMIĄ
+      //
+      // ⛔ USUNIĘTE Z FUNKCJI `loadRecommendations()`: `setRecommendations([])`.
+      //    To był wzorzec „błąd → pusta lista" w najczystszej postaci — i to
+      //    na ekranie, który JEDNOCZEŚNIE pokazywał komunikat o błędzie.
+      //    Zawodnik po nieudanym odczycie czytał trzy rzeczy naraz:
+      //      „Nie udało się wczytać rekomendacji."   (prawda)
+      //      „Nic do sprawdzenia w tej chwili."      (nieprawda)
+      //      „Brak historii."                        (nieprawda, po rozwinięciu)
+      //    Sam komunikat błędu NIE WYSTARCZY, dopóki obok stoi zdanie, które
+      //    mówi coś przeciwnego. To jest różnica między „ekran ma komunikat"
+      //    a „ekran rozróżnia" — i dlatego liczba komunikatów nie jest miarą.
+      //
+      // Wiersze sprzed nieudanego odświeżenia ZOSTAJĄ: lista sprzed chwili jest
+      // prawdziwsza niż jej wyczyszczenie (ten sam kierunek co `maWpisy`
+      // stojące przed wszystkim w `rozpoznajPustke`).
+      // ═══════════════════════════════════════════════════════════════
+      console.warn(opisBleduOdczytuDoLogu('centrum-decyzji.loadRecommendations → decision_recommendations', err));
       setLoadError('Nie udało się wczytać rekomendacji.');
-      setRecommendations([]);
+      setOdczytUdanySie(false);
       return;
     }
+    setOdczytUdanySie(true);
     const rows = (data ?? []) as unknown as Recommendation[];
     unreadSnapshotRef.current = new Set(rows.filter((r) => !r.viewed_at).map((r) => r.id));
     markedRef.current = new Set();
@@ -127,6 +152,35 @@ export default function CentrumDecyzjiScreen() {
   // inaczej zniknąłby z appki w chwili, gdy zawodnik chce do niego wrócić.
   const openIds = new Set(openActionable.map((r) => r.id));
   const history = recommendations.filter((r) => !openIds.has(r.id));
+
+  // ⭐ PLAN-D-C3 15.08.2026 — dwie sekcje, dwie pustki, jedna funkcja decyzyjna.
+  // Oba zdania idą tu CO DO ZNAKU — ten pas ich nie przepisuje (zakaz 4).
+  // ⚠️ Żadne z nich nie niesie następnego kroku i nie musi: „nic do
+  // sprawdzenia" to stan, w którym zawodnik nie ma co robić, i tak ma być
+  // nazwany. Kroku wymaga wyłącznie `blad_odczytu` — i tam go dostaje.
+  const wejscie = {
+    planLekcjiZnany: null,
+    moznaZapisywac: null,
+    odczytUdanySie,
+    daSieOdswiezyc: true,
+  } as const;
+  const pustkaWarto = rozpoznajPustke({
+    ...wejscie,
+    maWpisy: openActionable.length > 0,
+    tekstBrakuDanych: 'Nic do sprawdzenia w tej chwili.',
+  });
+  const pustkaHistorii = rozpoznajPustke({
+    ...wejscie,
+    maWpisy: history.length > 0,
+    tekstBrakuDanych: 'Brak historii.',
+  });
+
+  const renderPustke = (p: ReturnType<typeof rozpoznajPustke>) => (p ? (
+    <>
+      <Text style={styles.empty}>{p.tekst}</Text>
+      {p.krokWTekscie ? null : <Text style={styles.empty}>{p.cta}</Text>}
+    </>
+  ) : null);
 
   const toggleHistory = () => {
     setShowHistory((prev) => {
@@ -164,9 +218,7 @@ export default function CentrumDecyzjiScreen() {
 
       <View style={{ marginTop: 8 }}>
         <Text style={styles.sectionLabel}>Warto sprawdzić</Text>
-        {openActionable.length === 0
-          ? <Text style={styles.empty}>Nic do sprawdzenia w tej chwili.</Text>
-          : openActionable.map(renderCard)}
+        {pustkaWarto ? renderPustke(pustkaWarto) : openActionable.map(renderCard)}
       </View>
 
       <View style={{ marginTop: 32 }}>
@@ -174,9 +226,7 @@ export default function CentrumDecyzjiScreen() {
           <Text style={styles.sectionLabel}>{showHistory ? '▾' : '▸'} Historia rekomendacji</Text>
         </TouchableOpacity>
         {showHistory && (
-          history.length === 0
-            ? <Text style={styles.empty}>Brak historii.</Text>
-            : history.map(renderCard)
+          pustkaHistorii ? renderPustke(pustkaHistorii) : history.map(renderCard)
         )}
       </View>
     </ScrollView>

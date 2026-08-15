@@ -159,6 +159,8 @@ const GOAL_VALIDATION_API_URL = 'https://gamechange-app.vercel.app/api/validate-
 // z dysku przed edycją i nietknięty poza trzema miejscami obsługi błędu.
 // ═══════════════════════════════════════════════════════════════════
 import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
+// ⭐ PLAN-D-C3 15.08.2026 — trzy pustki na pięciu ścieżkach odczytu tego ekranu.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 
 // ZMIANA OBRAZU B5 08.08.2026 — rozpoznanie „nie ma takiej kolumny".
 // PostgREST zgłasza to na dwa sposoby zależnie od wersji (`42703` z Postgresa
@@ -268,6 +270,11 @@ export default function CeleScreen() {
 
   // --- Baza Składowych Segmentów: Obszar → Element → "opisz sam" (Tor 7 Krok 4) ---
   const [obszary, setObszary] = useState<SegmentComponent[]>([]);
+  // ⭐ PLAN-D-C3 15.08.2026 — trzy stany odczytu na każdą z trzech list tego
+  // ekranu. `null` znaczy „jeszcze nie czytałem", nie „odczyt przeszedł".
+  const [odczytObszarowUdanySie, setOdczytObszarowUdanySie] = useState<boolean | null>(null);
+  const [odczytElementowUdanySie, setOdczytElementowUdanySie] = useState<boolean | null>(null);
+  const [odczytCelowUdanySie, setOdczytCelowUdanySie] = useState<boolean | null>(null);
   const [obszaryLoading, setObszaryLoading] = useState(false);
   const [selectedObszarId, setSelectedObszarId] = useState<string | null>(null);
   const [elementy, setElementy] = useState<SegmentComponent[]>([]);
@@ -300,15 +307,22 @@ export default function CeleScreen() {
       if (err) throw err;
       const rows = (data ?? []) as SegmentComponent[];
       setObszary(rows);
+      setOdczytObszarowUdanySie(true);
       // Segment bez Obszarów w bazie (dziś: wyłącznie `techSpec`, świadomie
       // poza procesem populacji treści — patrz komentarz na górze pliku) —
       // bezpieczny spadek na "opisz sam", zamiast pustego ekranu.
       if (rows.length === 0) setFreeTextMode(true);
-    } catch {
-      // Cichy fallback — jeśli baza składowych nie odpowiada z jakiegokolwiek
-      // powodu, zawodnik i tak może opisać cel sam (ta opcja nigdy nie może
-      // zniknąć), tylko bez podpowiedzi z listy.
+    } catch (e) {
+      // ⭐ PLAN-D-C3 15.08.2026 — było „cichy fallback". FALLBACK ZOSTAJE
+      // (zawodnik nadal może opisać cel sam i ta opcja nigdy nie może zniknąć),
+      // ale cichy być przestaje: `setObszary([])` po nieudanym odczycie
+      // wyświetlało zdanie „Ten segment nie ma jeszcze gotowej listy obszarów"
+      // — twierdzenie o TREŚCI PRODUKTU postawione na podstawie zapytania,
+      // które nie doszło. Zawodnik nie ma jak zgadnąć, że ta lista istnieje,
+      // więc nie ma też powodu tu wracać.
+      console.warn(opisBleduOdczytuDoLogu('cele.loadObszary → segment_components (obszary)', e));
       setObszary([]);
+      setOdczytObszarowUdanySie(false);
       setFreeTextMode(true);
     } finally {
       setObszaryLoading(false);
@@ -325,8 +339,13 @@ export default function CeleScreen() {
         .order('display_order', { ascending: true });
       if (err) throw err;
       setElementy((data ?? []) as SegmentComponent[]);
-    } catch {
+      setOdczytElementowUdanySie(true);
+    } catch (e) {
+      // ⭐ PLAN-D-C3 15.08.2026 — `catch { setElementy([]) }` bez ani jednego
+      // słowa. Skutek na ekranie: „Brak elementów dla tego obszaru."
+      console.warn(opisBleduOdczytuDoLogu('cele.loadElementy → segment_components (elementy)', e));
       setElementy([]);
+      setOdczytElementowUdanySie(false);
     } finally {
       setElementyLoading(false);
     }
@@ -427,8 +446,13 @@ export default function CeleScreen() {
         label: GOAL_DIRECTION_LABELS[p.goal_direction] ?? p.goal_direction,
         note: p.goal_direction_note ?? null,
       });
-    } catch {
-      setDirectionContext(null); // cichy fallback — nie blokuje zakładania celu
+    } catch (e) {
+      // ⚠️ PLAN-D-C3 15.08.2026 — fallback zostaje (nie blokuje zakładania
+      // celu), ale przestaje być cichy. Ta ścieżka nie stawia zdania o
+      // zawodniku — po prostu gasi kontekst kierunku — więc trzy pustki nie
+      // mają czego zamienić.
+      console.warn(opisBleduOdczytuDoLogu('cele.loadGoalDirectionContext → player_profiles', e));
+      setDirectionContext(null);
     }
   }, [currentUser]);
 
@@ -440,7 +464,19 @@ export default function CeleScreen() {
       .eq('user_id', currentUser.id)
       .order('is_priority', { ascending: false })
       .order('created_at', { ascending: false });
-    if (err) return;
+    if (err) {
+      // ⭐ PLAN-D-C3 15.08.2026 — było `if (err) return;` bez słowa.
+      // `goals` karmi OBIE listy tego ekranu, więc jeden nieudany odczyt
+      // dawał dwa zdania naraz: „Nie masz teraz żadnego wąskiego gardła —
+      // dodaj pierwsze powyżej." i „Nic tu jeszcze nie ma." Pierwsze z nich
+      // jest najdroższym zdaniem w tej appce: wąskie gardło napędza kolejkę,
+      // zadania i rekomendacje, więc zawodnik czyta, że nie ma nic, co
+      // napędza cały produkt. Wiersze sprzed odświeżenia zostają nietknięte.
+      console.warn(opisBleduOdczytuDoLogu('cele.loadGoals → goals', err));
+      setOdczytCelowUdanySie(false);
+      return;
+    }
+    setOdczytCelowUdanySie(true);
     const rows = (data ?? []) as Goal[];
     setGoals(rows);
     await loadGoalDirectionContext(rows);
@@ -494,6 +530,7 @@ export default function CeleScreen() {
     await Promise.all([loadGoals(), loadActiveBlocks()]);
     setRefreshing(false);
   }, [loadGoals, loadActiveBlocks]);
+
 
   const patchGoal = async (id: number, fields: Record<string, any>) => {
     const { error: err } = await supabase.from('goals').update(fields).eq('id', id);
@@ -778,6 +815,44 @@ export default function CeleScreen() {
   const active = goals.filter((g) => g.status === 'active');
   const history = goals.filter((g) => g.status !== 'active');
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-C3 15.08.2026 — CZTERY PUSTKI TEGO EKRANU, JEDNA FUNKCJA
+  // Wszystkie cztery brzmienia idą CO DO ZNAKU (zakaz 4 polecenia C3);
+  // zmienia się wyłącznie to, KIEDY zawodnik je czyta.
+  // ═══════════════════════════════════════════════════════════════════
+  const bezZakresu = { planLekcjiZnany: null, moznaZapisywac: null, daSieOdswiezyc: true } as const;
+  const pustkaAktywnych = rozpoznajPustke({
+    ...bezZakresu,
+    maWpisy: active.length > 0,
+    odczytUdanySie: odczytCelowUdanySie,
+    tekstBrakuDanych: 'Nie masz teraz żadnego wąskiego gardła — dodaj pierwsze powyżej.',
+  });
+  const pustkaHistorii = rozpoznajPustke({
+    ...bezZakresu,
+    maWpisy: history.length > 0,
+    odczytUdanySie: odczytCelowUdanySie,
+    tekstBrakuDanych: 'Nic tu jeszcze nie ma.',
+  });
+  const pustkaElementow = rozpoznajPustke({
+    ...bezZakresu,
+    maWpisy: elementy.length > 0,
+    odczytUdanySie: odczytElementowUdanySie,
+    tekstBrakuDanych: 'Brak elementów dla tego obszaru.',
+  });
+  const pustkaObszarow = rozpoznajPustke({
+    ...bezZakresu,
+    maWpisy: obszary.length > 0,
+    odczytUdanySie: odczytObszarowUdanySie,
+    tekstBrakuDanych: 'Ten segment nie ma jeszcze gotowej listy obszarów — opisz swój cel własnymi słowami.',
+  });
+
+  const renderPustke = (p: ReturnType<typeof rozpoznajPustke>, styl: any) => (p ? (
+    <>
+      <Text style={styl}>{p.tekst}</Text>
+      {p.krokWTekscie ? null : <Text style={styl}>{p.cta}</Text>}
+    </>
+  ) : null);
+
   const renderGoalCard = (g: Goal) => {
     const label = SEG_LABELS[g.segment_id] ?? g.segment_id;
     const pillar = SEG_PILLAR[g.segment_id] ?? '';
@@ -929,9 +1004,10 @@ export default function CeleScreen() {
               )}
             </TouchableOpacity>
           ))}
-          {!elementyLoading && elementy.length === 0 && (
-            <Text style={styles.empty}>Brak elementów dla tego obszaru.</Text>
-          )}
+          {/* ⭐ PLAN-D-C3 15.08.2026 — „Brak elementów dla tego obszaru." tylko
+              wtedy, gdy naprawdę ich nie ma. Po nieudanym odczycie zdanie jest
+              inne i niesie następny krok. */}
+          {!elementyLoading && renderPustke(pustkaElementow, styles.empty)}
           <TouchableOpacity onPress={switchToFreeText} style={{ marginTop: 4 }}>
             <Text style={styles.linkText}>Opisz sam zamiast wybierać z listy</Text>
           </TouchableOpacity>
@@ -944,11 +1020,11 @@ export default function CeleScreen() {
     if (freeTextMode) {
       return (
         <View>
-          {obszary.length === 0 && !obszaryLoading && (
-            <Text style={styles.hintText}>
-              Ten segment nie ma jeszcze gotowej listy obszarów — opisz swój cel własnymi słowami.
-            </Text>
-          )}
+          {/* ⭐ PLAN-D-C3 15.08.2026 — zdanie o BRAKU LISTY W PRODUKCIE tylko
+              wtedy, gdy tej listy naprawdę nie ma. Po nieudanym odczycie
+              zawodnik czyta, że nie udało się sprawdzić — bo lista może
+              istnieć i on nie ma jak tego zgadnąć. */}
+          {!obszaryLoading && renderPustke(pustkaObszarow, styles.hintText)}
           <TextInput
             style={[styles.input, styles.textarea]}
             placeholderTextColor={colors.textSecondary}
@@ -1043,7 +1119,11 @@ export default function CeleScreen() {
 
       <View style={{ marginTop: 24 }} onLayout={(e) => setActiveSectionY(e.nativeEvent.layout.y)}>
         <Text style={styles.sectionLabel}>Nad czym pracujesz</Text>
-        {active.length === 0 && <Text style={styles.empty}>Nie masz teraz żadnego wąskiego gardła — dodaj pierwsze powyżej.</Text>}
+        {/* ⭐ PLAN-D-C3 15.08.2026 — najdroższe zdanie tej appki. Wąskie gardło
+            napędza kolejkę, zadania i rekomendacje; powiedzenie komuś, że go
+            nie ma, na podstawie odczytu, który nie doszedł, kasuje mu z ekranu
+            cały produkt. Brzmienie bez zmian (zakaz 4). */}
+        {renderPustke(pustkaAktywnych, styles.empty)}
         {active.map(renderGoalCard)}
       </View>
 
@@ -1054,7 +1134,7 @@ export default function CeleScreen() {
       </TouchableOpacity>
       {showHistory && (
         <View style={{ marginTop: 4 }}>
-          {history.length === 0 && <Text style={styles.empty}>Nic tu jeszcze nie ma.</Text>}
+          {renderPustke(pustkaHistorii, styles.empty)}
           {history.map(renderGoalCard)}
         </View>
       )}
