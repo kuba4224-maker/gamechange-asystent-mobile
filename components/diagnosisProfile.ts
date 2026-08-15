@@ -34,9 +34,35 @@
 // TREŚĆ NIEZMIENIONA: przeniesione wartości są identyczne co do znaku
 // (porównane maszynowo ze wszystkimi pięcioma kopiami przed usunięciem).
 // ─────────────────────────────────────────────────────────────
-import { SEGMENT_ORDER, SEGMENT_LABELS, segmentLabel } from '../lib/labels';
+// ⭐ PLAN-D-G1 08.2026 (15.08.2026) — TEN PLIK NIE WOŁA JUŻ `segmentLabel()`.
+// Wołał ją trzy razy (`nameOf` ×2, `groupSegmentsForDisplay` ×1), a ona przy
+// segmencie spoza słownika oddaje SUROWE `id` z bazy. Zamiast niej stoi tu
+// `opiszSegment()` z pasa F2 — dwie gałęzie, bez zgadywania nazwy.
+//
+// ⚠️ RE-EKSPORT `segmentLabel` ZOSTAJE. Sama funkcja mieszka w `lib/labels.ts`,
+// który jest dla pasa G1 plikiem zakazanym; skasowanie jej jest osobnym krokiem
+// (patrz komentarz przy niej i nota G1). Re-eksport nie jest wywołaniem i nie
+// liczy go strażnik `lib/surowaWartosc.selftest.ts`.
+import {
+  SEGMENT_ORDER,
+  SEGMENT_LABELS,
+  segmentLabel,
+  opiszSegment,
+  type OpisSegmentu,
+} from '../lib/labels';
 
 export { SEGMENT_ORDER, SEGMENT_LABELS, segmentLabel };
+
+/**
+ * ⭐ PLAN-D-G1 — SEGMENT, KTÓREGO NIE UMIEMY NAZWAĆ, WYNIESIONY Z FUNKCJI.
+ *
+ * ⛔ Ten plik jest CZYSTY: zero `console`, zero Reacta, zero Supabase (i tak ma
+ * zostać). Dlatego nie loguje sam — ODDAJE surowe wartości, a `console.warn`
+ * robi jedyny konsument, `components/DiagnosisProfileView.tsx`. To ten sam
+ * podział, którym `lib/trzyPustki.ts` oddaje `opisBleduOdczytuDoLogu()`
+ * ekranom zamiast pisać do konsoli z wnętrza `lib/`.
+ */
+export type NieznanySegment = Extract<OpisSegmentu, { znany: false }>;
 
 
 // ─────────────────────────────────────────────────────────────
@@ -350,9 +376,22 @@ export function getHiddenCauses(
 //    "zacznij od".
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * ⭐ PLAN-D-G1 08.2026 (15.08.2026) — TRZECI RODZAJ, BO R5 WYMAGA TRZECIEGO.
+ *
+ * `standalone` mówi zawodnikowi rzecz MOCNĄ: „ten obszar nie wynika z innych
+ * deficytów, wymaga bezpośredniej pracy". Wypowiedzenie tego zdania w sytuacji,
+ * w której przyczyny SĄ, tylko nie umiemy ich nazwać, byłoby podaniem
+ * niewiedzy jako ustalenia — czyli złamaniem **Z0** dokładnie tak, jak „0 z 12
+ * sesji zrobione" w pasie F1. Stąd osobny rodzaj: **„nie wynika z niczego"
+ * i „nie umiem nazwać tego, z czego wynika" to dwa różne zdania** (R5).
+ *
+ * ⚠️ `surowe` niesie wartości do LOGU, nie na ekran — patrz `NieznanySegment`.
+ */
 export type CauseText =
   | { kind: 'standalone'; text: string }
-  | { kind: 'blocked'; before: string; primaryName: string; after: string };
+  | { kind: 'blocked'; before: string; primaryName: string; after: string }
+  | { kind: 'nieznana_przyczyna'; surowe: NieznanySegment[] };
 
 export function describeCause(scores: Record<string, number>, segmentId: string): CauseText {
   const influences = getRankedInfluences(scores, segmentId, 3);
@@ -363,19 +402,55 @@ export function describeCause(scores: Record<string, number>, segmentId: string)
     };
   }
 
-  const nameOf = (inf: Influence): string =>
-    inf.kind === 'cascade'
-      ? inf.nodes.filter((n) => n !== segmentId).map(segmentLabel).join(' + ')
-      : segmentLabel(inf.from);
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-G1 — NAZWA WPLECIONA W ZDANIE, WIĘC NAPRAWA NIE JEST PODMIANĄ
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Wynik `nameOf` trafia do „Główna przyczyna: **X** — słabość w tym obszarze
+  // wyraźnie blokuje…", „Dodatkowy wpływ: X, Y." i „Zacznij od: X.". Wstawienie
+  // tam komunikatu dałoby zdanie „Zacznij od: Nie znam tego obszaru." — czyli
+  // polecenie, którego nie da się wykonać. Dlatego tutaj nieznana wartość
+  // NIE staje się napisem: WYPADA z listy przyczyn, a jeżeli wypadną wszystkie,
+  // funkcja oddaje osobny rodzaj `nieznana_przyczyna`.
+  //
+  // ⭐ WYPADA POJEDYNCZO, NIE HURTEM — i to jest sedno. Jedna nienazwana
+  // przyczyna z trzech nie ma kasować dwóch, które umiemy nazwać: zawodnik
+  // dostaje wtedy mniej wiedzy, niż mamy. Wąskie znalezisko, wąski skutek.
+  //
+  // ── DZIEDZINA, ZMIERZONA 15.08.2026 ──────────────────────────────────
+  // `inf.from` i `inf.nodes` pochodzą WYŁĄCZNIE z `DEPENDENCY_NETWORK`
+  // (81 par, 13 unikalnych id) i `DEPENDENCY_CASCADES` (6 kaskad, 9 id) —
+  // dwóch list wpisanych ręcznie w TYM pliku. Zmierzone: **wszystkie 13 i 9
+  // id są w `SEGMENT_LABELS`**, więc gałąź niżej jest dziś NIEOSIĄGALNA.
+  // ⚠️ Jest nieosiągalna przez ZBIEG DWÓCH LIST, a nie przez regułę — dlatego
+  // `lib/przyczynyDiagnozy.selftest.ts` dostał asercję, która zapala się
+  // w dniu, w którym ktoś doda do sieci węzeł bez nazwy.
+  const nieznane: NieznanySegment[] = [];
+  const nameOf = (inf: Influence): string | null => {
+    const ids = inf.kind === 'cascade' ? inf.nodes.filter((n) => n !== segmentId) : [inf.from];
+    const opisy = ids.map(opiszSegment);
+    const bezNazwy = opisy.filter((o): o is NieznanySegment => !o.znany);
+    if (bezNazwy.length) {
+      for (const o of bezNazwy) if (!nieznane.some((n) => n.surowy === o.surowy)) nieznane.push(o);
+      return null;
+    }
+    return opisy.map((o) => (o.znany ? o.etykieta : '')).join(' + ');
+  };
 
-  const primary = influences[0];
-  const primaryName = nameOf(primary);
+  // Para (przyczyna, jej nazwa) — żeby `weight` należał do TEJ SAMEJ przyczyny,
+  // której nazwę pokazujemy. Kolejność rankingu zachowana co do pozycji.
+  const nazwane = influences
+    .map((inf) => ({ inf, nazwa: nameOf(inf) }))
+    .filter((p): p is { inf: Influence; nazwa: string } => p.nazwa !== null);
+  if (!nazwane.length) return { kind: 'nieznana_przyczyna', surowe: nieznane };
+
+  const primary = nazwane[0].inf;
+  const primaryName = nazwane[0].nazwa;
   const strength = primary.weight >= 0.8 ? 'bezpośrednio' : 'wyraźnie';
 
   const restNames: string[] = [];
-  for (const inf of influences.slice(1)) {
-    const n = nameOf(inf);
-    if (n !== primaryName && !restNames.includes(n)) restNames.push(n);
+  for (const { nazwa } of nazwane.slice(1)) {
+    if (nazwa !== primaryName && !restNames.includes(nazwa)) restNames.push(nazwa);
   }
 
   if (restNames.length) {
@@ -410,11 +485,18 @@ export type GroupedSegment = {
   tier: SegmentTier | null;
 };
 
+/**
+ * ⭐ PLAN-D-G1 08.2026 — trzecie pole w wyniku: segmenty, których nie umiemy
+ * nazwać. Pole jest CZYTANE przez `DiagnosisProfileView.tsx` i logowane —
+ * dołożenie pola, którego nikt nie czyta, byłoby tym samym cichym brakiem,
+ * który ten pas usuwa (znalezisko E2-4 / F1-2).
+ */
 export function groupSegmentsForDisplay(
   scores: Record<string, number>,
   tiers: Record<string, SegmentTier> | null
-): { groups: Record<GroupKey, GroupedSegment[]>; hasTiers: boolean } {
+): { groups: Record<GroupKey, GroupedSegment[]>; hasTiers: boolean; nieznane: NieznanySegment[] } {
   const { median, stdDev } = playerMedianAndSpread(scores);
+  const nieznane: NieznanySegment[] = [];
 
   const classify = (score: number): SegmentClass => {
     const diff = score - median;
@@ -434,7 +516,25 @@ export function groupSegmentsForDisplay(
     if (score === undefined) continue;
     const cls = classify(score);
     const tier = tiers ? (tiers[id] || 'minor') : null;
-    const entry: GroupedSegment = { id, name: segmentLabel(id), barW: relativeBarWidth(score, median, stdDev), cls, tier };
+    // ⭐ PLAN-D-G1 — KSZTAŁT MIEJSCA: ETYKIETA. `entry.name` idzie do
+    // `<Text style={styles.segName}>{entry.name}</Text>` i stoi samodzielnie,
+    // więc komunikat „nie znam" wchodzi tu wprost, bez osobnego zdania.
+    //
+    // ⚠️ DZIEDZINA JEST DZIŚ ZAMKNIĘTA I MÓWIĘ TO WPROST: pętla iteruje po
+    // `SEGMENT_ORDER`, a zmierzone 15.08.2026 — `SEGMENT_ORDER` i klucze
+    // `SEGMENT_LABELS` to ten sam zbiór 13 pozycji, w obie strony. Gałąź
+    // „nie znam" jest więc dziś nieosiągalna. Wołam `opiszSegment()` mimo to,
+    // bo równość obu list to POMIAR z dzisiaj, nie reguła — asercja w
+    // `labels.selftest.ts` (pas F2) pilnuje jej i zapali się przy rozjeździe,
+    // a wtedy ten kod ma już być gotowy, a nie dopiero pisany.
+    const opis = opiszSegment(id);
+    if (!opis.znany) nieznane.push(opis);
+    const entry: GroupedSegment = {
+      id,
+      name: opis.znany ? opis.etykieta : opis.komunikat,
+      barW: relativeBarWidth(score, median, stdDev),
+      cls, tier,
+    };
 
     if (!tiers) {
       if (cls === 'deficit') groups.g1.push(entry);
@@ -451,7 +551,7 @@ export function groupSegmentsForDisplay(
   groups.g1.sort((a, b) => scores[a.id] - scores[b.id]);
   groups.g2.sort((a, b) => scores[b.id] - scores[a.id]);
 
-  return { groups, hasTiers: !!tiers };
+  return { groups, hasTiers: !!tiers, nieznane };
 }
 
 export const GROUP_HEADINGS_WITH_POSITION: Record<GroupKey, { title: string; badge: string; desc: string }> = {

@@ -434,12 +434,31 @@ check('F2: komunikat NIE jest żadnym z id segmentów ani żadną z ich nazw',
       ? '  ⛔ ZERO. Funkcja jest zbudowana i sprawdzona, ale ŻADEN EKRAN JEJ NIE RYSUJE (E2-4).'
       : `  → ${konsumenci.join(', ')}`));
 
-  check('⭐ F2/E2-4: opiszSegment nie ma jeszcze konsumenta — i mówię to wprost, '
-    + 'zamiast pozwolić zielonej suicie udawać naprawiony ekran',
-    konsumenci.length === 0,
-    `PIERWSZY KONSUMENT: ${konsumenci.join(', ')} — (1) przejrzyj SEGMENT_NIEZNANY_KOMUNIKAT `
-    + 'z Kubą (§6 noty F2), bo od teraz zawodnik go widzi; (2) zdejmij z tego pliku wywołanie '
-    + '`segmentLabel()`; (3) zaktualizuj tę asercję.');
+  // ⭐ PLAN-D-G1 15.08.2026 — ASERCJA ODWRÓCONA PRZEZ SESJĘ NAWIGUJĄCĄ.
+  // Do 15.08 pilnowała, że `opiszSegment()` NIE MA konsumenta — i była wtedy
+  // prawdziwa: F2 zbudował funkcję, a żaden ekran jej nie rysował (E2-4).
+  // Pas G1 dał jej CZTERECH konsumentów, więc asercja zapaliła się na SUKCESIE,
+  // dokładnie tak, jak ją zaprojektowano (O73). Od teraz pilnuje RÓWNOŚCI,
+  // a nie „zera" ani „co najmniej jednego":
+  //   • dojdzie piąty konsument  → zapala. I słusznie: nowy ekran zaczyna
+  //     pokazywać zawodnikowi SEGMENT_NIEZNANY_KOMUNIKAT i ktoś ma to przejrzeć.
+  //   • zniknie któryś z czterech → zapala. I słusznie: wraca `segmentLabel()`.
+  const KONSUMENCI_G1 = [
+    'app/(tabs)/ja.tsx',
+    'components/DiagnosisProfileView.tsx',
+    'components/diagnosisProfile.ts',
+    'lib/rediagnosis.ts',
+  ].sort();
+
+  const brakujacy = KONSUMENCI_G1.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI_G1.includes(p));
+
+  check('⭐ F2/E2-4 → G1: opiszSegment ma DOKŁADNIE czterech konsumentów — '
+    + 'równość, nie „≥ 1", żeby zapadka łapała w obie strony (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ jeżeli doszedł nowy ekran: (1) przejrzyj SEGMENT_NIEZNANY_KOMUNIKAT z Kubą, bo '
+    + 'zawodnik go tam zobaczy; (2) zdejmij z tego pliku `segmentLabel()`; (3) dopisz go wyżej.');
 }
 
 // ─── Hardening: wewnętrzna droga do Pickera nie może oddać surowego id ───

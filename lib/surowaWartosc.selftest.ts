@@ -222,6 +222,58 @@ export function wywolaniaHelpera(zywy: string, nazwa: string): Trafienie[] {
 const HELPER = 'segmentLabel';
 const PLIK_HELPERA = 'lib/labels.ts';
 
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-G1 08.2026 (15.08.2026) — PRÓBKI SYNTETYCZNE.
+// ⛔ MATERIAŁ DLA „CZY DETEKTOR ŻYJE" NIE MOŻE POCHODZIĆ Z BRUDU, KTÓRY
+//    WŁAŚNIE SPRZĄTAMY.
+// ═════════════════════════════════════════════════════════════════════
+//
+// ── DLACZEGO TO WCHODZI DOPIERO TERAZ ────────────────────────────────
+// Pas F2 napisał tu asercję „obie reguły coś widzą" jako
+// `render.length > 0 && helper.length > 0` — czyli policzył trafienia
+// W PRAWDZIWYM REPOZYTORIUM. Dopóki dług istniał, to działało. Ten pas zdjął
+// **11 z 12 wywołań** helpera i pod tą asercją został **jeden**, w `lib/labels.ts`.
+// W dniu, w którym ktoś skasuje `segmentLabel()` — a jest to wprost zalecone
+// w komentarzu przy tej funkcji — asercja ZAPALI SIĘ NA SUKCESIE.
+//
+// ⭐ To jest znalezisko **F1-1** („asercja licząca defekty w repozytorium zapala
+// się na sukcesie", nota F1 §6.1 i §16 poz. 4) oraz **F2-8**, zastosowane do
+// pliku, który sam je opisywał. Lekarstwo jest to samo, co zastosował pas F1:
+// materiał SYNTETYCZNY, z próbką „MUSI TRAFIĆ" **i** próbką „MUSI NIE TRAFIĆ".
+// Bez tej drugiej „detektor działa" znaczyłoby tylko „detektor cokolwiek
+// znajduje" — a detektor trafiający we wszystko jest bezużyteczny tak samo,
+// jak ten, który nie trafia w nic.
+
+type Probka = { nazwa: string; co: 'render' | 'helper'; maTrafic: boolean; zrodlo: string };
+
+const PROBKI: Probka[] = [
+  {
+    nazwa: 'postać 2 · surowa wartość jako dziecko tekstowe JSX',
+    co: 'render', maTrafic: true,
+    zrodlo: 'export const Karta = () => (<View><Text style={s.a}>{row.segment_id}</Text></View>);',
+  },
+  {
+    nazwa: 'postać 2 · to samo `row.segment_id`, ale w `key`, w propie i w stylu',
+    co: 'render', maTrafic: false,
+    zrodlo: 'export const Karta = () => (<View key={row.segment_id} segmentId={x.segment_id} '
+      + 'style={styles.cardSegment}><Text>{row.title}</Text></View>);',
+  },
+  {
+    nazwa: 'postać 3 · zwykłe wywołanie helpera',
+    co: 'helper', maTrafic: true,
+    zrodlo: "import { segmentLabel } from './labels';\n"
+      + 'export const opisz = (id: string) => segmentLabel(id);',
+  },
+  {
+    nazwa: 'postać 3 · DEKLARACJA helpera, prop o tej samej nazwie i styl',
+    co: 'helper', maTrafic: false,
+    zrodlo: "import { segmentLabel } from './labels';\n"
+      + 'export function segmentLabel(id: string){ return id; }\n'
+      + 'const s = styles.segmentLabel;\n'
+      + 'export const R = () => (<Planner segmentLabel={etykieta} />);',
+  },
+];
+
 // ─────────────────────────────────────────────────────────────────────
 // 3. ⭐ DŁUG ZASTANY — zapadka. Wymieniony z nazwy, POLICZONY, wypisywany.
 // ─────────────────────────────────────────────────────────────────────
@@ -274,46 +326,33 @@ const KANDYDACI_UNIEWINNIENI: Uniewinniony[] = [
  * Poniższe pięć woła helper — i dlatego były niewidzialne.
  */
 const WYCIEK_PRZEZ_HELPER: PozycjaDlugu[] = [
-  {
-    klucz: 'app/(tabs)/ja.tsx :: load',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — ekran „Ja", nieprzydzielony',
-    co: '`deficits.map(([id]) => segmentLabel(id))` — lista deficytów zawodnika',
-    ile: 1,
-  },
-  {
-    klucz: 'components/DiagnosisProfileView.tsx :: tiers',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — widok profilu diagnozy, nieprzydzielony',
-    co: 'nazwa deficytu, nazwa ukrytej przyczyny i lista `map(segmentLabel).join(", ")` '
-      + '— ⭐ TU nazwa stoi SAMODZIELNIE, więc komunikat „nie znam" wchodzi wprost',
-    ile: 3,
-  },
-  {
-    klucz: 'components/DiagnosisProfileView.tsx :: SekcjaWaskiegoGardla',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — widok profilu diagnozy, nieprzydzielony',
-    co: '⭐ NAJWAŻNIEJSZE MIEJSCE CAŁEJ LISTY: `Twoje wąskie gardło to ${segmentLabel(cel.segmentId)} '
-      + '— obszar z grupy …`. Zawodnik czyta tu nazwę obszaru, KTÓRY SAM WYBRAŁ. '
-      + '⚠️ Nazwa jest WPLECIONA W ZDANIE, więc naprawa nie może być podmianą napisu '
-      + '— ekran musi narysować obie gałęzie osobno',
-    ile: 3,
-  },
-  {
-    klucz: 'components/diagnosisProfile.ts :: nameOf',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — warstwa danych profilu diagnozy, nieprzydzielony',
-    co: '`map(segmentLabel).join(" + ")` i `segmentLabel(inf.from)` — nazwy w grafie przyczyn',
-    ile: 2,
-  },
-  {
-    klucz: 'components/diagnosisProfile.ts :: classify',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — warstwa danych profilu diagnozy, nieprzydzielony',
-    co: '`name: segmentLabel(id)` w `GroupedSegment` — nazwa idzie dalej do widoku',
-    ile: 1,
-  },
-  {
-    klucz: 'lib/rediagnosis.ts :: buildRediagnosisView',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — rediagnoza przy zamykaniu Bloku, nieprzydzielony',
-    co: '`const segmentName = segmentLabel(segmentId)` — wplatane w zdania rediagnozy',
-    ile: 1,
-  },
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-G1 08.2026 (15.08.2026) — SZEŚĆ POZYCJI ZDJĘTYCH, JEDNA ZOSTAJE
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Pas G1 podmienił **11 z 12 wywołań** `segmentLabel()` na `opiszSegment()`
+  // w czterech plikach, które pas F2 wypisał, i zdjął stąd sześć kluczy:
+  //
+  //   app/(tabs)/ja.tsx :: load                                   (1)
+  //   components/DiagnosisProfileView.tsx :: tiers                (3)
+  //   components/DiagnosisProfileView.tsx :: SekcjaWaskiegoGardla (3)
+  //   components/diagnosisProfile.ts :: nameOf                    (2)
+  //   components/diagnosisProfile.ts :: classify                  (1)
+  //   lib/rediagnosis.ts :: buildRediagnosisView                  (1)
+  //
+  // ⭐ ZAPADKA ZAPALIŁA SIĘ PRZED USUNIĘCIEM I TO JEST JEDYNY DOWÓD, ŻE ŻYJE.
+  // Po naprawie, a przed skreśleniem pozycji, asercja „każda pozycja długu
+  // NADAL istnieje" wypisała wszystkie sześć kluczy z nazwy. Zapadka działa
+  // w obie strony: pozycja naprawiona, ale zostawiona tu, też zapala.
+  //
+  // ⚠️ ZERO — I TO JEST WYNIK, NIE BRAK PRACY. Lista `WYCIEK_PRZEZ_HELPER`
+  // nie zeszła jednak do zera i nie ma zejść: została w niej jedna pozycja
+  // w `lib/labels.ts`, która NIE jest wyciekiem (dziedzina zamknięta listą
+  // filarów). ⭐ Dzięki temu ten plik NIE wpadł w pułapkę F1-1 / F2-8:
+  // asercja „obie reguły coś widzą" (`helper.length > 0`) nadal ma materiał.
+  // ⛔ Ale nie polegam na tym — patrz asercje na PRÓBKACH SYNTETYCZNYCH niżej,
+  // dołożone przez ten pas dokładnie po to, żeby „czy detektor żyje" nie
+  // opierało się na brudzie, który sprzątamy.
   {
     klucz: `${PLIK_HELPERA} :: ${HELPER}`,
     kto: '⚠️ PAS F2 — jedyna pozycja W MOIM PLIKU. NIE jest wyciekiem: wejściem jest '
@@ -424,12 +463,22 @@ function bateria(z: Zasady): WynikBaterii[] {
   zapisz('(strażnik strażnika) mam co przemiatać',
     Object.keys(z.zrodla).length >= 50, `plików: ${Object.keys(z.zrodla).length}`);
 
-  // ⚠️ Sformułowane na KANDYDATÓW, nie na defekty. Postać 2 ma dziś ZERO
-  // potwierdzonych defektów i wymaganie od niej trafienia byłoby wymaganiem,
-  // żeby produkt był zepsuty. Ale reguła musi COŚ widzieć — inaczej milczy
-  // przez awarię, a wygląda, jakby milczała przez czystość.
-  zapisz('(strażnik strażnika) OBIE reguły coś widzą — zero jest podejrzane, nie dobre',
-    render.length > 0 && helper.length > 0, `kandydatów: ${render.length} · wywołań: ${helper.length}`);
+  // ⭐ PLAN-D-G1 — „CZY DETEKTOR ŻYJE" LICZONE NA PRÓBKACH SYNTETYCZNYCH.
+  //
+  // ⛔ Było: `render.length > 0 && helper.length > 0`, czyli policzone
+  // w prawdziwym repozytorium. Ta wersja zapala się na sukcesie sprzątania
+  // (F1-1, F2-8) — patrz komentarz przy `PROBKI`. Teraz każda z czterech
+  // próbek ma z góry znaną odpowiedź i nie zależy od tego, ile długu zostało.
+  //
+  // ⚠️ Próbki idą przez `z.szukajRenderu` / `z.szukajHelpera`, czyli przez
+  // REGUŁY Z MUTOWANEGO OBIEKTU — dzięki temu każda mutacja, która oślepia
+  // detektor albo każe mu trafiać we wszystko, zapala je od razu.
+  for (const p of PROBKI) {
+    const traf = p.co === 'render' ? z.szukajRenderu(p.zrodlo) : z.szukajHelpera(p.zrodlo);
+    zapisz(`⭐ (próbka syntetyczna) ${p.nazwa} — ${p.maTrafic ? 'MUSI trafić' : 'MUSI NIE trafić'}`,
+      (traf.length > 0) === p.maTrafic,
+      `trafień: ${traf.length} (oczekiwane: ${p.maTrafic ? '≥1' : '0'})`);
+  }
 
   // ⛔ Ani jedno trafienie nie jest anonimowe (**O63**).
   const bezNazwy = [...render, ...helper]
@@ -704,6 +753,79 @@ console.log('\n4. ⭐ TEST MUTACYJNY — liczba FAIL-i przy każdej mutacji');
           + 'return o.znany ? o.etykieta : o.komunikat; }'),
       },
     },
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ⭐ PLAN-D-G1 08.2026 — SZEŚĆ MUTACJI TEGO PASA
+    // ═══════════════════════════════════════════════════════════════════
+    // ⚠️ Wszystkie sześć to KSZTAŁTY, KTÓRE NAPRAWDĘ BYŁY w tym repozytorium
+    // godzinę temu, na `main` (`1e0bfcaa`, pas F2) — albo takie, w które ten
+    // pas mógł się osunąć. To jest kontrola historyczna zapisana strukturalnie:
+    // mutanty żyją w obiektach `Zasady`, żaden nie dotyka dysku.
+    {
+      nazwa: 'G1-M1 · ⭐ `ja.tsx` WRACA do `segmentLabel()` — stan `main` sprzed pasa G1',
+      opis: 'regresja: ekran znów oddaje surowe `id` z `diagnostics.scores` jako nazwę obszaru. '
+        + 'Klucza nie ma już na liście długu, więc MUSI wyjść jako NOWY KANDYDAT',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: zeZrodlem('app/(tabs)/ja.tsx',
+          "import { segmentLabel } from '../../lib/labels';\n"
+          + 'export const load = async () => ({ deficitLabels: deficits.map(([id]) => segmentLabel(id)) });'),
+      },
+    },
+    {
+      nazwa: 'G1-M2 · ⭐ naprawiony plik ZOSTAJE na liście długu jako pomnik',
+      opis: 'dokładnie to, przed czym ostrzega polecenie G1.3: „pozycja naprawiona, ale '
+        + 'zostawiona na liście, też zapala strażnika". Bez tej mutacji zapadka '
+        + 'działałaby tylko w jedną stronę',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        dlugHelper: [
+          ...WYCIEK_PRZEZ_HELPER,
+          {
+            klucz: 'components/DiagnosisProfileView.tsx :: SekcjaWaskiegoGardla',
+            kto: 'POMNIK — pozycja zdjęta przez pas G1, wpisana z powrotem',
+            co: 'wywołania `segmentLabel()` już tam nie ma, a lista nadal o nim mówi',
+            ile: 3,
+          },
+        ],
+      },
+    },
+    {
+      nazwa: 'G1-M3 · detektor helpera OŚLEPIONY — nie widzi żadnego wywołania',
+      opis: '⭐ najgroźniejsza postać awarii po tym pasie: lista długu jest prawie pusta, '
+        + 'więc martwy detektor wygląda IDENTYCZNIE jak czyste repozytorium. '
+        + 'Łapie to WYŁĄCZNIE próbka syntetyczna „MUSI trafić"',
+      zasady: { ...ZASADY_PRAWDZIWE, szukajHelpera: () => [] },
+    },
+    {
+      nazwa: 'G1-M4 · detektor renderu TRAFIA WE WSZYSTKO',
+      opis: 'odwrotna awaria: reguła bez warunku „dziecko tekstowe JSX" wygląda na bardzo '
+        + 'czujną, a jest bezużyteczna. Łapie to próbka syntetyczna „MUSI NIE trafić"',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        szukajRenderu: (zywy) => [{ funkcja: nazwaFunkcjiNad(zywy, 0), fragment: 'wszystko' }],
+      },
+    },
+    {
+      nazwa: 'G1-M5 · ⭐⭐ LISTA DŁUGU OPRÓŻNIONA DO ZERA, a wywołanie nadal jest',
+      opis: '⛔ TO JEST ZNALEZISKO F1-1 I F2-8 W POSTACI MUTACJI: ktoś wycisza strażnika, '
+        + 'kasując listę zamiast defektów. Zapadka na RÓWNOŚĆ musi wtedy zgłosić '
+        + 'pozostałe wywołanie jako NOWEGO KANDYDATA, a nie zamilknąć',
+      zasady: { ...ZASADY_PRAWDZIWE, dlugHelper: [] },
+    },
+    {
+      nazwa: 'G1-M6 · ⭐ regresja w pliku NAPRAWIONYM przez ten pas',
+      opis: 'ktoś dokłada `segmentLabel()` z powrotem do `components/diagnosisProfile.ts` '
+        + 'obok `opiszSegment()`. Plik zniknął z listy długu, więc jedyną obroną jest '
+        + 'wykrycie NOWEGO KANDYDATA — sprawdzam, że nadal działa',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: zeZrodlem('components/diagnosisProfile.ts',
+          "import { segmentLabel, opiszSegment } from '../lib/labels';\n"
+          + 'export const nameOf = (x: string) => segmentLabel(x);\n'
+          + 'export const opis = (x: string) => opiszSegment(x);'),
+      },
+    },
   ];
 
   console.log(`\nbateria ma ${ROZMIAR} asercji · na prawdziwych zasadach FAIL-i: ${failePrawdziwe}\n`);
@@ -724,8 +846,18 @@ console.log('\n4. ⭐ TEST MUTACYJNY — liczba FAIL-i przy każdej mutacji');
   // pilnuje. E1 zmierzył, że dwie mutacje pasa C3b przestały cokolwiek łapać PO
   // naprawie i świeciły na zielono — więc ta asercja jest tu, żeby taki stan
   // zapalił się sam, a nie czekał na następny pas.
-  check('⭐ KAŻDA z dziewięciu mutacji zapala co najmniej jedną asercję (O71)',
+  check(`⭐ KAŻDA z ${MUTACJE.length} mutacji zapala co najmniej jedną asercję (O71)`,
     bezEfektu === 0, `mutacji bez żadnego efektu: ${bezEfektu}`);
+
+  // ⭐ PLAN-D-G1 — O71 W MOCNIEJSZEJ POSTACI: mutacja, która przestała cokolwiek
+  // łapać, jest tu wypisana Z NAZWY, a nie zliczona. E1 zmierzył, że dwie
+  // mutacje pasa C3b zgasły po naprawie i świeciły na zielono — zliczenie do
+  // jednej liczby nie powiedziałoby, KTÓRA. Ten pas zdjął 11 z 12 wywołań
+  // helpera, czyli zabrał mutacjom materiał; to jest dokładnie ta chwila,
+  // w której mutacje gasną.
+  const zgasle = MUTACJE.filter((m) => bateria(m.zasady).every((w) => w.ok)).map((m) => m.nazwa);
+  check('⭐ ŻADNA mutacja nie zgasła po naprawie — z nazwy, nie z licznika (O71 + E1)',
+    zgasle.length === 0, `zgasły: ${zgasle.join(' | ')}`);
 
   // ⛔ Cofnięcie jest STRUKTURALNE: mutanty to osobne obiekty `Zasady`, nie
   // edycje na dysku. Nie ma czego cofać i nie ma jak tego wypchnąć na produkcję.

@@ -23,13 +23,25 @@ import {
   getHiddenCauses,
   detectScenario,
   scenarioHeadline,
-  segmentLabel,
   GROUP_HEADINGS_WITH_POSITION,
   GROUP_HEADINGS_NO_POSITION,
   type GroupKey,
   type GroupedSegment,
   type SegmentTier,
+  type CauseText,
+  type NieznanySegment,
 } from './diagnosisProfile';
+// ⭐ PLAN-D-G1 08.2026 (15.08.2026) — TEN EKRAN NIE WOŁA JUŻ `segmentLabel()`.
+// Wołał ją sześć razy i w czterech z nich wynik był WPLATANY W ZDANIE
+// („Twoje wąskie gardło to ${…} — obszar z grupy …"), a przy segmencie spoza
+// słownika ta funkcja oddaje SUROWE `id` z bazy. Zawodnik czytałby wtedy
+// „Twoje wąskie gardło to explosive_power" o obszarze, który SAM wybrał.
+//
+// ⛔ `SEGMENT_NIEZNANY_KOMUNIKAT` jest brzmieniem CZEKAJĄCYM NA DECYZJĘ KUBY
+// (nota F2 §6). Ten pas używa go CO DO ZNAKU i nie dokłada jedenastego
+// brzmienia — propozycje osobnych zdań dla miejsc „wplecionych" stoją
+// w nocie G1 jako propozycje, nie w kodzie.
+import { opiszSegment, opisNieznanegoSegmentuDoLogu, SEGMENT_NIEZNANY_KOMUNIKAT } from '../lib/labels';
 // ⭐ PLAN-D-C3b 15.08.2026 — brzmienie „nie wiem" pochodzi z JEDNEJ funkcji
 // decyzyjnej, tej samej, którą pas C3 wpiął na sześciu ekranach. Ten plik
 // nie wymyśla własnego zdania (zakaz 4 polecenia C3b).
@@ -105,6 +117,61 @@ const TIER_LABEL: Record<SegmentTier, string> = {
   minor: 'drugorzędne',
 };
 
+/**
+ * ⭐ PLAN-D-G1 08.2026 — jedno miejsce, w którym ten ekran mówi konsoli, że
+ * baza urosła o obszar, którego appka nie umie nazwać. Treść pochodzi
+ * z `opisNieznanegoSegmentuDoLogu()` (pas F2) i wymienia trzy kolumny bez FK
+ * i bez CHECK-a, którymi taka wartość mogła wejść.
+ *
+ * ⚠️ Bez tego logu naprawa byłaby połowiczna: zawodnik przestałby czytać
+ * `explosive_power`, ale NIKT by się nie dowiedział, że taka wartość istnieje —
+ * czyli defekt zamieniłby się w cichy brak, dokładnie ten, który pas E1 mierzył.
+ */
+function zalogujNieznane(nieznane: NieznanySegment[]): void {
+  for (const o of nieznane) {
+    const tekst = opisNieznanegoSegmentuDoLogu(o);
+    if (tekst) console.warn(tekst);
+  }
+}
+
+/**
+ * ⭐ PLAN-D-G1 08.2026 — TRZY RODZAJE ZDANIA O PRZYCZYNIE, NIE DWA.
+ *
+ * ⚠️ Nazwa przyczyny jest tu WPLECIONA W ZDANIE („Główna przyczyna: **X** —
+ * słabość w tym obszarze wyraźnie blokuje…", „Zacznij od: X."), więc naprawa
+ * NIE MOGŁA być podmianą napisu: „Zacznij od: Nie znam tego obszaru." jest
+ * poleceniem, którego nie da się wykonać. Rozstrzygnięcie stoi w
+ * `describeCause`: nienazwana przyczyna WYPADA z listy, a gdy wypadną
+ * wszystkie, przychodzi tu osobny rodzaj `nieznana_przyczyna`.
+ *
+ * ⛔ Ten rodzaj rysuje `SEGMENT_NIEZNANY_KOMUNIKAT` CO DO ZNAKU — zakaz 4
+ * polecenia G1 („zero nowych brzmień"). ⚠️ Uważam, że lepszym zdaniem byłoby
+ * tu „Nie umiem nazwać przyczyny tego obszaru." — i dlatego stoi ono w nocie
+ * G1 jako PROPOZYCJA dla Kuby, a nie w tym pliku.
+ *
+ * ⭐ Bez `default: never` niżej dołożenie czwartego rodzaju `CauseText`
+ * przeszłoby tędy w ciszy — ten sam mechanizm, którym pas C3b zabezpieczył
+ * `SekcjaWaskiegoGardla`.
+ */
+function opisPrzyczyny(cause: CauseText): ReactNode {
+  if (cause.kind === 'standalone') return cause.text;
+  if (cause.kind === 'blocked') {
+    return (
+      <>
+        {cause.before}
+        <Text style={styles.deficitCauseStrong}>{cause.primaryName}</Text>
+        {cause.after}
+      </>
+    );
+  }
+  if (cause.kind === 'nieznana_przyczyna') {
+    zalogujNieznane(cause.surowe);
+    return SEGMENT_NIEZNANY_KOMUNIKAT;
+  }
+  const rodzajNieobsluzony: never = cause;
+  return rodzajNieobsluzony;
+}
+
 function SegmentRow({ entry, color, showTier }: { entry: GroupedSegment; color: string; showTier: boolean }) {
   return (
     <View style={styles.segRow}>
@@ -136,11 +203,35 @@ export default function DiagnosisProfileView({
   const deficits = getRelativeDeficits(scores, 4);
   const scenario = detectScenario(scores, !!positionProfile);
   const { headline, desc } = scenarioHeadline(scenario, deficits.length);
-  const { groups, hasTiers } = groupSegmentsForDisplay(scores, tiers);
+  const { groups, hasTiers, nieznane } = groupSegmentsForDisplay(scores, tiers);
   const headings = hasTiers ? GROUP_HEADINGS_WITH_POSITION : GROUP_HEADINGS_NO_POSITION;
   const groupOrder: GroupKey[] = hasTiers ? ['g1', 'g2', 'g3', 'g4'] : ['g1', 'g2', 'g4'];
 
-  const hiddenCause = getHiddenCauses(scores, deficits, 0.5)[0] ?? null;
+  // ⭐ PLAN-D-G1 — LOG STOI TUTAJ, bo `components/diagnosisProfile.ts` jest
+  // plikiem czystym (zero `console`) i ma taki zostać. Ten sam podział, którym
+  // `lib/trzyPustki.ts` oddaje ekranom `opisBleduOdczytuDoLogu()`.
+  zalogujNieznane(nieznane);
+
+  // ⭐ PLAN-D-G1 — UKRYTA PRZYCZYNA, KTÓREJ NIE UMIEMY NAZWAĆ, NIE JEST RYSOWANA.
+  //
+  // To jest jedyne miejsce z sześciu, w którym rezygnuję z narysowania czegoś,
+  // i mówię dlaczego: cały ten blok jest JEDNYM ZDANIEM zbudowanym wokół nazwy
+  // („**X** nie odstaje w Twoim profilu, więc łatwo go pominąć — ale to on
+  // silnie wpływa na obszary wypisane wyżej (A, B)"). Bez nazwy podmiotu tego
+  // zdania nie da się wypowiedzieć, a blok jest DODATKOWYM wglądem, nie
+  // twierdzeniem o zawodniku — jego brak niczego mu nie odbiera i nic nie
+  // przekłamuje. ⛔ Zniknięcie NIE jest ciche: leci do logu z surową wartością.
+  const hiddenCauseRaw = getHiddenCauses(scores, deficits, 0.5)[0] ?? null;
+  const opisUkrytej = hiddenCauseRaw ? opiszSegment(hiddenCauseRaw.id) : null;
+  const ukrytePowody = hiddenCauseRaw
+    ? Array.from(new Set(hiddenCauseRaw.causesFor)).map(opiszSegment)
+    : [];
+  if (opisUkrytej && !opisUkrytej.znany) zalogujNieznane([opisUkrytej]);
+  zalogujNieznane(ukrytePowody.filter((o): o is NieznanySegment => !o.znany));
+  const ukrytePowodyNazwy = ukrytePowody.filter((o) => o.znany).map((o) => (o.znany ? o.etykieta : ''));
+  const hiddenCause = opisUkrytej?.znany && ukrytePowodyNazwy.length
+    ? { etykieta: opisUkrytej.etykieta, powody: ukrytePowodyNazwy }
+    : null;
 
   // Powiązanie z Celem — bez ani jednego dodatkowego pytania do zawodnika:
   // wszystko liczone z danych, które system już ma.
@@ -178,33 +269,41 @@ export default function DiagnosisProfileView({
       ) : (
         deficits.map(([id], i) => {
           const cause = describeCause(scores, id);
+          // ⭐ PLAN-D-G1 — KSZTAŁT MIEJSCA: ETYKIETA. Nazwa deficytu stoi sama
+          // w osobnym `<Text>`, więc komunikat „nie znam" wchodzi tu wprost.
+          //
+          // ⚠️ DZIEDZINA OTWARTA I TO JEST NAJWAŻNIEJSZY POMIAR TEGO MIEJSCA:
+          // `id` pochodzi z `getRelativeDeficits(scores)`, czyli z KLUCZY
+          // `diagnostics.scores` (jsonb). Zmierzone przez F2 (F2-4): ta kolumna
+          // nie ma ŻADNEGO ograniczenia — ani FK, ani CHECK-a. Jeden `insert`
+          // z nowym kluczem i zawodnik czytał tu surowe id.
+          const opisDeficytu = opiszSegment(id);
+          if (!opisDeficytu.znany) zalogujNieznane([opisDeficytu]);
           return (
             <View key={id} style={styles.deficitRow}>
               <Text style={[styles.deficitRank, i === 0 && styles.deficitRankTop]}>{i + 1}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.deficitName}>{segmentLabel(id)}</Text>
-                <Text style={styles.deficitCause}>
-                  {cause.kind === 'standalone' ? cause.text : (
-                    <>
-                      {cause.before}
-                      <Text style={styles.deficitCauseStrong}>{cause.primaryName}</Text>
-                      {cause.after}
-                    </>
-                  )}
+                <Text style={styles.deficitName}>
+                  {opisDeficytu.znany ? opisDeficytu.etykieta : opisDeficytu.komunikat}
                 </Text>
+                <Text style={styles.deficitCause}>{opisPrzyczyny(cause)}</Text>
               </View>
             </View>
           );
         })
       )}
 
+      {/* ⭐ PLAN-D-G1 — nazwa i wyliczenie przyszły tu już NAZWANE (patrz
+          `hiddenCause` wyżej). Ten blok rysuje się wyłącznie wtedy, gdy
+          da się wypowiedzieć całe zdanie; inaczej go nie ma, a surowa
+          wartość poszła do logu. */}
       {hiddenCause ? (
         <View style={styles.hiddenCause}>
           <Text style={styles.hiddenCauseLabel}>Ukryta przyczyna</Text>
           <Text style={styles.hiddenCauseText}>
-            <Text style={styles.deficitCauseStrong}>{segmentLabel(hiddenCause.id)}</Text>
+            <Text style={styles.deficitCauseStrong}>{hiddenCause.etykieta}</Text>
             {' nie odstaje w Twoim profilu, więc łatwo go pominąć — ale to on silnie wpływa na obszary wypisane wyżej ('}
-            {Array.from(new Set(hiddenCause.causesFor)).map(segmentLabel).join(', ')}
+            {hiddenCause.powody.join(', ')}
             {'). Jeśli praca nad nimi nie przynosi efektu, zacznij stąd.'}
           </Text>
         </View>
@@ -308,14 +407,47 @@ function SekcjaWaskiegoGardla({
   }
 
   if (cel.stan === 'jest') {
+    // ═══════════════════════════════════════════════════════════════════
+    // ⭐ PLAN-D-G1 08.2026 — NAJWAŻNIEJSZE Z JEDENASTU MIEJSC TEGO PASA
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // Zawodnik czyta tu nazwę obszaru, KTÓRY SAM WYBRAŁ jako swoje wąskie
+    // gardło. Do dziś stało tu `segmentLabel(cel.segmentId)`, czyli funkcja
+    // oddająca surowe `id` z bazy — więc zdanie brzmiało „Twoje wąskie gardło
+    // to explosive_power — obszar z grupy „Tu jest Twoja szansa"".
+    //
+    // ── DZIEDZINA, ZMIERZONA 15.08.2026 ──────────────────────────────────
+    // `cel.segmentId` idzie z `goals.segment_id`, a ta kolumna MA FK →
+    // `public.segments`. ⚠️ To NIE domyka sprawy: `public.segments` nie ma
+    // kolumny z nazwą (znalezisko F2-5), więc czternasty wiersz dodany tam
+    // przechodzi FK i NIE MA nazwy w `lib/labels.ts`. Dziedzina jest zamknięta
+    // wobec tabeli, a otwarta wobec słownika nazw — i to ta druga tu rządzi.
+    //
+    // ── ⭐ DLACZEGO TO NIE JEST PODMIANA NAPISU ──────────────────────────
+    // Nazwa jest WPLECIONA W ZDANIE, w trzech wariantach. Podstawienie
+    // komunikatu w miejsce `${…}` dałoby „Twoje wąskie gardło to Nie znam
+    // tego obszaru — obszar z grupy „…"". To jest dokładnie ten kształt,
+    // z powodu którego pas F2 nie wszedł tutaj i wypisał to miejsce zamiast
+    // je naprawić. Rozwiązanie: przy nieznanym segmencie ekran nie skleja
+    // zdania, tylko stawia komunikat SAMODZIELNIE — a wyjście („Zobacz wąskie
+    // gardła →") zostaje, więc zawodnik ma co zrobić (M4).
+    //
+    // ⛔ `SEGMENT_NIEZNANY_KOMUNIKAT` użyty CO DO ZNAKU. ⚠️ Pełniejsze zdanie
+    // („Twoje wąskie gardło jest ustawione, ale nie znam tego obszaru.")
+    // byłoby JEDENASTYM brzmieniem czekającym na Kubę — stoi w nocie G1 jako
+    // propozycja, nie tutaj.
+    const opisCelu = opiszSegment(cel.segmentId);
+    if (!opisCelu.znany) zalogujNieznane([opisCelu]);
     return (
       <View style={[styles.card, goalInGroup === 'g1' && styles.cardHighlighted]}>
         <Text style={styles.cardBody}>
-          {goalInGroup === 'g1'
-            ? `Twoje wąskie gardło to ${segmentLabel(cel.segmentId)} — obszar z grupy „${headings.g1.title}". Stąd biorą się zadania i rekomendacje, które dostajesz.`
-            : goalInGroup
-              ? `Twoje wąskie gardło to ${segmentLabel(cel.segmentId)} — obszar z grupy „${headings[goalInGroup].title}". Twoim najmocniejszym punktem zaczepienia jest dziś grupa „${headings.g1.title}" powyżej.`
-              : `Twoje wąskie gardło to ${segmentLabel(cel.segmentId)}. Ten obszar nie ma jeszcze wyniku w Twojej ostatniej diagnozie.`}
+          {!opisCelu.znany
+            ? SEGMENT_NIEZNANY_KOMUNIKAT
+            : goalInGroup === 'g1'
+              ? `Twoje wąskie gardło to ${opisCelu.etykieta} — obszar z grupy „${headings.g1.title}". Stąd biorą się zadania i rekomendacje, które dostajesz.`
+              : goalInGroup
+                ? `Twoje wąskie gardło to ${opisCelu.etykieta} — obszar z grupy „${headings[goalInGroup].title}". Twoim najmocniejszym punktem zaczepienia jest dziś grupa „${headings.g1.title}" powyżej.`
+                : `Twoje wąskie gardło to ${opisCelu.etykieta}. Ten obszar nie ma jeszcze wyniku w Twojej ostatniej diagnozie.`}
         </Text>
         <TouchableOpacity onPress={onOpenGoals}>
           <Text style={styles.link}>Zobacz wąskie gardła →</Text>

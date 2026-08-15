@@ -76,7 +76,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { colors, typography, spacing, radii, minTouchHeight, skew } from '../../constants/theme';
-import { segmentLabel } from '../../lib/labels';
+// ⭐ PLAN-D-G1 08.2026 (15.08.2026) — było `segmentLabel`, czyli funkcja
+// oddająca surowe `id` z bazy przy segmencie spoza słownika. Teraz
+// `opiszSegment()` z dwiema gałęziami (pas F2) — patrz `load()`.
+import { opiszSegment, opisNieznanegoSegmentuDoLogu } from '../../lib/labels';
 import {
   parseScores,
   getRelativeDeficits,
@@ -272,11 +275,37 @@ export default function JaScreen() {
         const scenario = detectScenario(scores, hasPosition);
         const { headline, desc } = scenarioHeadline(scenario, deficits.length);
         deficitSegmentIds = deficits.map(([id]) => id);
+        // ═══════════════════════════════════════════════════════════════
+        // ⭐ PLAN-D-G1 08.2026 (15.08.2026) — KONIEC `segmentLabel()` TUTAJ
+        // ═══════════════════════════════════════════════════════════════
+        //
+        // Do dziś stało tu `deficits.map(([id]) => segmentLabel(id))`, a ta
+        // funkcja przy segmencie spoza słownika oddaje SUROWE `id` z bazy.
+        // Trzy nazwy z tej listy idą prosto na kartę profilu, sklejone „ · ",
+        // więc zawodnik czytałby `Moc · explosive_power · Regeneracja` i nie
+        // miałby jak zgłosić, że drugiej pozycji nie rozumie — surowa wartość
+        // WYGLĄDA jak nazwa.
+        //
+        // ── DZIEDZINA: OTWARTA, ZERO OGRANICZEŃ (znalezisko F2-4) ────────
+        // `id` to KLUCZ z `diagnostics.scores` (jsonb). Ta kolumna nie ma
+        // ani FK, ani CHECK-a, ani niczego — dziedziny nie domyka nic poza
+        // tym, co zapisze ankieta. Jeden `insert` z nowym kluczem wystarczy.
+        //
+        // ── KSZTAŁT MIEJSCA: ETYKIETA W WYLICZENIU ───────────────────────
+        // Wynik trafia do `<Text style={heroSegments}>{…join('  ·  ')}</Text>`,
+        // czyli każda pozycja stoi SAMODZIELNIE między separatorami. Komunikat
+        // „nie znam" czyta się tu poprawnie i nie trzeba osobnego zdania —
+        // inaczej niż w `SekcjaWaskiegoGardla`, gdzie nazwa jest wpleciona.
+        const opisyDeficytow = deficits.map(([id]) => opiszSegment(id));
+        for (const opis of opisyDeficytow) {
+          const doLogu = opisNieznanegoSegmentuDoLogu(opis);
+          if (doLogu) console.warn(doLogu);
+        }
         setSummary({
           state: 'ready',
           headline,
           desc,
-          deficitLabels: deficits.map(([id]) => segmentLabel(id)),
+          deficitLabels: opisyDeficytow.map((o) => (o.znany ? o.etykieta : o.komunikat)),
         });
       }
     }

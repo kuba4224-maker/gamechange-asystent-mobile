@@ -133,7 +133,12 @@ import {
   LIVING_DIAGNOSIS_QUESTION_BANK,
   resolveLivingDiagnosisWording,
 } from './livingDiagnosisQuestionBank';
-import { segmentLabel } from './labels';
+// ⭐ PLAN-D-G1 08.2026 (15.08.2026) — `segmentLabel()` WYSZŁO STĄD.
+// Ten plik wołał `segmentLabel(segmentId)`, czyli funkcję, która przy segmencie
+// spoza słownika oddaje SUROWE `id` z bazy. Zawodnik czytałby wtedy w nagłówku
+// rediagnozy „REDIAGNOZA · explosive_power". Teraz stoi tu `opiszSegment()`
+// z dwiema gałęziami (pas F2) — patrz `buildRediagnosisView`.
+import { opiszSegment, opisNieznanegoSegmentuDoLogu } from './labels';
 import { czyOslonaAktywna, type StanOgraniczen, type Obowiazuje } from './ograniczenia';
 
 // ─────────────────────────────────────────────────────────────
@@ -449,7 +454,37 @@ export function buildRediagnosisView(params: {
   // a każde pytanie kosztuje uwagę nastolatka.
   if (baseline.state !== 'ready') return { kind: 'absent', reason: 'no_baseline' };
 
-  const segmentName = segmentLabel(segmentId);
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-G1 08.2026 (15.08.2026) — NAZWA OBSZARU, KTÓREJ MOŻE NIE BYĆ
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // ── KSZTAŁT MIEJSCA: ETYKIETA, NIE ZDANIE ────────────────────────────
+  // `segmentName` idzie w `components/BlockClosingRediagnosis.tsx` do
+  // `<Text>{view.eyebrow}  ·  {view.segmentName}</Text>` — czyli STOI
+  // SAMODZIELNIE, po separatorze. Komunikat „nie znam" wchodzi tu wprost
+  // i czyta się poprawnie; nie trzeba osobnego zdania (inaczej niż
+  // w `SekcjaWaskiegoGardla`, gdzie nazwa jest WPLECIONA — patrz nota G1).
+  //
+  // ── ⛔ DLACZEGO NIE ZGASIŁEM CAŁEJ KARTY ─────────────────────────────
+  // Kuszące było dopisać nieznany segment do strażnika trzy linie wyżej
+  // (`!dir || !wording` → `absent`) i skończyć. ZMIERZONE: klucze
+  // `LIVING_DIAGNOSIS_QUESTION_BANK` są DZIŚ dokładnie te same, co klucze
+  // `SEGMENT_LABELS` (13 = 13, zero różnic w obie strony), więc taki
+  // strażnik nic by dziś nie zmienił — ale w dniu, w którym bank urośnie
+  // szybciej niż słownik nazw, ODEBRAŁBY zawodnikowi pytanie, na które
+  // umiemy odpowiedzieć, z powodu brakującej etykiety. Wąskie znalezisko
+  // (nie znam nazwy) nie ma się zamieniać w szeroką odmowę (nie zapytam).
+  // Pytanie zostaje, nazwa mówi prawdę o naszej niewiedzy.
+  //
+  // ── LOG ──────────────────────────────────────────────────────────────
+  // ⚠️ `console.warn` stoi TU, a nie u konsumenta, świadomie:
+  // `components/BlockClosingRediagnosis.tsx` jest poza pasem G1, a pole
+  // dołożone do `RediagnosisView` i przez nikogo nieczytane byłoby dokładnie
+  // tym cichym brakiem, który ten pas usuwa. Precedens w tym repozytorium:
+  // `lib/matchSegmentSelection.ts` loguje tak samo, z wnętrza `lib/`.
+  const opisSegmentu = opiszSegment(segmentId);
+  if (!opisSegmentu.znany) console.warn(opisNieznanegoSegmentuDoLogu(opisSegmentu));
+  const segmentName = opisSegmentu.znany ? opisSegmentu.etykieta : opisSegmentu.komunikat;
 
   if (answerValue == null) {
     return {
