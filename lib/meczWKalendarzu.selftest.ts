@@ -29,7 +29,7 @@
 // ⚠️ NIE UŻYWAĆ `new URL(...)` (ograniczenie O53): `tsconfig.json` ciągnie DOM,
 // więc `tsc` pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -70,6 +70,97 @@ const zrodlo = (wzgledna: string): string => bezKomentarzy(readFileSync(join(roo
 const PLIK_KALENDARZ = 'app/(tabs)/kalendarz.tsx';
 const PLIK_MECZ = 'app/(tabs)/mecz.tsx';
 const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
+const PLIK_DZIENNIK = 'app/(tabs)/dziennik.tsx';
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-E2 15.08.2026 — PRZEMIATANIE ZAMIAST LISTY NA SZTYWNO (O69)
+// ═══════════════════════════════════════════════════════════════════
+// „Strażnik z listą plików na sztywno zaczyna kłamać przy pierwszym nowym
+// pliku — i robi to NA ZIELONO." Tu jest odkrywanie katalogu; wyjątki są
+// jawne, nazwane i mają własne asercje dowodzące, że są zasłużone.
+
+function plikiKatalogu(katalog: string, prefiks: string, pasuje: (f: string) => boolean): string[] {
+  return readdirSync(katalog).filter(pasuje).sort().map((f) => `${prefiks}${f}`);
+}
+
+/**
+ * Wszystko, co może narysować zawodnikowi wartość z bazy: ekrany zakładek,
+ * komponenty i `lib/` (helper zwracający etykietę jest tą samą drogą na ekran,
+ * tylko o jeden skok dalej). ⛔ Selftesty są pominięte — cytują zepsute
+ * wzorce w asercjach, więc przemiatanie ich po sobie daje same fałszywe
+ * trafienia. To jest ta sama decyzja, co w `pustkaWCalymRepo.selftest.ts`.
+ */
+const PRZEMIATANE: string[] = [
+  ...plikiKatalogu(join(root, 'app', '(tabs)'), 'app/(tabs)/', (f) => f.endsWith('.tsx')),
+  ...plikiKatalogu(join(root, 'components'), 'components/', (f) => f.endsWith('.tsx')),
+  ...plikiKatalogu(join(root, 'lib'), 'lib/', (f) => /\.tsx?$/.test(f) && !f.endsWith('.selftest.ts')),
+];
+
+/** Ekrany, które NAPRAWDĘ rysują nazwę rodzaju wydarzenia — odkryte, nie wpisane. */
+const EKRANY_Z_ETYKIETAMI_RODZAJU: string[] =
+  PRZEMIATANE.filter((p) => /EVENT_TYPE_LABELS/.test(zrodlo(p)));
+
+/** Pierwszy człon wyrażenia w postaci `a.b.c` — do porównania klucza z zapasem. */
+function sciezkaWyrazenia(wyrazenie: string): string | null {
+  const m = /^\s*([\w$]+(?:\.[\w$]+)*)/.exec(wyrazenie);
+  return m ? m[1] : null;
+}
+
+export type SuroweTrafienie = { linia: number; tekst: string };
+
+/**
+ * ⭐ DETEKTOR CHOROBY, NIE JEDNEJ KOLUMNY.
+ *
+ * Szuka zapisu „słownik zapytany kluczem, a przy pudle oddający TEN SAM
+ * klucz": `SLOWNIK[x.y] ?? x.y` albo `SLOWNIK[x.y] || x.y`. Taki zapis nigdy
+ * nie jest poprawny — znaczy „gdy nie mam słowa, pokażę identyfikator z bazy,
+ * a on będzie wyglądał jak słowo, więc nikt nie zgłosi, że słowa brakuje".
+ *
+ * ⚠️ `SLOWNIK[x] ?? null` i `SLOWNIK[x] || 'Mecz'` to NIE jest ten defekt —
+ * tam zapas jest świadomą decyzją, a nie wyciekiem kolumny na ekran. Dlatego
+ * warunkiem trafienia jest RÓWNOŚĆ klucza i zapasu, nie sama obecność `??`.
+ */
+function surowaWartoscJakoNazwa(kod: string): SuroweTrafienie[] {
+  const trafienia: SuroweTrafienie[] = [];
+  const re = /([A-Za-z_$][\w$]*)\s*\[([^\]\n]+)\]\s*(\?\?|\|\|)([^\n,;)}]+)/g;
+  let m: RegExpExecArray | null = re.exec(kod);
+  while (m !== null) {
+    const klucz = sciezkaWyrazenia(m[2]);
+    const zapas = sciezkaWyrazenia(m[4]);
+    if (klucz !== null && klucz === zapas) {
+      trafienia.push({
+        linia: kod.slice(0, m.index).split('\n').length,
+        tekst: m[0].trim().slice(0, 80),
+      });
+    }
+    m = re.exec(kod);
+  }
+  return trafienia;
+}
+
+/**
+ * ⚠️ DŁUG ZGŁOSZONY, NIE NAPRAWIONY — ZMIERZONY 15.08.2026 PRZEZ PAS E2.
+ *
+ * ⛔ To NIE jest lista wyjątków „bo tak wygodnie". To są pliki, które łamią
+ * regułę i **należą do innych pasów albo do nikogo**. O68: cudzy plik
+ * naprawiony przez ten pas znika bez śladu przy jego pushu, a jego autor widzi
+ * zielone i nie dowiaduje się, że coś było nie tak.
+ *
+ * `zmierzone` to liczba miejsc w dniu wpisania. Asercje niżej pilnują dwóch
+ * rzeczy naraz: że pozycja NADAL jest zepsuta (inaczej trzeba ją stąd usunąć)
+ * i że NIE UROSŁA (dług wolno spłacać, nie wolno dokładać).
+ */
+const DLUG_SUROWEJ_WARTOSCI: { plik: string; pas: string; zmierzone: number }[] = [
+  { plik: 'app/(tabs)/cele.tsx', pas: 'nieprzydzielony', zmierzone: 3 },
+  { plik: 'app/(tabs)/diagnoza.tsx', pas: 'C3 / C3b — pasy domknięte 15.08.2026', zmierzone: 1 },
+  { plik: 'app/(tabs)/dzis.tsx', pas: 'C4 — pas domknięty 15.08.2026', zmierzone: 2 },
+  { plik: 'app/(tabs)/kalendarz.tsx', pas: 'nieprzydzielony', zmierzone: 3 },
+  { plik: 'app/(tabs)/mecz.tsx', pas: 'nieprzydzielony', zmierzone: 3 },
+  { plik: 'app/(tabs)/profil.tsx', pas: 'L2 — pas domknięty 15.08.2026', zmierzone: 1 },
+  { plik: 'components/RecommendationCard.tsx', pas: 'nieprzydzielony', zmierzone: 3 },
+  { plik: 'lib/labels.ts', pas: 'nieprzydzielony — `segmentLabel()` oddaje surowy `id`', zmierzone: 1 },
+  { plik: 'lib/materials.ts', pas: 'nieprzydzielony', zmierzone: 1 },
+];
 
 /** Klucze mapy etykiet rodzajów wydarzeń, wyjęte ze źródła ekranu. */
 function kluczeEtykietRodzajow(kod: string): string[] {
@@ -226,12 +317,34 @@ function check(label: string, cond: boolean, detail: string) {
   // uruchomieniu appki. Strażnik pilnujący JEDNEGO z dwóch miejsc tego samego
   // wzorca jest gorszy niż jego brak: daje zielone światło i nazwę „domknięte".
   // Pętla niżej ma rosnąć razem z listą ekranów rysujących rodzaj wydarzenia.
-  const EKRANY_Z_RODZAJEM: Array<[string, string]> = [
-    ['kalendarz', PLIK_KALENDARZ],
-    ['dziś', PLIK_DZIS],
-  ];
+  //
+  // ⭐⭐ PLAN-D-E2 15.08.2026 — I DOKŁADNIE TEGO NIE ROBIŁA.
+  // Powyższe zdanie („ma rosnąć razem z listą") było OBIETNICĄ ZŁOŻONĄ
+  // CZŁOWIEKOWI, a nie mechanizmem. Lista `EKRANY_Z_RODZAJEM` stała na
+  // sztywno na dwóch pozycjach, więc trzeci ekran wchodził do repozytorium
+  // NIEPRZEMIECIONY — i wszedł: `app/(tabs)/dziennik.tsx` niósł ten sam
+  // wzorzec (`SESSION_TYPE_LABELS[row.session_type] ?? row.session_type`)
+  // przez cały czas, kiedy ten strażnik świecił na zielono. To jest O69
+  // w czystej postaci: strażnik z listą na sztywno zaczyna kłamać przy
+  // pierwszym nowym pliku i robi to NA ZIELONO.
+  //
+  // Od E2 lista jest ODKRYWANA Z KATALOGU, a wyjątki są jawne i zasłużone —
+  // ten sam ruch, który pas C3b wykonał w `trzyPustki.selftest.ts`.
+  const EKRANY_Z_RODZAJEM = EKRANY_Z_ETYKIETAMI_RODZAJU;
 
-  for (const [nazwa, sciezka] of EKRANY_Z_RODZAJEM) {
+  check('(A7-3) (strażnik strażnika) mam co przemiatać — ekrany z etykietami rodzaju',
+    EKRANY_Z_RODZAJEM.length >= 2, `znalazłem ${EKRANY_Z_RODZAJEM.length}`);
+
+  // ⚠️ POKRYCIE Z PASA A7 NIE MOŻE PO CICHU ZNIKNĄĆ. Gdyby ktoś przestał
+  // rysować rodzaj na jednym z tych dwóch ekranów, przemiatanie po prostu
+  // przestałoby go widzieć — i nikt by się nie dowiedział.
+  const DWA_EKRANY_A7 = [PLIK_KALENDARZ, PLIK_DZIS];
+  const zgubione = DWA_EKRANY_A7.filter((p) => !EKRANY_Z_RODZAJEM.includes(p));
+  check('(A7-3) ⛔ żaden z dwóch ekranów pasa A7 nie wypadł z przemiatania',
+    zgubione.length === 0, `wypadły: ${zgubione.join(', ')}`);
+
+  for (const sciezka of EKRANY_Z_RODZAJEM) {
+    const nazwa = sciezka.split('/').pop() ?? sciezka;
     const kod = zrodlo(sciezka);
 
     check(`(A7-3) ${nazwa} nie pokazuje surowej wartości z bazy jako nazwy rodzaju`,
@@ -251,6 +364,148 @@ function check(label: string, cond: boolean, detail: string) {
       /EVENT_TYPE_LABELS\[\s*opisRodzaju\.id\s*\]/.test(kod) && /opisRodzaju\.komunikat/.test(kod),
       `${sciezka} woła \`opiszRodzaj\`, ale nie rysuje obu wyników — rodzaj mógł zniknąć z ekranu`);
   }
+
+  // ⚠️ Pliki, które DOTYKAJĄ `event_type`, ale nie mają słownika etykiet, są
+  // poza pętlą wyżej — i to jest poprawne tylko dopóty, dopóki naprawdę nie
+  // rysują rodzaju żadnym innym słownikiem. Ta asercja tego pilnuje, więc
+  // wyjście z przemiatania nie jest możliwe przez zmianę nazwy mapy.
+  const DOTYKAJA_EVENT_TYPE = PRZEMIATANE
+    .filter((p) => /event_type/.test(zrodlo(p)) && !EKRANY_Z_RODZAJEM.includes(p));
+  console.log(`   (A7-3) przemiatam ${EKRANY_Z_RODZAJEM.length} ekranów z etykietami rodzaju: `
+    + EKRANY_Z_RODZAJEM.map((p) => p.split('/').pop()).join(', '));
+  console.log(`   (A7-3) dotyka \`event_type\` bez słownika etykiet (${DOTYKAJA_EVENT_TYPE.length}): `
+    + DOTYKAJA_EVENT_TYPE.map((p) => p.split('/').pop()).join(', '));
+
+  const rysujaInnymSlownikiem = DOTYKAJA_EVENT_TYPE
+    .filter((p) => /[A-Z_]+LABELS\s*\[[^\]]*event_type/.test(zrodlo(p)));
+  check('(A7-3) ⛔ nikt nie rysuje rodzaju DRUGIM słownikiem, żeby wyjść z przemiatania',
+    rysujaInnymSlownikiem.length === 0, `rysują po swojemu: ${rysujaInnymSlownikiem.join(', ')}`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ (E2-5) SUROWA WARTOŚĆ Z BAZY JAKO NAZWA — CAŁE REPOZYTORIUM
+// ═══════════════════════════════════════════════════════════════════
+// Pas A7 opisał chorobę wąsko: „`EVENT_TYPE_LABELS[e.event_type] || e.event_type`
+// w trzech plikach appki". Pomiar 15.08.2026 (pas E2, detektor niżej puszczony
+// po `app/(tabs)`, `components/` i `lib/`) pokazuje, że to jest choroba
+// OGÓLNA, a nie sprawa jednej kolumny: **20 miejsc w 10 plikach**.
+//
+// ⛔ Dlatego ten strażnik nie pyta już o `event_type`. Pyta o WZORZEC:
+// „słownik zapytany kluczem, a przy pudle oddający ten sam klucz". Taki
+// zapis nigdy nie jest poprawny — zawsze znaczy „gdy nie mam słowa, pokażę
+// zawodnikowi identyfikator z bazy i będzie wyglądał jak słowo".
+//
+// ⚠️ CZEGO TA ASERCJA NIE UMIE: nie widzi mapowania rozbitego na kilka linii
+// ani zrobionego funkcją pomocniczą. Łapie zapis, który ludzie naprawdę piszą.
+{
+  check('(E2-5) (strażnik strażnika) detektor zapala się na wzorcu, który zna z historii',
+    surowaWartoscJakoNazwa('const x = EVENT_TYPE_LABELS[e.event_type] || e.event_type;').length === 1
+    && surowaWartoscJakoNazwa('const x = SESSION_TYPE_LABELS[row.session_type] ?? row.session_type;').length === 1
+    && surowaWartoscJakoNazwa("const t = GAME_TYPE_LABELS[gameType] || 'Mecz';").length === 0
+    && surowaWartoscJakoNazwa('const p = POSITION_PROFILES[key] ?? null;').length === 0,
+    'detektor nie odróżnia surowej wartości od porządnego zapasowego słowa');
+
+  const nazwyDlugu = new Set(DLUG_SUROWEJ_WARTOSCI.map((d) => d.plik));
+
+  check('(E2-5) (strażnik strażnika) każdy plik z listy długu naprawdę istnieje',
+    DLUG_SUROWEJ_WARTOSCI.every((d) => existsSync(join(root, d.plik))),
+    DLUG_SUROWEJ_WARTOSCI.filter((d) => !existsSync(join(root, d.plik))).map((d) => d.plik).join(', '));
+
+  check('(E2-5) (strażnik strażnika) przemiatam trzy katalogi, nie jeden',
+    PRZEMIATANE.some((p) => p.startsWith('app/'))
+    && PRZEMIATANE.some((p) => p.startsWith('components/'))
+    && PRZEMIATANE.some((p) => p.startsWith('lib/')),
+    `przemiatanych plików: ${PRZEMIATANE.length}`);
+
+  // ── ⭐ SEDNO: każdy przemiatany plik SPOZA listy długu ma być czysty.
+  //    Nowy ekran z tym wzorcem zapali się tu SAM, bez edycji tego pliku.
+  const brudneSpozaDlugu = PRZEMIATANE
+    .filter((p) => !nazwyDlugu.has(p))
+    .map((p) => ({ plik: p, trafienia: surowaWartoscJakoNazwa(zrodlo(p)) }))
+    .filter((x) => x.trafienia.length > 0);
+
+  check('⭐ (E2-5) ⛔ żaden plik spoza listy długu nie pokazuje surowej wartości jako nazwy',
+    brudneSpozaDlugu.length === 0,
+    brudneSpozaDlugu.map((x) => `${x.plik}: ${x.trafienia.map((t) => t.tekst).join(' | ')}`).join('\n       '));
+
+  // ── ⚠️ LISTA DŁUGU KASUJE SIĘ SAMA (O68 + zakaz cichego zniknięcia).
+  //    Pozycja naprawiona przez właściciela przestaje mieć prawo tu stać —
+  //    inaczej za tydzień nikt nie odróżni „jeszcze zepsute" od „zapomniane".
+  const stanDlugu = DLUG_SUROWEJ_WARTOSCI
+    .map((d) => ({ ...d, teraz: surowaWartoscJakoNazwa(zrodlo(d.plik)).length }));
+
+  console.log(`   ⚠️ (E2-5) DŁUG ZGŁOSZONY, NIE NAPRAWIONY — cudze pliki, O68 (${stanDlugu.length}):`);
+  for (const d of stanDlugu) console.log(`      • ${d.plik} — ${d.teraz} miejsc — pas: ${d.pas}`);
+  console.log(`   ⚠️ (E2-5) razem miejsc w długu: ${stanDlugu.reduce((s, d) => s + d.teraz, 0)}`);
+
+  const juzNaprawione = stanDlugu.filter((d) => d.teraz === 0);
+  check('(E2-5) ⛔ dług NADAL istnieje — naprawione pozycje wypadają z listy',
+    juzNaprawione.length === 0,
+    `NAPRAWIONE przez właściciela, usuń z DLUG_SUROWEJ_WARTOSCI: ${juzNaprawione.map((d) => d.plik).join(', ')}`);
+
+  // ⚠️ Dług wolno spłacać, nie wolno dokładać. Bez tego plik raz wpisany na
+  // listę stawałby się miejscem, w którym wzorzec może się mnożyć bez śladu.
+  const urosly = stanDlugu.filter((d) => d.teraz > d.zmierzone);
+  check('(E2-5) ⛔ żadna pozycja długu nie UROSŁA od pomiaru 15.08.2026',
+    urosly.length === 0,
+    urosly.map((d) => `${d.plik}: było ${d.zmierzone}, jest ${d.teraz}`).join(', '));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ (E2-6) DZIENNIK: DLACZEGO NIE `opiszRodzaj` — DOWÓD, NIE ZDANIE
+// ═══════════════════════════════════════════════════════════════════
+// Polecenie pasa E2 kazało podpiąć w `dziennik.tsx` funkcję `opiszRodzaj`
+// „co do znaku jak w dzis.tsx". Pomiar `pg_constraint` z 15.08.2026 pokazał,
+// że to są dwie różne dziedziny i że podpięcie zamieniłoby poprawną etykietę
+// „Inne" w komunikat „nie znam". Te asercje trzymają ten pomiar maszynowo,
+// żeby następna sesja nie „naprawiła" dziennika z powrotem.
+{
+  // Zmierzone 15.08.2026 (projekt kqrbztsvepjtggjmmcdx):
+  //   daily_logs_session_type_check → club_training, own_training,
+  //   micro_session, match, other
+  const DZIEDZINA_SESSION_TYPE = [
+    'club_training', 'own_training', 'micro_session', 'match', 'other',
+  ];
+
+  check('(E2-6) ⭐ dziedziny `session_type` i `event_type` NIE są tą samą piątką',
+    !DZIEDZINA_SESSION_TYPE.includes('task')
+    && (RODZAJE_WYDARZEN as readonly string[]).includes('task')
+    && !(RODZAJE_WYDARZEN as readonly string[]).includes('other')
+    && DZIEDZINA_SESSION_TYPE.includes('other'),
+    `session_type=${DZIEDZINA_SESSION_TYPE.join(',')} event_type=${RODZAJE_WYDARZEN.join(',')}`);
+
+  check('(E2-6) ⛔ `opiszRodzaj(\'other\')` mówi „nie znam" — a `other` jest legalną sesją',
+    opiszRodzaj('other').znany === false && czyZnanyRodzaj('match') === true,
+    'gdyby to przestało być prawdą, dziennik MOŻE wołać opiszRodzaj — zmień tę asercję świadomie');
+
+  const dziennik = zrodlo(PLIK_DZIENNIK);
+
+  // Słownik ekranu ma pokrywać dziedzinę bazy CO DO ZNAKU. Rozjazd znaczy,
+  // że gałąź „nie znam" zapali się na wartości, którą appka sama zapisuje.
+  const kluczeSlownika = Array.from(
+    (/SESSION_TYPE_LABELS[^=]*=\s*\{([\s\S]*?)\}/.exec(dziennik)?.[1] ?? '').matchAll(/(\w+)\s*:/g),
+  ).map((m) => m[1]);
+  check('(E2-6) słownik rodzajów sesji w dzienniku pokrywa dziedzinę CHECK-a co do znaku',
+    kluczeSlownika.length === DZIEDZINA_SESSION_TYPE.length
+    && DZIEDZINA_SESSION_TYPE.every((w) => kluczeSlownika.includes(w)),
+    `słownik=${kluczeSlownika.join(',')}`);
+
+  check('(E2-6) dziennik rozstrzyga rodzaj sesji jawną gałęzią, a nie surową wartością',
+    /opiszRodzajSesji\(/.test(dziennik) && !/SESSION_TYPE_LABELS\[[^\]]*\]\s*(\?\?|\|\|)/.test(dziennik),
+    'w dzienniku znów stoi słownik z zapasem w postaci surowej wartości');
+
+  check('(E2-6) dziennik rysuje OBIE gałęzie rodzaju sesji — etykietę i komunikat',
+    /opisRodzaju\.etykieta/.test(dziennik) && /opisRodzaju\.komunikat/.test(dziennik),
+    'rodzaj sesji mógł zniknąć z ekranu zamiast dostać nazwę');
+
+  check('(E2-6) dziennik rysuje OBIE gałęzie miejsca bólu — etykietę i komunikat',
+    /opisMiejsca\.etykieta/.test(dziennik) && /opisMiejsca\.komunikat/.test(dziennik),
+    'miejsce bólu mógł zniknąć z ekranu zamiast dostać nazwę');
+
+  check('(E2-6) nieznana wartość zostawia ślad w konsoli, nie znika po cichu',
+    /opisNieznanejWartosciDoLogu\(/.test(dziennik)
+    && (dziennik.match(/console\.warn\(opisNieznanejWartosciDoLogu\(/g) ?? []).length === 2,
+    'brak logu przy którejś z dwóch nieznanych wartości');
 }
 
 // ═══════════════════════════════════════════════════════════════════

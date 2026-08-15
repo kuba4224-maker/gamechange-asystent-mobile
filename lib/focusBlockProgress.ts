@@ -153,3 +153,174 @@ export function computeFocusBlockProgressState(params: {
     ? { stan: 'WIADOMO', done: 0, total }
     : { stan: 'NIE_WIEM', total };
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-E2 08.2026 (15.08.2026) — DRUGA LICZBA, KTÓREJ NIC NIE KASUJE
+//
+// CO ZMIERZONO 15.08.2026 na produkcji (projekt kqrbztsvepjtggjmmcdx,
+// wyłącznie `select`):
+//
+//   select fb.status, ce.status, count(*) from calendar_events ce
+//     join focus_blocks fb on fb.id = ce.focus_block_id group by 1,2;
+//   → active/scheduled = 12 · completed/cancelled = 12
+//
+//   focus_blocks: 2 wiersze — 1 `active`, 1 `completed`.
+//   Zawodnik 0be298a2… ma DOKŁADNIE JEDEN Blok i jest on `completed`,
+//   a wszystkie jego 12 sesji ma status `cancelled`.
+//
+// CO Z TEGO WYNIKA — DEFEKT JEST OSIĄGALNY DZIŚ, NA PRAWDZIWYM WIERSZU.
+// `computeFocusBlockProgress` dostaje z ekranu WYŁĄCZNIE bloki `active`
+// (`blocksRes` ma `.eq('status','active')`) i WYŁĄCZNIE wydarzenia
+// `scheduled`. Dla tego zawodnika oba zbiory są puste, więc funkcja zwraca
+// `null`, a ekran rysuje zaproszenie do zaplanowania pracy. Zawodnik, który
+// przepracował czterotygodniowy Blok, czyta nazajutrz, że nie ma planu.
+//
+// ⛔ TO JEST DOKŁADNIE TO, CZEGO ZAKAZUJE N1: nagroda cofnięta za coś, co
+// zawodnik zrobił dobrze. Licznik nie „spadł do zera" — on ZNIKNĄŁ, co jest
+// gorsze, bo nie zostawia nawet śladu, że praca była.
+//
+// ⚠️ I DRUGA RZECZ, WAŻNIEJSZA OD PIERWSZEJ: rozszerzenie samego zbioru
+// Bloków o `completed` DEFEKTU NIE NAPRAWIA. Zmierzone wyżej: domknięciu
+// Bloku towarzyszy zmiana statusu jego sesji na `cancelled`, więc drugi filtr
+// — ten po statusie WYDARZENIA — wyciąłby tę pracę tak samo skutecznie.
+// Filtry są dwa i oba trzeba wyjąć.
+//
+// ── CO TA SEKCJA ZMIENIA, A CZEGO NIE ─────────────────────────────────
+// `computeFocusBlockProgress` i `computeFocusBlockProgressState` ZOSTAJĄ
+// NIETKNIĘTE. Odpowiadają na pytanie „ile z sesji BIEŻĄCEGO Bloku mam za
+// sobą" i na takie pytanie odpowiedź MUSI się zerować przy nowym Bloku —
+// inaczej nie jest odpowiedzią na nie. To ta sama różnica, co w pasie C4
+// między licznikiem okna a dorobkiem: tamta liczba opisuje RYTM, ta — DOROBEK.
+//
+//   | liczba                        | czy może zmaleć |
+//   |-------------------------------|-----------------|
+//   | postęp w TYM Bloku            | tak i tak ma być |
+//   | praca we WSZYSTKICH Blokach   | ⛔ NIGDY         |
+//
+// ── ⭐ DLACZEGO TEGO ZAKAZU NIE DA SIĘ ZŁAMAĆ DYSCYPLINĄ ──────────────
+// Wzorzec przeniesiony co do sensu z `lib/nagrodaZaPrace.ts` §7.1: regułę,
+// której nie wolno złamać, wymuszamy KSZTAŁTEM TYPU, a nie czujnością
+// kolejnej sesji.
+//
+//   • funkcja NIE PRZYJMUJE listy Bloków — Bloki wyprowadza z samych sesji,
+//     przez `focus_block_id`. Nie mając wiersza Bloku, nie ma czym odsiać
+//     Bloku domkniętego. Filtr po statusie Bloku jest tu NIE DO NAPISANIA;
+//   • typ sesji (`BlockEventLike`) nie ma pola ze statusem ANI z datą, więc
+//     poniżej tej granicy nie istnieje nic, czym dałoby się policzyć „ile dni
+//     temu" ani odsiać sesji anulowanej.
+//
+// ⛔ ZOSTAJE JEDNO MIEJSCE, W KTÓRYM DA SIĘ TO ZEPSUĆ: wywołanie. Ekran,
+// który poda tu zbiór już odsiany zapytaniem (`status='scheduled'`), dostanie
+// liczbę mniejszą od prawdy. Tego typ nie obroni — broni tego asercja
+// `(E2-4)` w `lib/focusBlockProgress.selftest.ts`, czytająca wywołania
+// w `app/` i `components/`. Nazwa pola jest częścią tej obrony i dlatego jest
+// tak długa: `wszystkieSesjeBlokow` ma się źle czytać, gdy podstawi się pod
+// nią `scheduledEvents`.
+//
+// ⛔ ZERO SERII DNI, PASSY, „CODZIENNIE" I „NIE PRZERWIJ" — tak samo jak
+// w pasie C4. Pilnuje tego asercja czytająca ten plik jako tekst.
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Dorobek zawodnika ze WSZYSTKICH Bloków Skupienia — bieżących i domkniętych.
+ *
+ * ⚠️ TRZECI STAN (R5) NIE MA POLA `sesje`. „Nie udało się policzyć" i „zero
+ * pracy" to dwa różne zdania, a stan, z którego nie da się wyjąć liczby, nie
+ * da się przez pomyłkę narysować jako zero. Ten sam kształt co `nie_policzona`
+ * w `lib/nagrodaZaPrace.ts`.
+ */
+export type DorobekWBlokach =
+  | { rodzaj: 'policzony'; sesje: number; bloki: number }
+  | { rodzaj: 'nie_policzony'; nieodczytaneZrodlo: string };
+
+/** Nazwy źródeł — wchodzą do zdania „nie udało mi się policzyć (…)". */
+export const ZRODLO_SESJE_BLOKOW = 'sesje Bloków z kalendarza';
+export const ZRODLO_POWIAZANIA_WPISOW = 'powiązania wpisów w Dzienniku z sesjami';
+
+/**
+ * Liczy pracę wykonaną we WSZYSTKICH Blokach Skupienia zawodnika.
+ *
+ * ⚠️ `null` w którymkolwiek wejściu znaczy „nie odczytałem", a nie „puste",
+ * i przewraca CAŁY wynik na `nie_policzony`. Uzasadnienie jest to samo, co
+ * w `lib/nagrodaZaPrace.ts` §7.3: liczba wyliczona z jednego źródła zamiast
+ * dwóch jest MNIEJSZA od tej samej liczby sprzed godziny — czyli licznik
+ * malejący przy awarii sieci. To jest ten sam defekt, którego cała ta sekcja
+ * zakazuje, tylko taki, o którym nikt się nie dowie.
+ *
+ * Dowodem wykonania jest DOKŁADNIE TO SAMO, co w `computeFocusBlockProgress`:
+ * powiązanie wpisu w Dzienniku z pozycją kalendarza (`daily_logs
+ * .calendar_event_id`). Jedno rozumienie „zrobione" w całej appce, nie drugie.
+ */
+export function policzPraceWeWszystkichBlokach(params: {
+  /**
+   * WSZYSTKIE sesje Bloków tego zawodnika — bez odsiewania po statusie Bloku
+   * i bez odsiewania po statusie sesji. `null` = odczyt się nie udał.
+   */
+  wszystkieSesjeBlokow: BlockEventLike[] | null;
+  /** WSZYSTKIE powiązania wpisów tego zawodnika. `null` = odczyt się nie udał. */
+  zrobioneEventIds: ReadonlySet<number> | null;
+}): DorobekWBlokach {
+  const { wszystkieSesjeBlokow, zrobioneEventIds } = params;
+  if (wszystkieSesjeBlokow === null) {
+    return { rodzaj: 'nie_policzony', nieodczytaneZrodlo: ZRODLO_SESJE_BLOKOW };
+  }
+  if (zrobioneEventIds === null) {
+    return { rodzaj: 'nie_policzony', nieodczytaneZrodlo: ZRODLO_POWIAZANIA_WPISOW };
+  }
+
+  // Odsiewanie po kluczu wiersza, nie po pozycji w tablicy: ten sam wiersz
+  // podany dwa razy ma się policzyć raz. Bez tego liczba rosłaby od samego
+  // odświeżenia ekranu, czyli byłaby nagrodą za obecność (N1).
+  const policzoneSesje = new Set<number>();
+  const dotknieteBloki = new Set<string>();
+  for (const sesja of wszystkieSesjeBlokow) {
+    if (sesja.focus_block_id === null) continue;
+    if (!zrobioneEventIds.has(sesja.id)) continue;
+    if (policzoneSesje.has(sesja.id)) continue;
+    policzoneSesje.add(sesja.id);
+    dotknieteBloki.add(sesja.focus_block_id);
+  }
+
+  return { rodzaj: 'policzony', sesje: policzoneSesje.size, bloki: dotknieteBloki.size };
+}
+
+// ── Brzmienia drugiej liczby ───────────────────────────────────────────
+// ⚠️⚠️ DO PRZEJRZENIA PRZEZ KUBĘ — treść widoczna dla zawodnika. Zebrane
+// w jednym miejscu i wypisane w nocie pasa E2, sekcja „BRZMIENIA".
+// ⛔ ŻADNE Z NICH NIE JEST DZIŚ NIGDZIE NARYSOWANE: jedyny konsument tego
+// pliku, `app/(tabs)/dzis.tsx`, jest plikiem pasa C4 i pas E2 go nie dotyka.
+// Podpięcie należy do sesji nawigującej — patrz nota, sekcja „POZA PASEM".
+
+/** Odmiana przez liczbę — trzy formy, reguła polska (1 · 2–4 · 5+ i 12–14). */
+export function odmienPrzezLiczbe(n: number, formy: [string, string, string]): string {
+  const setki = Math.abs(n) % 100;
+  const jednosci = Math.abs(n) % 10;
+  if (n === 1) return formy[0];
+  if (jednosci >= 2 && jednosci <= 4 && !(setki >= 12 && setki <= 14)) return formy[1];
+  return formy[2];
+}
+
+export const DOROBEK_BLOKOW_NAGLOWEK = 'PRACA W BLOKACH SKUPIENIA';
+
+/**
+ * ⛔ BEZ ZAKRESU CZASU. Zakres czasu jest dokładnie tym, co pozwala liczbie
+ * zmaleć — to jest ta sama decyzja, co w bloku „TWÓJ DOROBEK" pasa C4.
+ */
+export const dorobekBlokowLiczba = (sesje: number, bloki: number): string =>
+  `${sesje} ${odmienPrzezLiczbe(sesje, ['sesja', 'sesje', 'sesji'])}`
+  + ` · w ${bloki} ${bloki === 1 ? 'Bloku' : 'Blokach'}`;
+
+/**
+ * Stan „policzone, ale jeszcze nic nie ma". ⚠️ Mówi o wiedzy produktu i daje
+ * rzecz do zrobienia (M4); nie ocenia pracy zawodnika (M1).
+ */
+export const DOROBEK_BLOKOW_PUSTO =
+  'Tu pokaże się praca, którą masz za sobą w Blokach Skupienia — licząc także '
+  + 'Bloki już domknięte.';
+
+export const DOROBEK_BLOKOW_RZECZ_DO_ZROBIENIA = NIE_WIEM_RZECZ_DO_ZROBIENIA;
+
+/** Stan „nie udało się policzyć" — inne zdanie niż „jeszcze nic nie ma" (R5). */
+export const dorobekBlokowNiePoliczony = (zrodlo: string): string =>
+  `Nie udało mi się policzyć Twojej pracy w Blokach (nie odczytałem: ${zrodlo}). `
+  + 'To nie znaczy, że jej nie masz — pociągnij w dół.';

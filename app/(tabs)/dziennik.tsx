@@ -51,6 +51,90 @@ const SESSION_TYPE_LABELS: Record<string, string> = {
   micro_session: 'Mikro-sesja', match: 'Mecz', other: 'Inne',
 };
 
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-E2 08.2026 (15.08.2026) — SUROWA WARTOŚĆ Z BAZY NIE WYCHODZI
+// NA EKRAN JAKO NAZWA
+//
+// DO 15.08.2026 W TYM PLIKU STAŁY DWA WYWOŁANIA TEGO SAMEGO WZORCA:
+//   SESSION_TYPE_LABELS[row.session_type] ?? row.session_type
+//   BODY_LOCATION_LABELS[pe.body_location] ?? pe.body_location
+// Wartość z kolumny renderowana zawodnikowi jako etykieta. „club_training"
+// wygląda jak nazwa, więc nikt nigdy nie zgłosi, że nazwy brakuje — reguła R5
+// łamana po cichu. Ten sam wzorzec pas A7 usunął z `kalendarz.tsx` i `dzis.tsx`.
+//
+// ⚠️ DLACZEGO NIE `opiszRodzaj()` Z `lib/meczWKalendarzu.ts` — ZMIERZONE,
+// NIE ZAŁOŻONE. Polecenie pasa E2 kazało podpiąć tamtą funkcję „co do znaku
+// jak w dzis.tsx". Zapytanie do `pg_constraint` 15.08.2026 (projekt
+// kqrbztsvepjtggjmmcdx) pokazuje, że to są DWIE RÓŻNE DZIEDZINY:
+//
+//   daily_logs_session_type_check      → club_training, own_training,
+//                                        micro_session, match, other
+//   chk_calendar_events_event_type     → club_training, own_training,
+//                                        micro_session, match, task
+//
+// Cztery wartości wspólne, po jednej własnej z każdej strony. `opiszRodzaj`
+// zna `task` (którego `session_type` nie przyjmie) i NIE ZNA `other` —
+// a `other` podaje zawodnikowi Picker w tym pliku, kilkadziesiąt linii niżej,
+// pod nazwą „Inne". Podpięcie tamtej funkcji tutaj zamieniłoby poprawną
+// etykietę „Inne" w komunikat „Nie znam tego rodzaju wydarzenia" — czyli
+// produkt przestałby rozumieć wartość, którą sam przed chwilą zapisał.
+// To jest defekt WIĘKSZY niż ten, który polecenie kazało naprawić, i osiągalny
+// dziś, bez żadnej zmiany w bazie. Asercja `(E2-6)` w
+// `lib/meczWKalendarzu.selftest.ts` trzyma ten pomiar maszynowo.
+//
+// Zostaje więc KSZTAŁT rozstrzygnięcia z `opiszRodzaj` — dwie gałęzie plus
+// ślad w konsoli — a dziedzina pochodzi z tego słownika, który ten ekran
+// naprawdę rysuje. ⛔ Słowników NIE SCALAM: polecenie mówi wprost, że to
+// osobna decyzja o brzmieniach.
+// ═════════════════════════════════════════════════════════════════════
+
+type OpisWartosci =
+  | { znany: true; etykieta: string }
+  | { znany: false; surowy: string; komunikat: string };
+
+/**
+ * Rozstrzyga, czy dla wartości z bazy mamy słowo.
+ *
+ * ⛔ Przy braku NIE oddaje surowej wartości jako nazwy — oddaje jawny stan
+ * „nie znam", żeby ekran miał co narysować, a autor po czym poznać, że baza
+ * urosła o wartość, której appka nie zna.
+ *
+ * ⚠️ Zbiór znanych wartości bierze się z SAMEGO SŁOWNIKA, a nie z osobnej
+ * listy obok niego. Dwie listy, które trzeba trzymać zgodne ręcznie, rozjadą
+ * się przy pierwszej zmianie — i to jest ta klasa błędu, która robi to cicho.
+ */
+function opiszWartoscZeSlownika(
+  slownik: Record<string, string>, wartosc: unknown, komunikat: string,
+): OpisWartosci {
+  if (typeof wartosc === 'string' && Object.prototype.hasOwnProperty.call(slownik, wartosc)) {
+    return { znany: true, etykieta: slownik[wartosc] };
+  }
+  const surowy = typeof wartosc === 'string' ? wartosc : String(wartosc);
+  return { znany: false, surowy, komunikat };
+}
+
+// ⚠️⚠️ DWA NOWE BRZMIENIA WIDOCZNE DLA ZAWODNIKA — DO PRZEJRZENIA PRZEZ KUBĘ.
+// Zbudowane co do sensu jak „Nie znam tego rodzaju wydarzenia" z pasa A7.
+const NIEZNANY_RODZAJ_SESJI = 'Nie znam tego rodzaju sesji';
+const NIEZNANE_MIEJSCE_BOLU = 'Nie znam tego miejsca';
+
+function opiszRodzajSesji(wartosc: unknown): OpisWartosci {
+  return opiszWartoscZeSlownika(SESSION_TYPE_LABELS, wartosc, NIEZNANY_RODZAJ_SESJI);
+}
+
+function opiszMiejsceBolu(wartosc: unknown): OpisWartosci {
+  return opiszWartoscZeSlownika(BODY_LOCATION_LABELS, wartosc, NIEZNANE_MIEJSCE_BOLU);
+}
+
+/** Tekst do konsoli — ma nazwać kolumnę i wartość, której appka nie rozumie. */
+function opisNieznanejWartosciDoLogu(
+  kolumna: string, opis: OpisWartosci, znane: string[],
+): string | null {
+  if (opis.znany) return null;
+  return `[PLAN-D-E2] ${kolumna} = „${opis.surowy}" — poza wartościami znanymi appce `
+    + `(${znane.join(', ')}). Wiersz jest w bazie i zawodnik widzi go bez nazwy.`;
+}
+
 // NAPRAWA 05.08.2026: klawiatura decimal-pad na polskim locale (iOS/Android)
 // pokazuje przecinek jako separator dziesiętny, nie kropkę — Number("6,25")
 // to NaN. NaN wysłany do Supabase (JSON.stringify) zamienia się w jawny JSON
@@ -657,7 +741,18 @@ export default function DziennikScreen() {
             }
             if (p.mood_motivation !== undefined) detailParts.push({ text: `nastrój: ${p.mood_motivation}/10`, color: higherIsBetterColor(p.mood_motivation) });
           } else {
-            if (row.session_type) detailParts.push({ text: SESSION_TYPE_LABELS[row.session_type] ?? row.session_type });
+            // ⭐ PLAN-D-E2 15.08.2026 — patrz `opiszRodzajSesji` na górze pliku.
+            if (row.session_type) {
+              const opisRodzaju = opiszRodzajSesji(row.session_type);
+              if (!opisRodzaju.znany) {
+                console.warn(opisNieznanejWartosciDoLogu(
+                  'daily_logs.session_type', opisRodzaju, Object.keys(SESSION_TYPE_LABELS),
+                ));
+              }
+              detailParts.push({
+                text: opisRodzaju.znany ? opisRodzaju.etykieta : opisRodzaju.komunikat,
+              });
+            }
             if (p.duration_minutes !== undefined) detailParts.push({ text: `${p.duration_minutes} min` });
             if (p.rpe !== undefined) detailParts.push({ text: `RPE: ${p.rpe}/10`, color: neutralIntensityColor(p.rpe) });
             if (p.post_fatigue !== undefined) detailParts.push({ text: `zmęczenie: ${p.post_fatigue}/10`, color: neutralIntensityColor(p.post_fatigue) });
@@ -679,7 +774,16 @@ export default function DziennikScreen() {
                 ))}
               </Text>
               {pains.map((pe: any, i: number) => {
-                const loc = BODY_LOCATION_LABELS[pe.body_location] ?? pe.body_location;
+                // ⭐ PLAN-D-E2 15.08.2026 — ta sama reguła, druga surowa wartość
+                // w tym pliku. `pain_entries.body_location` też jest kolumną bazy
+                // i też wychodziła na ekran bez słowa.
+                const opisMiejsca = opiszMiejsceBolu(pe.body_location);
+                if (!opisMiejsca.znany) {
+                  console.warn(opisNieznanejWartosciDoLogu(
+                    'pain_entries.body_location', opisMiejsca, Object.keys(BODY_LOCATION_LABELS),
+                  ));
+                }
+                const loc = opisMiejsca.znany ? opisMiejsca.etykieta : opisMiejsca.komunikat;
                 const side = pe.side === 'left' ? ' (L)' : pe.side === 'right' ? ' (P)' : '';
                 return (
                   <Text key={i} style={[styles.painTag, { color: higherIsWorseColor(pe.intensity) }]}>
