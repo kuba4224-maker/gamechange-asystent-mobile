@@ -136,7 +136,35 @@ import { toLocalDateStr, DAYS_OF_WEEK } from '../../lib/date-utils';
 // JEDNA DROGA B2 08.08.2026 — jedno źródło nazw segmentów (lib/labels.ts);
 // lokalna kopia 13 nazw usunięta, treść niezmieniona co do znaku.
 import { SEGMENT_LABELS } from '../../lib/labels';
-import { computeFocusBlockProgress, type FocusBlockProgress } from '../../lib/focusBlockProgress';
+// ⭐ PLAN-D-F1 08.2026 (15.08.2026) — SILNIK NA EKRAN.
+//
+// Do tego pasa ten plik importował WYŁĄCZNIE `computeFocusBlockProgress`,
+// czyli jedną funkcję z pięciu, które `lib/focusBlockProgress.ts` oferuje.
+// Pozostałe były zbudowane, sprawdzone 63 asercjami i NIEWIDOCZNE: pas A1
+// dołożył 14.08 trzeci stan „NIE WIEM" i zostawił w komentarzu zdanie
+// „podmiana wywołania jest KONTRAKTEM dla pasa T", a pas E2 dołożył 15.08
+// drugą liczbę i sam napisał: „druga liczba tego pasa też bez konsumenta —
+// wzorzec, nie przypadek". Ten import jest wykonaniem obu tych kontraktów.
+//
+// ⛔ `computeFocusBlockProgress` NIE JEST TU JUŻ IMPORTOWANE i to nie jest
+// sprzątanie: dopóki stało w tym pliku, każdy, kto poprawiał ekran, miał pod
+// ręką wersję BEZ trzeciego stanu i wybierał ją, bo była krótsza. Funkcja
+// zostaje w `lib/` (woła ją `computeFocusBlockProgressState` w środku, ma
+// własne asercje), ale ekran nie ma już jak jej wybrać.
+import {
+  computeFocusBlockProgressState,
+  policzPraceWeWszystkichBlokach,
+  NIE_WIEM_TYTUL,
+  NIE_WIEM_POWOD,
+  DOROBEK_BLOKOW_NAGLOWEK,
+  DOROBEK_BLOKOW_PUSTO,
+  DOROBEK_BLOKOW_RZECZ_DO_ZROBIENIA,
+  dorobekBlokowLiczba,
+  dorobekBlokowNiePoliczony,
+  type BlockEventLike,
+  type FocusBlockProgressState,
+  type DorobekWBlokach,
+} from '../../lib/focusBlockProgress';
 // WIEDZA B4 08.08.2026 — wszystkie reguły podpowiedzi (bramka wiekowa A9,
 // rozróżnienie R5, wybór jednej z kilkunastu) siedzą w czystych funkcjach
 // z własnym selftestem. Tutaj zostaje wyłącznie zapytanie i rysowanie.
@@ -249,7 +277,11 @@ import {
 // który nic nie zaplanował, I zawodnikowi, któremu wygasł dostęp i którego
 // wpisu baza i tak by nie przyjęła. To są dwie różne rzeczy i od tej rundy
 // mają dwa różne zdania. Rozstrzygnięcie: `lib/trzyPustki.ts`.
-import { rozpoznajPustke, opisPustkiDoLogu } from '../../lib/trzyPustki';
+// ⭐ PLAN-D-F1 15.08.2026 — doszło `opisBleduOdczytuDoLogu`: JEDNA postać logu
+// nieudanego odczytu w całym repozytorium (ta sama, której używają pasy C3,
+// C3b i E1). Druga, pisana własnymi słowami, rozjechałaby się z pierwszą
+// i wtedy `grep` po logach przestałby znajdować połowę awarii.
+import { rozpoznajPustke, opisPustkiDoLogu, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 import { czytajStanDostepu, RPC_STAN_DOSTEPU } from '../../lib/dostepKonta';
 // ZADANIE E2 12.08.2026 — punkt pomocy wyżej w kontuzji i ścieżce wyjścia.
 // Stąd idzie WYŁĄCZNIE prośba o otwarcie tego samego, jedynego modala
@@ -468,7 +500,16 @@ type WierszDziennika = {
  */
 type DaneEkranu = {
   wejscia: Omit<WejsciaKolejki, 'jednaOdpowiedz' | 'dodatkowi'>;
-  wydarzeniaDnia: CalEvent[];
+  /**
+   * ⭐ PLAN-D-F1 15.08.2026 — `null` znaczy ODCZYT SIĘ NIE UDAŁ i nie ma czego
+   * zostawić z poprzedniego odświeżenia. Pusta tablica znaczy „odczytałem
+   * i nic dziś nie ma". Do 15.08 obie te rzeczy były tą samą pustą tablicą,
+   * bo lista powstawała z `(eventsRes.data ?? [])` — i zawodnik z trzema
+   * treningami w kalendarzu czytał po awarii „Nic zaplanowanego na dziś."
+   */
+  wydarzeniaDnia: CalEvent[] | null;
+  /** ⭐ PLAN-D-F1 — czy ostatni odczyt wydarzeń przeszedł. Rozstrzyga czwarty rodzaj pustki. */
+  odczytWydarzenUdanySie: boolean;
   /**
    * ⭐ PLAN-D-B4 — SZEŚĆ WEJŚĆ PRODUCENTA WGLĄDÓW. `dzis` nie stoi tutaj:
    * bierze się z `wejscia.dzis`, żeby ranker i producent wglądów nie mogły
@@ -511,6 +552,20 @@ type DaneEkranu = {
    * przy każdym renderze, z wierszy, które już są w bazie.
    */
   wejsciaNagrody: WejscieNagrody;
+  /**
+   * ⭐ PLAN-D-F1 15.08.2026 — WSZYSTKIE sesje Bloków tego zawodnika,
+   * BEZ odsiewania po statusie Bloku i BEZ odsiewania po statusie sesji.
+   *
+   * ⛔ TO NIE JEST TO SAMO CO `wydarzeniaDnia` ANI CO `wejscia.kalendarz`:
+   * tamte dwa jadą z odpowiedzi zawężonej do `status in ('scheduled','completed')`,
+   * a praca we wszystkich Blokach MUSI widzieć `cancelled` — zmierzone
+   * 15.08.2026: Blok `completed` ma wszystkie 12 swoich sesji w tym statusie.
+   * Podanie tu zbioru odsianego daje liczbę MNIEJSZĄ OD PRAWDY, czyli dorobek
+   * cofnięty za domknięcie Bloku (N1).
+   *
+   * ⛔ `null` = odczyt się nie udał. Pusta tablica = odczytałem i nic nie ma.
+   */
+  sesjeWszystkichBlokow: BlockEventLike[] | null;
 };
 
 type WierszBolu = {
@@ -954,7 +1009,14 @@ export default function DzisScreen() {
   const [focusRec, setFocusRec] = useState<RecommendationRow | null>(null);
   const [otherUnreadCount, setOtherUnreadCount] = useState(0);
   const [openActionableCount, setOpenActionableCount] = useState(0);
-  const [workProgress, setWorkProgress] = useState<FocusBlockProgress>(null);
+  /**
+   * ⭐ PLAN-D-F1 15.08.2026 — TRZY STANY PASA A1 ZAMIAST DWÓCH.
+   * Do 15.08 stało tu `useState<FocusBlockProgress>(null)`, czyli
+   * `{done,total} | null` — kształt, w którym „zrobiłeś zero z dwunastu"
+   * i „nie wiemy, ile z dwunastu zrobiłeś" są TĄ SAMĄ wartością.
+   * `null` nadal znaczy „jeszcze nie czytałem".
+   */
+  const [workProgress, setWorkProgress] = useState<FocusBlockProgressState | null>(null);
   // ⭐ PLAN-D-B2 — JEDEN STAN ZAMIAST DWÓCH. Zawiera wejścia kolejki (wszystko
   // poza `jednaOdpowiedz`, którą ekran liczy dopiero w renderze, i poza
   // `dodatkowi`) oraz dzisiejsze wydarzenia dla karty kalendarza.
@@ -1241,8 +1303,31 @@ export default function DzisScreen() {
       // I ODRZUCONE: jedna tablica dla pięciu konsumentów znaczy, że każdy
       // z nich musi pamiętać o odfiltrowaniu odwołań, a pierwszy, który
       // zapomni, zepsuje się CICHO. Osobna, wąska odpowiedź nie ma tej wady.
+      //
+      // ⭐ PLAN-D-F1 15.08.2026 — DOSZŁA JEDNA KOLUMNA: `focus_block_id`.
+      //
+      // ⚠️ TO JEST ROZSZERZENIE ISTNIEJĄCEGO ZAPYTANIA, NIE NOWE ZAPYTANIE —
+      // ten sam ruch i to samo uzasadnienie, którym B2 dołożył tu `status`
+      // i `scheduled_time`, a B4 `body_location` do `pain_entries`. Koszt:
+      // zero nowych zapytań, zero nowych rund sieci, zero nowych dróg awarii.
+      //
+      // ⛔ DLACZEGO NIE `eventsRes`, KTÓRE `focus_block_id` JUŻ MA. Bo tamto
+      // zapytanie ma `.in('status', ['scheduled','completed'])`, czyli DRUGI
+      // z dwóch filtrów, które kasują pracę zawodnika po domknięciu Bloku.
+      // Zmierzone 15.08.2026 na produkcji: Blok `completed` ma wszystkie 12
+      // swoich sesji w statusie `cancelled`, więc `eventsRes` nie zawiera
+      // z niego ANI JEDNEGO wiersza. Dorobek policzony z tamtej odpowiedzi
+      // byłby MNIEJSZY OD PRAWDY — i to jest dokładnie ta jedna droga, której
+      // typ `BlockEventLike` nie umie zablokować (patrz `lib/focusBlockProgress.ts`,
+      // sekcja PLAN-D-E2, „ZOSTAJE JEDNO MIEJSCE: wywołanie").
+      //
+      // ⛔ DLACZEGO NIE ZDJĄĆ FILTRA Z `eventsRes` — rozważone i odrzucone:
+      // tamta odpowiedź karmi rankera, sześć wejść wglądów, listę „Dziś
+      // w kalendarzu" i pasek postępu Bloku. Każdy z tych konsumentów
+      // policzyłby odwołane wydarzenie jako pracę do zrobienia. To jest ten
+      // sam wybór, który B5 uzasadnił, zakładając to zapytanie.
       supabase.from('calendar_events')
-        .select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,source')
+        .select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,source,focus_block_id')
         .eq('user_id', currentUser.id),
       // ⭐ PLAN-D-B5, NOWE ZAPYTANIE nr 2 — WERDYKTY ZAWODNIKA (pas D1).
       // Ten sam wąski kształt co w `app/(tabs)/kalendarz.tsx` — cztery kolumny,
@@ -1369,11 +1454,37 @@ export default function DzisScreen() {
       && !r.feedback_response).length);
     markShownAsViewed(rec);
 
-    // ⚠️ `?? []` ZOSTAJE WYŁĄCZNIE TU I WYŁĄCZNIE DLA LICZNIKA PRACY, który
-    // miał tę gałąź przed tym pasem i którego ten pas nie przebudowuje.
-    // WEJŚCIE KOLEJKI budowane jest niżej z SUROWEJ odpowiedzi, przez
-    // `wejscieZOdpowiedzi` — patrz sekcja oznaczona „WEJŚCIA KOLEJKI".
-    const events = (eventsRes.data ?? []) as CalEvent[];
+    // ═══════════════════════════════════════════════════════════════
+    // ⭐ PLAN-D-F1 15.08.2026, zadanie F1.3 — OSIEROCONE `?? []` ZNIKA.
+    //
+    // DO TEGO PASA STAŁO TU: `const events = (eventsRes.data ?? []) as CalEvent[];`
+    // z komentarzem „`?? []` ZOSTAJE WYŁĄCZNIE TU (…) i którego ten pas nie
+    // przebudowuje". Pas, który tak napisał, skończył się 15.08 i wypchnął
+    // (`931bb16`); pozycja została na liście `DLUG_ZASTANY` strażnika
+    // `lib/pustkaWCalymRepo.selftest.ts` jako **dług bez właściciela** (E1).
+    //
+    // CO ZAWODNIK CZYTAŁ PRZEZ TO: `events` karmi `wydarzeniaDnia`, czyli
+    // kartę „Dziś w kalendarzu". Nieudany odczyt dawał PUSTĄ TABLICĘ, a pusta
+    // tablica znaczy dla `rozpoznajPustke` „maWpisy: false" — więc zawodnik
+    // z trzema treningami w kalendarzu czytał „Nic zaplanowanego na dziś.",
+    // zdanie z rejestru FAKT O TOBIE, postawione po odczycie, który nie doszedł.
+    //
+    // WZORZEC WZIĘTY CO DO ZNAKU z `PRZEKAZANIE_PAS_C3_15_08_2026.md` §8:
+    // gałąź błędu NIE CZYŚCI listy i NAZYWA to, co się stało. Tu jedno i drugie:
+    //   • `null` ≠ `[]` — trzy stany zamiast dwóch, jak przy `wydarzeniaTygodnia`;
+    //   • lista sprzed nieudanego ODŚWIEŻENIA zostaje (patrz `setDane` niżej —
+    //     gałąź błędu przepisuje `wydarzeniaDnia` z poprzedniego stanu);
+    //   • log z powodem, więc błąd przestaje być niewidoczny;
+    //   • ekran dostaje czwarty rodzaj pustki (`odczytUdanySie: false`), czyli
+    //     „Nie udało się sprawdzić." zamiast zdania o zawodniku.
+    // ═══════════════════════════════════════════════════════════════
+    const events: CalEvent[] | null =
+      eventsRes.error || !Array.isArray(eventsRes.data)
+        ? null
+        : (eventsRes.data as unknown as CalEvent[]);
+    if (events === null) {
+      console.warn(opisBleduOdczytuDoLogu('dzis.load → calendar_events', eventsRes.error));
+    }
 
     // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — STAN DOSTĘPU DO ZAPISU.
     // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE: gdyby RPC `stan_dostepu` padło
@@ -1390,15 +1501,17 @@ export default function DzisScreen() {
     // Cała logika (i uzasadnienie każdej decyzji) siedzi w
     // lib/focusBlockProgress.ts — czysta funkcja, uruchamiana i sprawdzana bez
     // appki przez lib/focusBlockProgress.selftest.ts. Tutaj tylko dane.
+    //
+    // ⭐ PLAN-D-F1 15.08.2026 — SAMO WYWOŁANIE PRZENIOSŁO SIĘ NIŻEJ, do sekcji
+    // „WEJŚCIA TYGODNIA I LICZNIKA", i to nie jest przestawianie mebli.
+    // `computeFocusBlockProgressState` rozstrzyga między „0 z M" a „nie wiemy,
+    // ile z M" DYSKRYMINATOREM, którym jest zbiór powiązań wpisu z sesją —
+    // a UCZCIWY zbiór powiązań (`wpisyDziennikaIds`, z `null` przy nieudanym
+    // odczycie) powstaje dopiero tam. Liczony tutaj, szedłby z
+    // `(dziennikRes.data ?? [])`, czyli z pustego zbioru NIEODRÓŻNIALNEGO od
+    // „żaden wpis nie wskazuje sesji" — i wtedy trzeci stan pasa A1 orzekałby
+    // o zawodniku na podstawie awarii sieci.
     const activeBlocks = (blocksRes.data ?? []) as FocusBlockRow[];
-    setWorkProgress(computeFocusBlockProgress({
-      goalSegmentId: goal?.segment_id ?? null,
-      activeBlocks,
-      scheduledEvents: events, // wyłącznie status='scheduled' — patrz zapytanie wyżej
-      doneEventIds: new Set(((dziennikRes.data ?? []) as WierszDziennika[])
-        .map((l) => l.calendar_event_id)
-        .filter((x): x is number => typeof x === 'number')),
-    }));
 
     setLoading(false);
 
@@ -1560,13 +1673,18 @@ export default function DzisScreen() {
       console.warn(`dzis: nie odczytałem wydarzeń tygodnia — ${powodBledu(tydzienRes.error)}`);
     }
 
-    // ⚠️ ŚWIADOMIE NIE UŻYWAM `doneEventIds` policzonego wyżej dla paska Bloku:
-    // tamten powstaje z `(dziennikRes.data ?? [])`, czyli po nieudanym odczycie
-    // oddaje PUSTY zbiór nieodróżnialny od „żaden wpis nie wskazuje sesji".
-    // Dla plakietek i licznika ta różnica jest cała: pusty zbiór znaczy
-    // „bez wpisu", a `null` znaczy „nie wiemy" — i to są dwa różne zdania
-    // na ekranie. Tamtej linii nie ruszam (należy do innego pasa i do innej
-    // liczby); tutaj liczę to samo drugi raz, uczciwie.
+    // ⭐ PLAN-D-F1 15.08.2026 — TEN ZBIÓR MA OD DZIŚ TRZECIEGO KONSUMENTA
+    // I DLATEGO POPRZEDNI AKAPIT PRZESTAŁ BYĆ PRAWDĄ.
+    //
+    // Do tego pasa stało tu: „ŚWIADOMIE NIE UŻYWAM `doneEventIds` policzonego
+    // wyżej dla paska Bloku (…). Tamtej linii nie ruszam (należy do innego pasa
+    // i do innej liczby); tutaj liczę to samo drugi raz, uczciwie."
+    // ⛔ Ta linia była w tym pliku DRUGIM, NIEUCZCIWYM ROZUMIENIEM „zrobione":
+    // pasek Bloku liczył z `(dziennikRes.data ?? [])`, licznik pracy — stąd.
+    // Dwa zbiory z jednej odpowiedzi, różniące się WYŁĄCZNIE tym, co robią po
+    // awarii. Pas F1 kasuje tamten i podaje TEN do obu liczb o Blokach, bo
+    // to jest ten sam dyskryminator: „czy mechanizm powiązań u tego zawodnika
+    // demonstrowalnie zadziałał". Jedno rozumienie „zrobione" w całym pliku.
     const wpisyDziennikaIds: ReadonlySet<number> | null = (() => {
       if (dziennikRes.error) return null;
       if (!Array.isArray(dziennikRes.data)) return null;
@@ -1578,6 +1696,65 @@ export default function DzisScreen() {
 
     const werdyktyWe = czytajWerdykty({ dane: werdyktyRes.data, blad: werdyktyRes.error });
     if (werdyktyWe.rodzaj !== 'jest') console.warn(`dzis: [PLAN-D-D1] ${werdyktyWe.powod}`);
+
+    // ═══════════════════════════════════════════════════════════════
+    // ⭐ PLAN-D-F1 15.08.2026, zadanie F1.2 — DWIE LICZBY O BLOKACH.
+    //
+    // Obie były policzone przed tym pasem i ŻADNEJ NIKT NIE RYSOWAŁ.
+    // Rejestr obietnic nosił 32 pozycje „KOD GOTOWY"; to są dwie z nich.
+    //
+    // ⛔ DWIE LICZBY, DWA RÓŻNE ZDANIA — I TO JEST CAŁA ISTOTA:
+    //
+    //   | liczba                       | czy może zmaleć | mówi o           |
+    //   |------------------------------|-----------------|------------------|
+    //   | postęp w BIEŻĄCYM Bloku      | tak i tak ma być| tym Bloku        |
+    //   | praca we WSZYSTKICH Blokach  | ⛔ NIGDY        | całej historii   |
+    //
+    // Pierwsza odpowiada na pytanie o RYTM i musi się zerować przy nowym
+    // Bloku — inaczej nie jest odpowiedzią na nie. Druga odpowiada na pytanie
+    // o DOROBEK i zmalenie jest w niej defektem (N1). To jest ta sama para,
+    // co licznik okna (pas D1) i „TWÓJ DOROBEK" (pas C4) piętro niżej.
+    // ═══════════════════════════════════════════════════════════════
+
+    // (1) POSTĘP W BIEŻĄCYM BLOKU — trzy stany pasa A1 zamiast dwóch.
+    // ⛔ `scheduledEvents` DOSTAJE ZBIÓR ODSIANY I TAK MA BYĆ: ta liczba mówi
+    // o pracy DO ZROBIENIA w bieżącym Bloku, a sesja odwołana nie jest pracą
+    // do zrobienia i nie może podbijać mianownika (kontrakt `lib/focusBlockProgress.ts`).
+    // ⚠️ `events === null` (odczyt padł) daje pustą listę wejściową, czyli
+    // `BRAK_PLANU`, czyli MILCZENIE — a nie „0 z M". Kierunek błędu jest tu
+    // jedyny dopuszczalny: po nieudanym odczycie produkt nie stawia zdania.
+    setWorkProgress(computeFocusBlockProgressState({
+      goalSegmentId: goal?.segment_id ?? null,
+      activeBlocks,
+      scheduledEvents: events === null ? [] : events,
+      // ⭐ DYSKRYMINATOR pasa A1. `null` (odczyt powiązań padł) daje pusty
+      // zbiór, czyli NIE_WIEM — jedyny stan, który jest wtedy prawdziwy.
+      // Powodu NIE_WIEM ekran w tym stanie nie rysuje (patrz `renderPracaWBlokach`),
+      // bo zdanie „żaden wpis nie jest jeszcze połączony" byłoby twierdzeniem
+      // o zawodniku postawionym po odczycie, którego nie było.
+      doneEventIds: wpisyDziennikaIds === null ? new Set<number>() : new Set(wpisyDziennikaIds),
+    }));
+
+    // (2) PRACA WE WSZYSTKICH BLOKACH — liczba, której nic nie kasuje.
+    //
+    // ⛔ ZBIÓR MUSI BYĆ PEŁNY: bez odsiewania po statusie Bloku I bez
+    // odsiewania po statusie sesji. Zmierzone 15.08.2026 na produkcji: Blok
+    // `completed` ma wszystkie 12 sesji w statusie `cancelled`, więc każdy
+    // z tych dwóch filtrów Z OSOBNA wystarczy, żeby czterotygodniowa praca
+    // zniknęła z ekranu. Dlatego źródłem jest `tydzienRes` (zapytanie BEZ
+    // filtra statusu), rozszerzone w tym pasie o kolumnę `focus_block_id`.
+    //
+    // ⚠️ NAZWA ZMIENNEJ JEST CZĘŚCIĄ OBRONY, nie ozdobą: asercja `(E2-6)`
+    // w `lib/focusBlockProgress.selftest.ts` czyta argument tego wywołania
+    // i zapala się, gdy trafi w nim na `scheduled`, `active` czy `aktywn`.
+    const sesjeWszystkichBlokow: BlockEventLike[] | null =
+      tydzienRes.error || !Array.isArray(tydzienRes.data)
+        ? null
+        : (tydzienRes.data as unknown as { id: number; focus_block_id: string | null }[])
+          .map((e) => ({ id: e.id, focus_block_id: e.focus_block_id ?? null }));
+    if (sesjeWszystkichBlokow === null) {
+      console.warn(opisBleduOdczytuDoLogu('dzis.load → sesje wszystkich Bloków', tydzienRes.error));
+    }
     // ⬆⬆⬆ WEJŚCIA TYGODNIA I LICZNIKA — KONIEC ⬆⬆⬆
 
     // ═══════════════════════════════════════════════════════════════
@@ -1676,7 +1853,12 @@ export default function DzisScreen() {
     };
     // ⬆⬆⬆ WEJŚCIA NAGRODY ZA PRACĘ — KONIEC ⬆⬆⬆
 
-    setDane({
+    // ⭐ PLAN-D-F1 15.08.2026 — postać FUNKCYJNA `setDane`, i to nie jest styl.
+    // Gałąź nieudanego odczytu wydarzeń przepisuje `wydarzeniaDnia`
+    // z POPRZEDNIEGO stanu, czyli lista sprzed nieudanego ODŚWIEŻENIA zostaje
+    // (wzorzec C3 §8: „gałąź błędu NIE CZYŚCI listy"). Bez dostępu do
+    // poprzedniego stanu nie da się tego zrobić — stąd `(poprzednie) => …`.
+    setDane((poprzednie) => ({
       wejscia: {
         dzis: todayStr,
         glos: stanTygodnia,
@@ -1691,10 +1873,20 @@ export default function DzisScreen() {
       // Karta „Dziś w kalendarzu" — NIETKNIĘTA przez ten pas (EK-12, EK-14).
       // ⚠️ Ta lista bierze się z `events`, a nie z `weKalendarz`, właśnie po to,
       // żeby wydarzenia cykliczne nie zniknęły razem z wejściem rankera.
-      wydarzeniaDnia: events.filter((e) =>
-        e.scheduled_date === todayStr
-        || (!!e.recurrence_rule && e.recurrence_rule.replace('weekly:', '').split(',').includes(todayCode))
-      ),
+      //
+      // ⭐ PLAN-D-F1 — TRZY STANY, NIE DWA. `null` znaczy „odczyt padł", pusta
+      // tablica znaczy „odczytałem i nic dziś nie ma". Po nieudanym ODŚWIEŻENIU
+      // zostaje lista sprzed niego; dopiero gdy nie ma czego zostawić, idzie
+      // `null` i ekran mówi „Nie udało się sprawdzić." zamiast „Nic
+      // zaplanowanego na dziś."
+      wydarzeniaDnia: events === null
+        ? (poprzednie === null ? null : poprzednie.wydarzeniaDnia)
+        : events.filter((e) =>
+          e.scheduled_date === todayStr
+          || (!!e.recurrence_rule && e.recurrence_rule.replace('weekly:', '').split(',').includes(todayCode))
+        ),
+      /** ⭐ PLAN-D-F1 — czy odczyt, z którego wzięła się lista wyżej, PRZESZEDŁ. */
+      odczytWydarzenUdanySie: events !== null,
       // ⭐ PLAN-D-B4 — sześć wejść producenta wglądów, każde w trzech stanach.
       wejsciaWgladow: {
         dziennik: wgDziennik,
@@ -1710,7 +1902,11 @@ export default function DzisScreen() {
       werdykty: werdyktyWe,
       // ⭐ PLAN-D-C4 — WEJŚCIA, NIE WYNIK. Liczby powstają w `useMemo` niżej.
       wejsciaNagrody,
-    });
+      // ⭐ PLAN-D-F1 — WEJŚCIE, NIE WYNIK, z tego samego powodu co wyżej:
+      // liczba wyliczona w `load()` i przechowana w stanie jest drugą kopią
+      // prawdy, która rozjeżdża się przy pierwszym renderze z innym wejściem.
+      sesjeWszystkichBlokow,
+    }));
     // ⬆⬆⬆ WEJŚCIA KOLEJKI — KONIEC ⬆⬆⬆
   }, [currentUser, markShownAsViewed, loadHint, loadNewDose]);
 
@@ -1739,7 +1935,14 @@ export default function DzisScreen() {
     return !d.dane.some((w) => w.dzien === dane.wejscia.dzis);
   }, [dane]);
 
-  const todayEvents: CalEvent[] = dane === null ? [] : dane.wydarzeniaDnia;
+  /**
+   * ⭐ PLAN-D-F1 — `null` znaczy „nie udało się odczytać i nie ma czego
+   * pokazać", a nie „nic dziś nie masz". Przed 15.08 obie te rzeczy były pustą
+   * tablicą. ⚠️ `dane === null` (jeszcze nie czytałem) też daje `null` — ekran
+   * jest wtedy w stanie `loading` i pustki nie rysuje.
+   */
+  const todayEvents: CalEvent[] | null = dane === null ? null : dane.wydarzeniaDnia;
+  const odczytWydarzenUdanySie: boolean | null = dane === null ? null : dane.odczytWydarzenUdanySie;
 
   // ═══════════════════════════════════════════════════════════════════
   // ⭐ PLAN-D-B5 — TYDZIEŃ NA KARCIE (WT-02) I LICZNIK PRACY (WG-28, WG-37).
@@ -1862,6 +2065,32 @@ export default function DzisScreen() {
 
   if (nagroda !== null) console.log(`dzis: ${opisNagrodyDoLogu(nagroda)}`);
 
+  /**
+   * ⭐ PLAN-D-F1 15.08.2026 — PRACA WE WSZYSTKICH BLOKACH.
+   *
+   * ⛔ WYLICZANA W `useMemo` Z WEJŚĆ, nie czytana z kolumny stanu — z tego
+   * samego powodu, co dorobek pasa C4: liczba trzymana w stanie jest liczbą,
+   * którą da się nie zaktualizować albo wyzerować, a ta liczba NIE MA PRAWA
+   * ZMALEĆ. Tu nie ma czego zerować: powstaje przy każdym renderze z wierszy,
+   * które już są w bazie.
+   *
+   * ⛔ JEDEN ARGUMENT, jak przy `policzNagrode`: funkcja nie przyjmuje ani
+   * listy Bloków, ani statusu, ani daty — i to jest cała jej obrona.
+   */
+  const pracaWBlokach: DorobekWBlokach | null = useMemo(
+    () => (dane === null ? null : policzPraceWeWszystkichBlokach({
+      wszystkieSesjeBlokow: dane.sesjeWszystkichBlokow,
+      zrobioneEventIds: dane.wpisyDziennika,
+    })),
+    [dane],
+  );
+
+  if (pracaWBlokach !== null) {
+    console.log(`dzis: [PLAN-D-F1] praca w Blokach — ${pracaWBlokach.rodzaj === 'policzony'
+      ? `${pracaWBlokach.sesje} sesji w ${pracaWBlokach.bloki} Blokach`
+      : `NIE POLICZONA, nie odczytałem: ${pracaWBlokach.nieodczytaneZrodlo}`}`);
+  }
+
   // PIERWSZE URUCHOMIENIE 10.08.2026 — stan „zawodnik zero": ani diagnozy,
   // ani Celu. Świadomie WYMAGA OBU warunków: kto zdążył założyć Cel sam,
   // dostaje ekran Celu jak dotąd — nie odbieramy mu tego, co już zrobił.
@@ -1955,7 +2184,13 @@ export default function DzisScreen() {
     laduje: loading,
     maGardlo: !!priorityGoal,
     etykietaGardla: goalSegmentLabel,
-    maAktywnyBlok: !!workProgress,
+    // ⭐ PLAN-D-F1 — CO DO ZNAKU TO SAMO CO `!!workProgress` PRZED PASEM:
+    // `BRAK_PLANU` zachodzi dokładnie wtedy, gdy `computeFocusBlockProgress`
+    // zwracało `null` (patrz `computeFocusBlockProgressState`, pierwsza linia).
+    // ⛔ `NIE_WIEM` NIE JEST brakiem Bloku: Blok jest, sesje są, nieznana jest
+    // wyłącznie liczba odbytych. Zaliczenie go do „nie ma Bloku" kazałoby
+    // jednej odpowiedzi zaprosić do zaplanowania pracy, którą zawodnik ma.
+    maAktywnyBlok: workProgress !== null && workProgress.stan !== 'BRAK_PLANU',
     nowaPorcjaCzeka: newDoseWaiting,
     rekomendacja: { jest: !!focusRec && !!currentUser, powiazanaZGardlem: isRecLinkedToGoal },
     podpowiedz: hintState,
@@ -2126,11 +2361,18 @@ export default function DzisScreen() {
   // ⚠️ `planLekcjiZnany: null` — planu lekcji nie ma w bazie (zmierzone
   // 14.08.2026: zero tabel %school% / %szkol% / %lesson%), więc gałąź
   // „brak konfiguracji" jest nieosiągalna. Włącza ją pas A3.
+  // ⭐ PLAN-D-F1 15.08.2026 — CZWARTY RODZAJ PUSTKI WCHODZI NA TEN EKRAN.
+  // Do 15.08 `dzis.tsx` wołał `rozpoznajPustke` BEZ `odczytUdanySie` i miał do
+  // tego prawo: pole jest wstecznie zgodne (R9 pasa C3), a lista i tak zawsze
+  // przychodziła jako tablica — bo `?? []` gasiło awarię wcześniej. Po
+  // usunięciu tamtego `?? []` (F1.3) awaria ma wreszcie czym się zameldować.
   const pustkaDzis = rozpoznajPustke({
-    maWpisy: todayEvents.length > 0,
+    maWpisy: todayEvents !== null && todayEvents.length > 0,
     planLekcjiZnany: null,
     moznaZapisywac,
     zakres: 'dzis',
+    // ⛔ `null` (jeszcze nie czytałem) NIE jest `false`. Trzy wartości, nie dwie.
+    odczytUdanySie: odczytWydarzenUdanySie,
   });
   if (pustkaDzis) console.log(`dzis: ${opisPustkiDoLogu(pustkaDzis)}`);
 
@@ -2339,6 +2581,88 @@ export default function DzisScreen() {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-F1, F1.2 — PRACA WE WSZYSTKICH BLOKACH SKUPIENIA.
+  //
+  // Trzecia liczba na tej karcie i trzecia inna odpowiedź:
+  //   • licznik pasa D1  — RYTM ostatnich 14 dni (może zmaleć i tak ma być);
+  //   • „TWÓJ DOROBEK" C4 — cała wykonana praca w punktach (nie maleje);
+  //   • ten blok         — praca w BLOKACH SKUPIENIA, licząc te domknięte.
+  //
+  // ⛔ DLACZEGO OSOBNO OD „TWOJEGO DOROBKU". Dorobek C4 liczy PUNKTY z wag
+  // (wpis = 1, sesja z dowodem = 3), więc odpowiada na pytanie „ile pracy
+  // razem". Ten blok odpowiada na inne: „co mi zostało z Bloków, które
+  // przepracowałem" — i to jest jedyna liczba w appce, która nie znika
+  // w dniu domknięcia Bloku. Zlanie ich w jedną kazałoby wybrać jedną
+  // z dwóch odpowiedzi na dwa różne pytania.
+  //
+  // ⛔ BEZ ZAKRESU CZASU. Zakres czasu jest dokładnie tym, co pozwala liczbie
+  // zmaleć — ta sama decyzja, co w bloku C4 i w typie `BlockEventLike`, który
+  // nie ma pola z datą.
+  // ⛔ ANI JEDNEGO SŁOWA O DNIACH Z RZĘDU, PASSIE, SERII (N1).
+  // ⛔ ZERO PORÓWNANIA Z KIMKOLWIEK (N3). ⛔ ZERO POWIADOMIEŃ.
+  //
+  // ⚠️ WSZYSTKIE BRZMIENIA POCHODZĄ Z `lib/focusBlockProgress.ts` I ANI JEDNO
+  // NIE JEST NOWE. Sześć brzmień pasów A1 i E2 czeka na decyzję Kuby; ten pas
+  // ich UŻYWA dokładnie tak, jak stoją, i nie dokłada siódmego.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderPracaWBlokach() {
+    if (pracaWBlokach === null) return null;
+
+    // ⭐ R5 — „nie udało się policzyć" to INNE ZDANIE niż „jeszcze nic nie ma",
+    // nie to samo z zerem. Typ `nie_policzony` nie ma pola `sesje`, więc zera
+    // nie da się tu narysować nawet przez pomyłkę.
+    if (pracaWBlokach.rodzaj === 'nie_policzony') {
+      return (
+        <View style={styles.licznikCzesc}>
+          <Text style={styles.odpowiedzNaglowek}>{DOROBEK_BLOKOW_NAGLOWEK}</Text>
+          <Text style={styles.licznikBrakPodstawy}>
+            {dorobekBlokowNiePoliczony(pracaWBlokach.nieodczytaneZrodlo)}
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.licznikCzesc}>
+        <Text style={styles.odpowiedzNaglowek}>{DOROBEK_BLOKOW_NAGLOWEK}</Text>
+
+        {/* LICZBA — albo jawne „jeszcze nic tu nie ma", NIE „0 sesji". */}
+        {pracaWBlokach.sesje > 0 ? (
+          <Text style={styles.licznikLiczba}>
+            {dorobekBlokowLiczba(pracaWBlokach.sesje, pracaWBlokach.bloki)}
+          </Text>
+        ) : (
+          <Text style={styles.licznikBrakPodstawy}>{DOROBEK_BLOKOW_PUSTO}</Text>
+        )}
+
+        {/* ⭐ POWÓD STANU „NIE WIEM" — jedyne miejsce, w którym jest napisany.
+            Kafelek Celu mówi „Nie wiemy, ile z M sesji się odbyło" i nie ma
+            miejsca na wyjaśnienie; wyjaśnienie stoi tu, przy liczbie, której
+            dotyczy ta sama przyczyna.
+            ⛔ RYSUJEMY GO WYŁĄCZNIE, GDY ODCZYT POWIĄZAŃ PRZESZEDŁ. Zdanie
+            „żaden wpis nie jest jeszcze połączony z sesją" jest TWIERDZENIEM
+            o danych zawodnika — postawione po odczycie, którego nie było,
+            byłoby zgadywaniem podanym jako pewnik (Z0). Po nieudanym odczycie
+            zawodnik czyta zamiast tego zdanie `nie_policzony` z gałęzi wyżej. */}
+        {workProgress !== null && workProgress.stan === 'NIE_WIEM' ? (
+          <Text style={styles.licznikPodpis}>{NIE_WIEM_POWOD}</Text>
+        ) : null}
+
+        {/* ⭐ M4 — liczba kończy się rzeczą do zrobienia, i jest to DOKŁADNIE
+            TA SAMA rzecz, którą wskazuje trzeci stan pasa A1
+            (`DOROBEK_BLOKOW_RZECZ_DO_ZROBIENIA === NIE_WIEM_RZECZ_DO_ZROBIENIA`).
+            ⛔ JEDNO ZDANIE, NIE DWA — tak zdecydował pas E2, przejmując je co
+            do znaku zamiast pisać własne. Dlatego stoi na ekranie RAZ, tutaj,
+            i jest przyciskiem: obie liczby o Blokach odblokowuje ten sam ruch
+            zawodnika, więc dwa razy to samo zdanie byłoby szumem. */}
+        <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/dziennik')}>
+          <Text style={styles.cardAction}>{DOROBEK_BLOKOW_RZECZ_DO_ZROBIENIA}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   const allRecsLinkLabel = otherUnreadCount > 0
     ? `Wszystkie rekomendacje (${otherUnreadCount} nowe) →`
     : openActionableCount > 0
@@ -2411,7 +2735,20 @@ export default function DzisScreen() {
                   na to, w którym zawodnik szuka odpowiedzi „co dziś zrobić".
                   ⚠️ KAFELEK ZOSTAJE PIERWSZY (decyzja Kuby z 06.08.2026) i nadal
                   jest w całości przyciskiem do szczegółów wąskiego gardła. */}
-              {workProgress && widokDzis.pokazacPostepPracy ? (
+              {/* ⭐ PLAN-D-F1 15.08.2026 — TRZECI STAN WCHODZI NA KAFELEK.
+                  Do 15.08 stało tu `{workProgress.done} z {workProgress.total}
+                  sesji zrobione` i była to JEDYNA gałąź. Zmierzone tego dnia na
+                  produkcji: `daily_logs.calendar_event_id` jest puste w 10 na
+                  10 wpisach, więc zawodnik `8d7e1ebb…` czytał „0 z 12 sesji
+                  zrobione" — zdanie z rejestru FAKT O TOBIE, twierdzące, że nie
+                  odbył ani jednej sesji, podczas gdy prawdą jest, że NIE WIEMY.
+                  Pas A1 nazwał to złamaniem Z0 i naprawił w bibliotece 14.08;
+                  kontrakt „podmiana wywołania należy do pasa T" stał
+                  niewykonany dobę. To jest jego wykonanie.
+                  ⛔ PASEK RYSUJE SIĘ WYŁĄCZNIE PRZY `WIADOMO`. Pasek na 0%
+                  obok zdania „nie wiemy" byłby tym samym kłamstwem, tylko
+                  narysowanym zamiast napisanym. */}
+              {workProgress && workProgress.stan === 'WIADOMO' && widokDzis.pokazacPostepPracy ? (
                 <>
                   <Text style={styles.workText}>
                     {workProgress.done} z {workProgress.total} sesji zrobione
@@ -2420,6 +2757,9 @@ export default function DzisScreen() {
                     <View style={[styles.workFill, { width: `${Math.round((workProgress.done / workProgress.total) * 100)}%` }]} />
                   </View>
                 </>
+              ) : null}
+              {workProgress && workProgress.stan === 'NIE_WIEM' && widokDzis.pokazacPostepPracy ? (
+                <Text style={styles.workText}>{NIE_WIEM_TYTUL(workProgress.total)}</Text>
               ) : null}
             </>
           ) : (
@@ -2764,7 +3104,13 @@ export default function DzisScreen() {
                     <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
                   </>
                 ) : (
-                  todayEvents.map((e) => {
+                  // ⭐ PLAN-D-F1 — `?? []` NIE WRACA TU TYLNYMI DRZWIAMI.
+                  // `pustkaDzis` jest `null` wyłącznie wtedy, gdy `maWpisy`
+                  // było prawdą, czyli gdy `todayEvents` NIE JEST `null`
+                  // i ma co najmniej jeden wiersz. `(todayEvents ?? [])`
+                  // zamieniłoby tę gwarancję w ciszę — i wtedy stan „nie udało
+                  // się sprawdzić" renderowałby się jako pusty blok.
+                  (todayEvents === null ? [] : todayEvents).map((e) => {
                     // ⚠️ PLAN-D 14.08.2026 — DO DZIŚ STAŁO TU
                     // `EVENT_TYPE_LABELS[e.event_type] || e.event_type`.
                     // Rodzaj spoza piątki znanej appce (dołożony do CHECK-a w bazie
@@ -2801,6 +3147,14 @@ export default function DzisScreen() {
                 ⛔ Zero dotknięć (P0): zawodnik, który wrócił po tygodniu
                 choroby, ma zobaczyć BEZ KLIKANIA, że nic nie stracił. */}
             {renderNagrodaZaPrace()}
+
+            {/* ── ⭐ F1.2: PRACA WE WSZYSTKICH BLOKACH SKUPIENIA ────────
+                Trzecia liczba i trzecia inna odpowiedź. ⛔ Zero dotknięć (P0):
+                zawodnik, który wczoraj domknął czterotygodniowy Blok, ma
+                zobaczyć BEZ KLIKANIA, że praca z niego nie zniknęła razem
+                z Blokiem. Do 15.08 nie widział tu NIC — funkcja istniała
+                w `lib/` i nie miała ani jednego konsumenta. */}
+            {renderPracaWBlokach()}
 
             {/* NAWIGACJA B3 08.08.2026 — to jest JEDYNE wejście do Kalendarza
                 po zabraniu jego zakładki z paska, więc link musi nazywać obie

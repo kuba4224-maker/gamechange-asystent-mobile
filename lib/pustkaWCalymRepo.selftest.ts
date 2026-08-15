@@ -126,31 +126,35 @@ const PLIKI_PRZEMIATANE = WSZYSTKIE_PLIKI.filter((p) => !czyPomijamy(p));
 type PozycjaDlugu = { klucz: string; kto: string; co: string };
 
 const DLUG_ZASTANY: PozycjaDlugu[] = [
-  // ⭐ PLAN-D-E1 15.08.2026 — PIĘĆ POZYCJI ZDJĘTYCH, DWIE ZOSTAJĄ.
+  // ⭐ PLAN-D-F1 15.08.2026 — DWIE OSTATNIE POZYCJE ZDJĘTE. LISTA JEST PUSTA.
   //
-  // Zdjęte (naprawione w pasie E1): `lib/matchSegmentSelection.ts`,
-  // `lib/livingDiagnosisPulses.ts` i trzy miejsca w
-  // `components/FocusBlockPlanner.tsx`. Zapadka w dół zapaliła się dokładnie
-  // wtedy, kiedy miała — po naprawie, przed usunięciem ich stąd — i to jest
-  // jedyny dowód, że ta lista nie gnije.
+  // Historia tej listy, bo jest w niej cała treść trzech pasów:
+  //   • C3b (15.08) zmierzył 7 trafień w całym repozytorium i wpisał je tutaj
+  //     zamiast naprawiać — polecenie kazało ZMIERZYĆ dziurę, nie zasypać;
+  //   • E1  (15.08) naprawił pięć „niczyich miejsc" i zdjął je stąd. Zapadka
+  //     w dół zapaliła się dokładnie wtedy, kiedy miała: po naprawie, przed
+  //     usunięciem pozycji;
+  //   • F1  (15.08) naprawił dwie ostatnie — `dzis.tsx :: (poziom modułu)`
+  //     (`eventsRes.data ?? []`) i `profil.tsx :: loadProfile`
+  //     (`injuryRes.data ?? []`). Obie były DŁUGIEM BEZ WŁAŚCICIELA: pasy C4
+  //     i L2 skończyły się i wypchnęły (`931bb16`, `1ad6eaf`), a defekty
+  //     zostały. Zapadka w dół zapaliła się i tu — dosłownie:
+  //     „NAPRAWIONE, usuń z DLUG_ZASTANY: app/(tabs)/dzis.tsx :: (poziom
+  //     modułu) | app/(tabs)/profil.tsx :: loadProfile".
   //
-  // ⚠️ DWIE ZOSTAJĄCE MIAŁY OPIS, KTÓRY PRZESTAŁ BYĆ PRAWDĄ, I ZOSTAŁ POPRAWIONY
-  // POMIAREM, NIE Z PAMIĘCI. C3b zapisał je jako „PAS W LOCIE". Zmierzone
-  // 15.08.2026 ok. 17:20 CEST: oba pasy są WYPCHNIĘTE (`1ad6eaf` L2, `931bb16`
-  // C4, oba w `origin/main`), a mimo to **oba defekty nadal są w kodzie** —
-  // ten strażnik znajduje je na tym samym `main`. Czyli nie są już „w locie";
-  // są długiem bez właściciela. Zostawienie ich z etykietą „w locie" kazałoby
-  // następnemu pasowi czekać na coś, co już się skończyło (**O55**).
-  {
-    klucz: 'app/(tabs)/dzis.tsx :: (poziom modułu)',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — pas C4 WYPCHNIĘTY (`931bb16`), defekt ZOSTAŁ. Zmierzone 15.08.2026 przez E1',
-    co: '`eventsRes.data ?? []` przy odczycie kalendarza',
-  },
-  {
-    klucz: 'app/(tabs)/profil.tsx :: loadProfile',
-    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — pas L2 WYPCHNIĘTY (`1ad6eaf`), defekt ZOSTAŁ. Zmierzone 15.08.2026 przez E1',
-    co: '`injuryRes.data ?? []` — historia kontuzji po nieudanym odczycie wygląda jak jej brak',
-  },
+  // ⛔ PUSTA LISTA JEST TU STANEM DOCELOWYM, A NIE AWARIĄ — ale WYŁĄCZNIE
+  // wtedy, gdy przemiatanie nie znajduje ani jednego trafienia. Pilnuje tego
+  // asercja „pusty dług jest dozwolony TYLKO przy zerze trafień" niżej: bez
+  // niej ktoś mógłby wyciszyć strażnika, kasując listę zamiast defektów.
+  //
+  // ⚠️ I RZECZ, KTÓRA KOSZTOWAŁA PAS F1 OSOBNĄ POPRAWKĘ (**O71**, znalezisko
+  // E1 §10 zastosowane do jego własnego strażnika): TRZY ASERCJE TEGO PLIKU
+  // BYŁY NAPISANE PRZY MILCZĄCYM ZAŁOŻENIU, ŻE DŁUG NIGDY NIE BĘDZIE PUSTY —
+  // „reguła w ogóle coś znajduje" (≥1 trafienie w repozytorium), „dług jest
+  // policzony" (≥1 pozycja) i mutacja M2 (celowała w istniejącą pozycję).
+  // Wszystkie trzy zgasłyby albo zapaliły się na SUKCESIE. Naprawa kodu
+  // potrafi wyciszyć test mutacyjny, bo zabiera mu materiał — i dlatego
+  // materiał tych trzech asercji jest od dziś SYNTETYCZNY, nie prawdziwy.
 ];
 
 const KLUCZE_DLUGU = new Set(DLUG_ZASTANY.map((d) => d.klucz));
@@ -169,6 +173,58 @@ type Zasady = {
 };
 
 type Znalezione = { klucz: string; postac: string; fragment: string };
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-F1 15.08.2026 — PRÓBKI WZORCOWE, czyli sprawdzian dla DETEKTORA
+// ═════════════════════════════════════════════════════════════════════
+//
+// ⛔ PO CO TO ISTNIEJE — i to jest najważniejsza zmiana tego pasa w tym pliku.
+//
+// Do 15.08 „czy detektor w ogóle działa" sprawdzała asercja
+// *„reguła w ogóle coś znajduje — inaczej milczy przez błąd, nie przez
+// czystość"*, czyli warunek `znalezione.length > 0` NA PRAWDZIWYM
+// REPOZYTORIUM. Póki dług był niepusty, działało. **Pas F1 naprawił dwa
+// ostatnie miejsca i ta asercja zapaliła się NA SUKCESIE** — powiedziała
+// „zero trafień w całym repozytorium jest podejrzane", w chwili gdy zero
+// trafień było dokładnie tym, po co ten strażnik powstał.
+//
+// Strażnik, który świeci na czerwono, gdy repozytorium jest czyste, zostanie
+// wyciszony przy pierwszej okazji — i wtedy przestanie pilnować czegokolwiek.
+//
+// ⭐ ROZWIĄZANIE JEST MOCNIEJSZE OD TEGO, CO ZASTĄPIŁO. Detektor dostaje dwie
+// próbki, których treść znamy: jedną, na której MUSI się zapalić, i jedną, na
+// której MUSI milczeć. To sprawdza go bez względu na to, czy repozytorium jest
+// brudne — a przy okazji utrzymuje przy życiu mutacje M5 i M6, które oślepiają
+// regułę na jedną z dwóch postaci wzorca i po opróżnieniu długu nie miałyby
+// się na czym wyłożyć (**O71**).
+//
+// ⚠️ PRÓBKI SĄ SYNTETYCZNE I TAK MA BYĆ: materiał, który znika razem z naprawą
+// kodu, jest materiałem, na którym nie da się oprzeć testu mutacyjnego.
+
+/** Ma trafić — postać „niezauważony": `?? []` przy odczycie bez pytania o `.error`. */
+const PROBKA_TRAFIA_NIEZAUWAZONY =
+  'export async function probaNiezauwazona() {'
+  + ' const res = await supabase.from("x").select("*");'
+  + ' const rows = res.data ?? []; return rows; }';
+
+/** Ma trafić — postać „gałąź": `catch`, który czyści listę i milczy. */
+const PROBKA_TRAFIA_GALAZ =
+  'const probaGalaz = useCallback(async () => {'
+  + ' try { const { data, error: err } = await q(); if (err) throw err; setPozycje(data); }'
+  + ' catch { setPozycje([]); } }, []);';
+
+/**
+ * ⛔ MA NIE TRAFIĆ. Ten sam `?? []`, ale błąd JEST przeczytany tuż obok —
+ * czyli dokładnie ten kształt, który pasy C3, C3b, E1 i F1 zostawiały jako
+ * poprawny. Bez tej próbki „detektor działa" znaczyłoby tylko „detektor
+ * cokolwiek znajduje", a detektor trafiający we wszystko jest bezużyteczny
+ * tak samo jak ten, który nie trafia w nic.
+ */
+const PROBKA_NIE_TRAFIA =
+  'export async function probaCzysta() {'
+  + ' const res = await supabase.from("x").select("*");'
+  + ' if (res.error) { console.warn("ODCZYT PADŁ", res.error.message); return null; }'
+  + ' const rows = res.data ?? []; return rows; }';
 
 function przemiec(z: Zasady): Znalezione[] {
   const out: Znalezione[] = [];
@@ -205,8 +261,25 @@ function bateria(z: Zasady): WynikBaterii[] {
     Object.keys(z.zrodla).length >= 50,
     `plików: ${Object.keys(z.zrodla).length}`);
 
-  zapisz('(strażnik strażnika) reguła w ogóle coś znajduje — inaczej milczy przez błąd, nie przez czystość',
-    znalezione.length > 0, 'zero trafień w całym repozytorium jest podejrzane, nie dobre');
+  // ⭐ PLAN-D-F1 15.08.2026 — SPRAWDZIAN DETEKTORA NA PRÓBKACH, nie na
+  // brudzie w repozytorium. Do 15.08 stało tu `znalezione.length > 0`, czyli
+  // asercja, która zapala się dokładnie wtedy, gdy repozytorium jest CZYSTE.
+  // Powód i pełne uzasadnienie: nagłówek przy `PROBKA_TRAFIA_*` wyżej.
+  const trafiaNiezauwazony = z.szukaj(PROBKA_TRAFIA_NIEZAUWAZONY);
+  const trafiaGalaz = z.szukaj(PROBKA_TRAFIA_GALAZ);
+  const nieTrafia = z.szukaj(PROBKA_NIE_TRAFIA);
+
+  zapisz('⭐ (strażnik strażnika) detektor ZAPALA SIĘ na próbce „niezauważony błąd"',
+    trafiaNiezauwazony.some((t) => t.postac === 'niezauwazony'),
+    `postacie: ${trafiaNiezauwazony.map((t) => t.postac).join(', ') || '(zero trafień)'}`);
+
+  zapisz('⭐ (strażnik strażnika) detektor ZAPALA SIĘ na próbce „gałąź czyszcząca listę"',
+    trafiaGalaz.some((t) => t.postac === 'galaz'),
+    `postacie: ${trafiaGalaz.map((t) => t.postac).join(', ') || '(zero trafień)'}`);
+
+  zapisz('⛔ (strażnik strażnika) detektor MILCZY na `?? []` z przeczytanym błędem obok',
+    nieTrafia.length === 0,
+    `fałszywe trafienie: ${nieTrafia.map((t) => t.postac).join(', ')}`);
 
   // ⛔ Ani jedno trafienie nie jest anonimowe (O63).
   const bezNazwy = znalezione.filter((t) => t.klucz.endsWith(':: ') || t.klucz.includes(':: undefined'));
@@ -274,9 +347,26 @@ console.log('\n2. ⭐ CO ZNALAZŁEM — pełna lista, nazwa pliku i funkcji');
 
   for (const w of bateria(ZASADY_PRAWDZIWE)) check(w.label, w.ok, w.detail);
 
-  check('⭐ dług zastany jest POLICZONY i wypisany, nie schowany',
-    DLUG_ZASTANY.length > 0 && DLUG_ZASTANY.every((d) => d.kto.length > 10 && d.co.length > 20),
+  // ⭐ PLAN-D-F1 15.08.2026 — do 15.08 warunek zaczynał się od
+  // `DLUG_ZASTANY.length > 0`, czyli asercja WYMAGAŁA, żeby dług istniał.
+  // Zapaliła się w chwili, gdy ten pas zdjął z listy dwie ostatnie pozycje —
+  // na sukcesie. Zostaje wymaganie JAKOŚCI opisu (każda pozycja ma właściciela
+  // i defekt), znika wymaganie ILOŚCI.
+  check('⭐ każda pozycja długu ma WŁAŚCICIELA i opis defektu, nie sam klucz',
+    DLUG_ZASTANY.every((d) => d.kto.length > 10 && d.co.length > 20),
     'pozycja bez właściciela albo bez opisu defektu');
+
+  // ⛔ …ale pusta lista NIE MOŻE BYĆ WYGODNYM WYJŚCIEM. Wyciszenie tego
+  // strażnika przez skasowanie listy zamiast defektów zapala TĘ asercję.
+  check('⛔ ⭐ pusty dług jest dozwolony WYŁĄCZNIE przy zerze trafień w repozytorium',
+    DLUG_ZASTANY.length > 0 || znalezione.length === 0,
+    `dług pusty, a przemiatanie znajduje ${znalezione.length}: `
+    + `${znalezione.map((t) => t.klucz).join(' | ')}`);
+
+  console.log(znalezione.length === 0 && DLUG_ZASTANY.length === 0
+    ? '   ⭐ ZERO TRAFIEŃ I PUSTY DŁUG — to jest stan docelowy, nie awaria.\n'
+      + '      Detektor sprawdzony osobno, na próbkach wzorcowych (patrz bateria).'
+    : `   ⚠️ trafień: ${znalezione.length} · pozycji długu: ${DLUG_ZASTANY.length}`);
 
   const niczyje = DLUG_ZASTANY.filter((d) => d.kto.includes('NICZYJ'));
   console.log(`   ⭐ z tego DO ROZDZIELENIA przez sesję nawigującą: ${niczyje.length}`);
@@ -312,10 +402,22 @@ console.log('\n3. ⭐ TEST MUTACYJNY — liczba FAIL-i przy każdej mutacji');
       opis: 'lista długu gnije i nikt nie wie, co jest jeszcze zepsute',
       zasady: {
         ...ZASADY_PRAWDZIWE,
-        // ⚠️ PLAN-D-E1: było `lib/matchSegmentSelection.ts` — plik, który ten pas
-        // NAPRAWIŁ i zdjął z listy, więc mutacja przestałaby cokolwiek udowadniać.
-        // Musi wskazywać na pozycję, która NA LIŚCIE JEST.
-        zrodla: zeZrodlem('app/(tabs)/profil.tsx', 'export const nic = 1;'),
+        // ⚠️ PLAN-D-E1: było `lib/matchSegmentSelection.ts` — plik, który tamten
+        // pas NAPRAWIŁ i zdjął z listy, więc mutacja przestała cokolwiek
+        // udowadniać. E1 przecelował ją na `app/(tabs)/profil.tsx`, czyli na
+        // JEDNĄ Z DWÓCH POZYCJI, KTÓRE WTEDY BYŁY NA LIŚCIE.
+        //
+        // ⭐ PLAN-D-F1 15.08.2026 — I DOKŁADNIE TO SAMO STAŁO SIĘ DRUGI RAZ,
+        // dobę później: ten pas naprawił `profil.tsx`, lista jest pusta,
+        // a mutacja przecelowana na prawdziwą pozycję znowu nie miałaby czego
+        // złapać. **Przecelowywanie jej po każdej naprawie jest samo w sobie
+        // wzorcem, nie przypadkiem** — więc materiał przestaje być prawdziwy.
+        //
+        // Od dziś mutacja wstrzykuje WŁASNY, SYNTETYCZNY klucz długu, którego
+        // nie ma w żadnym źródle. `zniknietе` ma wtedy dokładnie jeden element
+        // niezależnie od tego, co jest w repozytorium — więc zapadka w dół
+        // ma na czym się wyłożyć także wtedy, gdy repozytorium jest czyste.
+        dlug: new Set([...KLUCZE_DLUGU, 'lib/atrapaDlugu.ts :: funkcjaKtorejNieMa']),
       },
     },
     {

@@ -168,6 +168,15 @@ import {
   type StanRaportuRodzica,
   type WierszSubskrypcji,
 } from '../../lib/raportRodzica';
+// ⭐ PLAN-D-F1 08.2026 (15.08.2026), zadanie F1.3 — CZWARTY RODZAJ PUSTKI
+// WCHODZI NA TEN EKRAN. Historia kontuzji powstawała z `injuryRes.data ?? []`,
+// więc nieudany odczyt wyglądał DOKŁADNIE tak samo jak brak kontuzji: zawodnik
+// po dwóch urazach czytał „Brak wpisów w historii kontuzji." Pas L2 skończył
+// się i wypchnął (`1ad6eaf`), a pozycja została w `DLUG_ZASTANY` strażnika
+// `lib/pustkaWCalymRepo.selftest.ts` jako dług bez właściciela (zmierzone
+// przez E1). ⛔ Rozstrzygnięcie NIE JEST tu odtwarzane drugi raz — decyduje
+// `rozpoznajPustke`, ta sama funkcja, którą wołają ekrany pasa C3.
+import { rozpoznajPustke, opisPustkiDoLogu, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 
 // ── Stałe — 1:1 z asystent_app.html (kontrakt, sekcje 1-4) ──
 const POSITIONS = [
@@ -379,6 +388,14 @@ export default function ProfilScreen() {
 
   // Sekcja 8
   const [injuryHistory, setInjuryHistory] = useState<InjuryRow[]>([]);
+  /**
+   * ⭐ PLAN-D-F1 15.08.2026 — TRZY WARTOŚCI, NIE DWIE.
+   * `null` = jeszcze nie czytałem · `true` = odczyt przeszedł, lista jest
+   * prawdziwa · `false` = odczyt padł, a lista (jeśli jakaś jest) pochodzi
+   * sprzed nieudanego odświeżenia. Ten sam kształt co `odczytObszarowUdanySie`
+   * w `components/FocusBlockPlanner.tsx` (pas E1) i `moznaZapisywac` w C3.
+   */
+  const [odczytKontuzjiUdanySie, setOdczytKontuzjiUdanySie] = useState<boolean | null>(null);
 
   const loadProfile = useCallback(async () => {
     // Konwencja z web: load* NIE czyści banerów błędu/OK — patrz kontrakt sekcja 9.
@@ -411,7 +428,24 @@ export default function ProfilScreen() {
       setInjuryModeActive(!!p?.injury_mode_active);
       setInjuryModeCategory(p?.injury_mode_category ?? '');
 
-      setInjuryHistory(injuryRes.data ?? []);
+      // ⭐ PLAN-D-F1 15.08.2026 — DO TEGO PASA STAŁO TU
+      // `setInjuryHistory(injuryRes.data ?? []);`, dwie linie NAD komentarzem,
+      // który mówi „Błąd odczytu NIE udaje pustej historii" o pomiarach wzrostu.
+      // Ta sama reguła, obok, na tej samej paczce `Promise.all` — i akurat ta
+      // jedna gałąź jej nie miała.
+      //
+      // WZORZEC CO DO ZNAKU z `PRZEKAZANIE_PAS_C3_15_08_2026.md` §8: gałąź
+      // błędu NIE CZYŚCI listy (wiersze sprzed nieudanego odświeżenia zostają
+      // — a jeśli to pierwszy odczyt, nie ma czego czyścić) i NAZYWA to, co się
+      // stało: logiem i stanem odczytu, z którego ekran rysuje czwarty rodzaj
+      // pustki zamiast zdania o zawodniku.
+      if (injuryRes.error || !Array.isArray(injuryRes.data)) {
+        console.warn(opisBleduOdczytuDoLogu('profil.loadProfile → injury_history', injuryRes.error));
+        setOdczytKontuzjiUdanySie(false);
+      } else {
+        setInjuryHistory(injuryRes.data as InjuryRow[]);
+        setOdczytKontuzjiUdanySie(true);
+      }
       // Błąd odczytu NIE udaje pustej historii: pusta lista przy błędzie
       // znaczyłaby „nie masz żadnego pomiaru" komuś, kto ma ich pięć (reguła R5).
       if (heightRes.error) {
@@ -913,6 +947,26 @@ export default function ProfilScreen() {
     }
   };
 
+  // ⭐ PLAN-D-F1 15.08.2026, zadanie F1.3 — KTÓRA TO PUSTKA W HISTORII KONTUZJI.
+  //
+  // ⛔ `maWpisy` BIJE WSZYSTKO i to jest decyzja pasa C3, nie moja: ekran,
+  // który MA co pokazać, pokazuje — lista sprzed nieudanego odświeżenia jest
+  // prawdziwsza niż komunikat zamiast niej. Zdanie o awarii wchodzi wyłącznie
+  // tam, gdzie w przeciwnym razie stanęłoby zdanie o zawodniku.
+  //
+  // ⚠️ `moznaZapisywac` bierze się z tego samego `stanDostepu`, który ekran już
+  // czyta — trzy wartości, `null` przy nieodczytanym stanie (fail-open).
+  // ⚠️ `planLekcjiZnany: null` — ta lista nie ma nic wspólnego z planem lekcji.
+  const pustkaKontuzji = rozpoznajPustke({
+    maWpisy: injuryHistory.length > 0,
+    planLekcjiZnany: null,
+    moznaZapisywac: stanDostepu === null || stanDostepu.rodzaj !== 'znany' ? null : stanDostepu.maDostep,
+    odczytUdanySie: odczytKontuzjiUdanySie,
+    daSieOdswiezyc: false,
+    tekstBrakuDanych: 'Brak wpisów w historii kontuzji.',
+  });
+  if (pustkaKontuzji) console.log(`profil: historia kontuzji — ${opisPustkiDoLogu(pustkaKontuzji)}`);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
     <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
@@ -1252,7 +1306,24 @@ export default function ProfilScreen() {
           {/* Historia kontuzji */}
           <View style={{ marginTop: spacing.md }}>
             <Text style={styles.sectionLabel}>Historia kontuzji</Text>
-            {injuryHistory.length === 0 && <Text style={styles.empty}>Brak wpisów w historii kontuzji.</Text>}
+            {/* ⭐ PLAN-D-F1 15.08.2026 — DO TEGO PASA STAŁO TU
+                `{injuryHistory.length === 0 && <Text …>Brak wpisów w historii
+                kontuzji.</Text>}`, czyli JEDNO zdanie na DWIE różne sytuacje.
+                ⛔ Brzmienie „Brak wpisów w historii kontuzji." ZOSTAJE CO DO
+                ZNAKU — wchodzi do `rozpoznajPustke` jako `tekstBrakuDanych`
+                i wychodzi z niej takie samo. Zmienia się wyłącznie to, KIEDY
+                zawodnik je czyta (ten sam ruch, co na siedmiu ekranach C3).
+                ⚠️ `daSieOdswiezyc: false` — ZMIERZONE, nie założone: ten ekran
+                nie ma `RefreshControl` ani `useFocusEffect` (komentarz na
+                górze pliku mówi, dlaczego: odświeżanie nadpisywałoby
+                niezapisane pola formularza). „Pociągnij w dół" byłoby
+                obietnicą, której produkt tu nie dotrzymuje. */}
+            {pustkaKontuzji && (
+              <>
+                <Text style={styles.empty}>{pustkaKontuzji.tekst}</Text>
+                {pustkaKontuzji.cta ? <Text style={styles.empty}>{pustkaKontuzji.cta}</Text> : null}
+              </>
+            )}
             {injuryHistory.map((row) => {
               const loc = BODY_LOCATION_LABELS[row.body_location] ?? row.body_location;
               const side = row.side === 'left' ? ' (L)' : row.side === 'right' ? ' (P)' : '';

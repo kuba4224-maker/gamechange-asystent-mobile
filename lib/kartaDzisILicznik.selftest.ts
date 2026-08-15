@@ -58,7 +58,7 @@
 // więc `tsc` pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
 // ═════════════════════════════════════════════════════════════════════
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -538,6 +538,493 @@ function check(label: string, cond: boolean, detail: string) {
     JSON.stringify(napisy));
 }
 
+// ╔═══════════════════════════════════════════════════════════════════╗
+// ║  ⭐ PLAN-D-F1 08.2026 (15.08.2026) — SILNIK MA TRAFIĆ NA EKRAN     ║
+// ╚═══════════════════════════════════════════════════════════════════╝
+//
+// ── PO CO TA CZĘŚĆ ISTNIEJE — to jest choroba, nie jeden defekt ──────
+//
+// Rejestr obietnic niósł 15.08.2026 **32 pozycje w stanie „KOD GOTOWY"**:
+// zbudowane, sprawdzone asercjami i NIEWIDOCZNE dla zawodnika. Pas E2 dołożył
+// tego dnia dwie kolejne i sam to nazwał: *„druga liczba tego pasa też bez
+// konsumenta — wzorzec, nie przypadek"*.
+//
+//   • `computeFocusBlockProgressState` (pas A1, 14.08) — trzeci stan licznika
+//     Bloku. Komentarz w `lib/focusBlockProgress.ts` mówił wprost, że podmiana
+//     wywołania „jest KONTRAKTEM dla pasa T". Kontrakt stał niewykonany dobę,
+//     a zawodnik `8d7e1ebb…` czytał przez ten czas „0 z 12 sesji zrobione" —
+//     zdanie nieprawdziwe (`daily_logs.calendar_event_id`: 0 z 10);
+//   • `policzPraceWeWszystkichBlokach` (pas E2, 15.08) — jedyna liczba
+//     w appce, której nie kasuje domknięcie Bloku. Zero konsumentów.
+//
+// Pas F1 podpiął obie. ⚠️ ALE SAMO PODPIĘCIE NIE JEST OBRONĄ: następna sesja
+// może je odpiąć jednym `return null`, a suita nadal będzie zielona. Dlatego
+// niżej stoi para asercji, której wcześniej w tym repozytorium nie było:
+//
+//   (F1-1) obie liczby MAJĄ konsumenta w `dzis.tsx` i obie trafiają do <Text>;
+//   (F1-2) ⭐ ASERCJA ODWROTNA — w `lib/` NIE MA funkcji liczącej pracę,
+//          której nikt nie woła. Ta druga jest ważniejsza, bo (F1-1) pilnuje
+//          DWÓCH ZNANYCH liczb, a (F1-2) złapie NASTĘPNĄ, o której dziś nikt
+//          nie wie. To jest strażnik przeciwko wzorcowi, nie przeciwko dwóm
+//          jego wystąpieniom.
+//
+// ⚠️ O71 — CZEGO TA CZĘŚĆ ŚWIADOMIE NIE ROBI. Asercja szukająca frazy
+// w CAŁYM pliku nie pilnuje jej w JEDNEJ instrukcji: `dzis.tsx` ma 3 100 linii
+// i prawie każda fraza gdzieś w nim jest. Pas E1 zmierzył, że dwie mutacje
+// pasa C3b przestały cokolwiek łapać po naprawie i świeciły na zielono.
+// Dlatego niżej wycinane są KONKRETNE instrukcje: ciało `renderPracaWBlokach`,
+// gałąź `WIADOMO` i gałąź `NIE_WIEM` kafelka — i pytanie zadawane jest im,
+// a nie plikowi. Jedynym wyjątkiem jest (F1-4), gdzie polecenie WYMAGA
+// asercji na tekst całego pliku, i ma rację: zakazu N1 nie da się spełnić
+// lokalnie.
+
+const PLIK_PROFIL = 'app/(tabs)/profil.tsx';
+const profilSurowe = readFileSync(join(root, PLIK_PROFIL), 'utf8');
+
+/**
+ * Gałąź „then" wyrażenia `{ warunek ? ( … ) : null }`, wycięta przez
+ * dopasowanie nawiasów od pierwszego `? (` po `igla`.
+ * ⚠️ Po co, skoro jest `blokOd`: gałęzie JSX stoją w nawiasach OKRĄGŁYCH,
+ * nie klamrowych — ta sama pułapka, na której zapaliła się pierwsza wersja
+ * asercji (B5-5) na poprawnym kodzie.
+ */
+function galazJsx(src: string, igla: string): string | null {
+  const od = src.indexOf(igla);
+  if (od < 0) return null;
+  const pyt = src.indexOf('?', od + igla.length);
+  if (pyt < 0) return null;
+  const start = src.indexOf('(', pyt);
+  if (start < 0) return null;
+  let glebokosc = 0;
+  for (let i = start; i < src.length; i++) {
+    if (src[i] === '(') glebokosc++;
+    else if (src[i] === ')') {
+      glebokosc--;
+      if (glebokosc === 0) return src.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Ciało `export function <nazwa>(…)` — do asercji odwrotnej (F1-2).
+ *
+ * ⚠️ NIE MOŻNA TU UŻYĆ SAMEGO `blokOd`, i to nie jest drobiazg: `blokOd` bierze
+ * PIERWSZY `{` po nazwie, a w tym repozytorium prawie każda czysta funkcja ma
+ * podpis `nazwa(params: { … })`. Pierwsza wersja tej funkcji wycinała więc TYP
+ * ARGUMENTU zamiast ciała — i asercja odwrotna oskarżyła
+ * `computeFocusBlockProgress` o brak konsumenta, choć woła je
+ * `computeFocusBlockProgressState` trzy linie niżej. Strażnik oskarżający
+ * poprawny kod zostaje wyciszony przy pierwszej okazji; ta poprawka jest
+ * powodem, dla którego niżej stoi próbka „detektor MILCZY, gdy funkcja ma
+ * konsumenta". Najpierw domykamy NAWIASY OKRĄGŁE podpisu, potem szukamy `{`.
+ */
+function cialoEksportu(src: string, nazwa: string): string | null {
+  const igla = `export function ${nazwa}(`;
+  const od = src.indexOf(igla);
+  if (od < 0) return null;
+  let glebokosc = 1;
+  let i = od + igla.length;
+  for (; i < src.length && glebokosc > 0; i++) {
+    if (src[i] === '(') glebokosc++;
+    else if (src[i] === ')') glebokosc--;
+  }
+  return glebokosc === 0 ? blokOd(src, i) : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// ⭐ (F1-2) DŁUG: funkcje liczące pracę, o których WIEMY, że nikt ich nie woła
+// ─────────────────────────────────────────────────────────────────────
+// ⚠️ Ta lista działa jak `DLUG_ZASTANY` w `lib/pustkaWCalymRepo.selftest.ts`:
+// pozycja, która dostanie konsumenta, ZAPALA strażnika z poleceniem usunięcia
+// jej stąd, a pozycja nowa zapala go z poleceniem podpięcia albo skasowania.
+// Bez zapadki w obie strony „dług zgłoszony" jest miejscem, w którym da się
+// przenocować dowolnie długo.
+const SILNIKI_BEZ_EKRANU: { klucz: string; kto: string; dlaczego: string }[] = [
+  {
+    klucz: 'lib/sladZachowania.ts :: policzSlad',
+    kto: 'runda systematyczności (N1) — zgłoszone przez pas F1 15.08.2026, NIE naprawione (O68)',
+    dlaczego: 'Jedyny konsument, karta „Ostatnie 28 dni, policzone" na ekranie Kalibracji, '
+      + 'został usunięty z produktu 13.08.2026 razem z całą Kalibracją. Plik i tabela '
+      + '`behavioural_trace` zostały ŚWIADOMIE — decyzja jest opisana w nagłówku '
+      + '`lib/sladZachowania.ts` i ma datę. ⚠️ To jest 33. pozycja tej samej choroby, '
+      + 'nie wyjątek od niej: cztery liczniki są policzone, przetestowane i niewidoczne.',
+  },
+];
+
+const KLUCZE_SILNIKOW_BEZ_EKRANU = new Set(SILNIKI_BEZ_EKRANU.map((s) => s.klucz));
+
+type ZasadyF1 = {
+  dzis: string;
+  profil: string;
+  /** `lib/<plik>.ts` → treść. Wstrzykiwane, żeby mutacja nie dotykała dysku. */
+  zrodlaLib: Record<string, string>;
+  /** `app/…` i `components/…` → treść. Konsumenci pierwszego rzędu. */
+  zrodlaEkranow: Record<string, string>;
+  dlugSilnikow: Set<string>;
+};
+
+/**
+ * ⭐ Funkcje liczące pracę, DO KTÓRYCH NIE DA SIĘ DOJŚĆ Z ŻADNEGO EKRANU.
+ *
+ * Osiągalność jest PRZECHODNIA i to nie jest wyrafinowanie dla ozdoby:
+ * `computeFocusBlockProgress` nie jest dziś wołane z żadnego ekranu, ale woła
+ * je `computeFocusBlockProgressState`, które jest — więc jego wynik DOCIERA
+ * do zawodnika. Asercja bez przechodniości oskarżałaby poprawny kod, a strażnik,
+ * który zapala się na poprawnym kodzie, zostaje wyciszony przy pierwszej okazji.
+ *
+ * ⚠️ CZEGO TA FUNKCJA NIE UMIE, napisane wprost: nie rozumie aliasów importu
+ * (`import { policzX as y }`), nie widzi wywołań przez zmienną
+ * (`const f = policzX; f()`), i uznaje wystąpienie nazwy z nawiasem za
+ * wywołanie. Wszystkie trzy dają FAŁSZYWE „ma konsumenta", nie odwrotnie —
+ * czyli mylą się w stronę milczenia. To jest ta sama granica, którą zgłosił
+ * detektor wzorca pustki w `lib/trzyPustki.ts`.
+ */
+function silnikiBezEkranu(z: ZasadyF1): { klucz: string; nazwa: string }[] {
+  const NAZWA_LICZY_PRACE = /^(policz|compute)/;
+
+  // 1. Wszystkie eksportowane funkcje liczące pracę, z ciałami.
+  const funkcje: { klucz: string; plik: string; nazwa: string; cialo: string }[] = [];
+  for (const [plik, src] of Object.entries(z.zrodlaLib)) {
+    const re = /export\s+function\s+([A-Za-z0-9_]+)\s*\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) {
+      const nazwa = m[1];
+      if (!NAZWA_LICZY_PRACE.test(nazwa)) continue;
+      funkcje.push({ klucz: `${plik} :: ${nazwa}`, plik, nazwa, cialo: cialoEksportu(src, nazwa) ?? '' });
+    }
+  }
+
+  const wolaneW = (src: string, nazwa: string) => new RegExp(`\\b${nazwa}\\s*\\(`).test(src);
+
+  // 2. Ziarno: wołane wprost z ekranu.
+  const osiagalne = new Set<string>();
+  for (const f of funkcje) {
+    if (Object.values(z.zrodlaEkranow).some((src) => wolaneW(src, f.nazwa))) osiagalne.add(f.klucz);
+  }
+
+  // 3. Domknięcie przechodnie: wołane z ciała funkcji już osiągalnej.
+  let rosnie = true;
+  while (rosnie) {
+    rosnie = false;
+    for (const f of funkcje) {
+      if (osiagalne.has(f.klucz)) continue;
+      const wolaGoOsiagalny = funkcje.some((g) => osiagalne.has(g.klucz) && g.klucz !== f.klucz && wolaneW(g.cialo, f.nazwa));
+      if (wolaGoOsiagalny) { osiagalne.add(f.klucz); rosnie = true; }
+    }
+  }
+
+  return funkcje.filter((f) => !osiagalne.has(f.klucz)).map((f) => ({ klucz: f.klucz, nazwa: f.nazwa }));
+}
+
+type WynikF1 = { label: string; ok: boolean; detail: string };
+
+function bateriaF1(z: ZasadyF1): WynikF1[] {
+  const r: WynikF1[] = [];
+  const zapisz = (label: string, ok: boolean, detail = '') => r.push({ label, ok, detail });
+
+  // ⚠️ IGŁA MUSI BYĆ JEDNOZNACZNA. `workProgress.stan === 'NIE_WIEM'` występuje
+  // w tym pliku DWA razy: na kafelku Celu i w `renderPracaWBlokach` (warunek
+  // powodu). Pierwsza wersja tej asercji brała pierwsze wystąpienie i pytała
+  // gałąź powodu o tytuł, którego tam nie ma — czyli zapalała się na poprawnym
+  // kodzie. Igła zawiera więc drugi człon warunku, który stoi TYLKO na kafelku.
+  const galazWiadomo = galazJsx(z.dzis, "workProgress.stan === 'WIADOMO' && widokDzis.pokazacPostepPracy");
+  const galazNieWiem = galazJsx(z.dzis, "workProgress.stan === 'NIE_WIEM' && widokDzis.pokazacPostepPracy");
+  const cialoPracy = cialoFunkcji(z.dzis, 'renderPracaWBlokach');
+  const ilePolan = (src: string, nazwa: string) => (src.match(new RegExp(`${nazwa}\\(\\)`, 'g')) || []).length;
+
+  // ── P1 · PIERWSZA LICZBA MA KONSUMENTA I TRZECI STAN JEST NARYSOWANY ──
+  zapisz('⭐ (F1-1) `dzis.tsx` woła `computeFocusBlockProgressState`, a nie wersję bez trzeciego stanu',
+    /\bcomputeFocusBlockProgressState\(/.test(z.dzis)
+    && !/\bsetWorkProgress\(\s*computeFocusBlockProgress\(/.test(z.dzis),
+    'ekran wrócił do `computeFocusBlockProgress` — „nie wiemy, ile z M" znowu rysuje się jako „0 z M"');
+
+  zapisz('⭐ (F1-1) stan `NIE_WIEM` NAPRAWDĘ trafia do `<Text>`, nie tylko jest policzony',
+    galazNieWiem !== null && /<Text[^>]*>\s*\{?\s*NIE_WIEM_TYTUL\(/.test(galazNieWiem),
+    galazNieWiem === null
+      ? 'nie ma gałęzi `stan === \'NIE_WIEM\'` na kafelku Celu'
+      : `gałąź jest, ale nie rysuje tytułu: ${galazNieWiem.replace(/\s+/g, ' ').slice(0, 120)}`);
+
+  // ⛔ O71 — TO JEST ASERCJA NA WYCIĘTĄ INSTRUKCJĘ, NIE NA PLIK. Pasek postępu
+  // narysowany na 0% obok zdania „nie wiemy, ile się odbyło" jest tym samym
+  // kłamstwem co „0 z 12", tylko narysowanym zamiast napisanym.
+  zapisz('⛔ ⭐ (F1-1) pasek postępu rysuje się WYŁĄCZNIE przy `WIADOMO`',
+    galazWiadomo !== null && /styles\.workFill/.test(galazWiadomo)
+    && galazNieWiem !== null && !/styles\.workFill/.test(galazNieWiem),
+    'pasek wjechał do gałęzi „nie wiemy" albo zniknął z gałęzi „wiadomo"');
+
+  // ── P2 · DRUGA LICZBA MA KONSUMENTA I JEST NARYSOWANA ────────────────
+  zapisz('⭐ (F1-1) `dzis.tsx` woła `policzPraceWeWszystkichBlokach`',
+    /\bpoliczPraceWeWszystkichBlokach\(/.test(z.dzis),
+    'praca we wszystkich Blokach nie ma konsumenta — czyli nie istnieje dla zawodnika');
+
+  zapisz('⭐ (F1-1) LICZBA pracy w Blokach jest w `<Text>`, nie tylko policzona',
+    cialoPracy !== null && /<Text[^>]*>\s*\{?\s*dorobekBlokowLiczba\(/.test(cialoPracy),
+    cialoPracy === null ? 'nie ma funkcji `renderPracaWBlokach`' : 'wynik nigdzie nie wchodzi do `<Text>`');
+
+  zapisz('⭐ (F1-1) render pracy w Blokach jest WOŁANY, a nie tylko zdefiniowany',
+    ilePolan(z.dzis, 'renderPracaWBlokach') >= 2,
+    `wystąpień \`renderPracaWBlokach()\`: ${ilePolan(z.dzis, 'renderPracaWBlokach')} `
+    + '(1 = sama definicja, czyli zawodnik tego nie zobaczy)');
+
+  // ── P3 · ⭐ ASERCJA ODWROTNA ─────────────────────────────────────────
+  const bezEkranu = silnikiBezEkranu(z);
+  const noweBezEkranu = bezEkranu.filter((s) => !z.dlugSilnikow.has(s.klucz));
+  const juzPodpiete = [...z.dlugSilnikow].filter((k) => !bezEkranu.some((s) => s.klucz === k));
+
+  zapisz('⭐⛔ (F1-2) ANI JEDNEJ nowej funkcji liczącej pracę, której nikt nie woła',
+    noweBezEkranu.length === 0,
+    `${noweBezEkranu.length} NOWYCH: ${noweBezEkranu.map((s) => s.klucz).join(' | ')} — `
+    + 'podepnij ją do ekranu albo skasuj; trzecia droga („zostawiam, przyda się") '
+    + 'jest tym, jak powstały 32 pozycje „KOD GOTOWY"');
+
+  zapisz('⭐ (F1-2) pozycja długu, która DOSTAŁA konsumenta, wypada z listy',
+    juzPodpiete.length === 0,
+    `PODPIĘTE, usuń z SILNIKI_BEZ_EKRANU: ${juzPodpiete.join(' | ')}`);
+
+  // ⭐ (strażnik strażnika) — bez tego „zero niewidocznych silników" mogłoby
+  // znaczyć „detektor nic nie widzi". Próbki są SYNTETYCZNE, więc nie znikną
+  // razem z naprawą kodu (O71, znalezisko E1 §10).
+  const probaZlapie = silnikiBezEkranu({
+    ...z,
+    zrodlaLib: { ...z.zrodlaLib, 'lib/atrapaF1.ts': 'export function policzAtrapeF1() { return 1; }' },
+  });
+  const probaPrzepusci = silnikiBezEkranu({
+    ...z,
+    zrodlaLib: { ...z.zrodlaLib, 'lib/atrapaF1.ts': 'export function policzAtrapeF1() { return 1; }' },
+    zrodlaEkranow: { ...z.zrodlaEkranow, 'app/(tabs)/atrapa.tsx': 'const x = policzAtrapeF1();' },
+  });
+  zapisz('⭐ (F1-2) (strażnik strażnika) detektor ZNAJDUJE funkcję bez konsumenta…',
+    probaZlapie.some((s) => s.nazwa === 'policzAtrapeF1'), 'detektor przepuścił atrapę bez konsumenta');
+  zapisz('⭐ (F1-2) (strażnik strażnika) …i MILCZY, gdy ta sama funkcja ma konsumenta',
+    !probaPrzepusci.some((s) => s.nazwa === 'policzAtrapeF1'), 'detektor oskarża funkcję, która ma konsumenta');
+
+  // ── P4 · R5 ──────────────────────────────────────────────────────────
+  // „Nie udało się policzyć" i „jeszcze nic nie ma" muszą być DWOMA różnymi
+  // zdaniami w DWÓCH różnych gałęziach, nie tą samą stałą z zerem.
+  zapisz('⭐ (F1-3) R5 — „nie udało się policzyć" i „jeszcze nic nie ma" to DWA różne zdania',
+    cialoPracy !== null
+    && /dorobekBlokowNiePoliczony\(/.test(cialoPracy)
+    && /DOROBEK_BLOKOW_PUSTO/.test(cialoPracy)
+    && /rodzaj === 'nie_policzony'/.test(cialoPracy),
+    'ekran skleił awarię odczytu z pustką — dorobek malejący przy awarii sieci kłamie tak samo '
+    + 'jak licznik zerowany po opuszczonym dniu');
+
+  zapisz('⛔ ⭐ (F1-3) R5 — stan `nie_policzony` NIE jest wyciszany wcześniejszym `return null`',
+    cialoPracy !== null
+    && !/rodzaj\s*!==\s*'policzony'[\s\S]{0,80}?return\s+null/.test(cialoPracy)
+    && !/rodzaj\s*===\s*'nie_policzony'[\s\S]{0,80}?return\s+null/.test(cialoPracy),
+    'ekran chowa „nie udało się policzyć" zamiast je pokazać — cisza wygląda jak brak funkcji');
+
+  // ⭐ Powód stanu NIE_WIEM jest TWIERDZENIEM o danych zawodnika („żaden wpis
+  // nie jest jeszcze połączony z sesją"). Postawiony po odczycie, którego nie
+  // było, jest zgadywaniem podanym jako pewnik (Z0).
+  zapisz('⛔ ⭐ (F1-3) powód „NIE WIEM" rysuje się TYLKO przy stanie `NIE_WIEM`, nie bezwarunkowo',
+    cialoPracy !== null
+    && /workProgress[\s\S]{0,120}?stan === 'NIE_WIEM'[\s\S]{0,120}?NIE_WIEM_POWOD/.test(cialoPracy),
+    'zdanie o tym, że żaden wpis nie jest połączony z sesją, stoi bez warunku — '
+    + 'czyli także po nieudanym odczycie powiązań');
+
+  // ── P5 · N1 — NA TEKŚCIE CAŁEGO PLIKU, tak jak wymaga polecenie ──────
+  const zakazaneN1: readonly (readonly [string, RegExp])[] = [
+    ['seria', /\bseri(a|i|e|ę|ą|ach|om|ami)\b/i],
+    ['passa', /\bpass(a|y|ie|ę|ą)\b/i],
+    ['z rzędu', /z\s+rzędu/i],
+    ['streak', /\bstreak/i],
+    ['codziennie', /\bcodzienn/i],
+    ['nie przerwij', /nie\s+przerw/i],
+  ];
+  const trafioneN1 = zakazaneN1.filter(([, w]) => w.test(z.dzis)).map(([s]) => s);
+  zapisz('⭐⛔ (F1-4) N1 — ANI JEDNEGO słowa o dniach z rzędu w CAŁYM `dzis.tsx`',
+    trafioneN1.length === 0, `zakazane słowa w pliku: ${trafioneN1.join(', ')}`);
+
+  // ── P6 · F1.3 — DWA OSIEROCONE `?? []` ──────────────────────────────
+  zapisz('⭐ (F1-5) `dzis.tsx` nie ma już `eventsRes.data ?? []`',
+    !/eventsRes\.data\s*\?\?\s*\[\s*\]/.test(z.dzis),
+    'wrócił `?? []` przy odczycie kalendarza — pusty dzień zamiast „nie udało się sprawdzić"');
+
+  zapisz('⭐ (F1-5) `profil.tsx` nie ma już `injuryRes.data ?? []`',
+    !/injuryRes\.data\s*\?\?\s*\[\s*\]/.test(z.profil),
+    'wrócił `?? []` przy historii kontuzji — brak historii, której nie odczytano');
+
+  zapisz('⭐ (F1-5) OBA ekrany podają `odczytUdanySie` do `rozpoznajPustke`',
+    (argumentyWywolania(z.dzis, 'rozpoznajPustke')[0] ?? []).join(',').includes('odczytUdanySie')
+    && (argumentyWywolania(z.profil, 'rozpoznajPustke')[0] ?? []).join(',').includes('odczytUdanySie'),
+    'ekran woła `rozpoznajPustke` bez stanu odczytu — czwarty rodzaj pustki jest wtedy nieosiągalny, '
+    + 'a awaria znowu wygląda jak „nic nie masz"');
+
+  // ⛔ Brzmienie zatwierdzone wcześniej ZOSTAJE co do znaku — zmienia się
+  // wyłącznie to, KIEDY zawodnik je czyta (ten sam ruch, co na siedmiu
+  // ekranach pasa C3).
+  zapisz('⛔ (F1-5) brzmienie „Brak wpisów w historii kontuzji." NIE ZNIKNĘŁO z `profil.tsx`',
+    /Brak wpisów w historii kontuzji\./.test(z.profil),
+    'pas skasował cudze brzmienie zamiast je przepuścić przez `rozpoznajPustke`');
+
+  return r;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+console.log('\n⭐ F1. SILNIK NA EKRANIE — dwie liczby, dwa `?? []`, asercja odwrotna');
+// ═══════════════════════════════════════════════════════════════════
+const ZRODLA_LIB_PRAWDZIWE: Record<string, string> = Object.fromEntries(
+  readdirSync(join(root, 'lib'))
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.selftest.ts'))
+    .sort()
+    .map((f) => [`lib/${f}`, bezKomentarzy(readFileSync(join(root, 'lib', f), 'utf8'))]),
+);
+
+const ZRODLA_EKRANOW_PRAWDZIWE: Record<string, string> = Object.fromEntries([
+  ...readdirSync(join(root, 'app', '(tabs)'))
+    .filter((f) => f.endsWith('.tsx'))
+    .sort()
+    .map((f) => [`app/(tabs)/${f}`, bezKomentarzy(readFileSync(join(root, 'app', '(tabs)', f), 'utf8'))] as const),
+  ...readdirSync(join(root, 'components'))
+    .filter((f) => f.endsWith('.tsx'))
+    .sort()
+    .map((f) => [`components/${f}`, bezKomentarzy(readFileSync(join(root, 'components', f), 'utf8'))] as const),
+]);
+
+const ZASADY_F1: ZasadyF1 = {
+  dzis,
+  profil: bezKomentarzy(profilSurowe),
+  zrodlaLib: ZRODLA_LIB_PRAWDZIWE,
+  zrodlaEkranow: ZRODLA_EKRANOW_PRAWDZIWE,
+  dlugSilnikow: KLUCZE_SILNIKOW_BEZ_EKRANU,
+};
+
+{
+  console.log(`   przemiatam ${Object.keys(ZASADY_F1.zrodlaLib).length} plików lib/ `
+    + `i ${Object.keys(ZASADY_F1.zrodlaEkranow).length} ekranów`);
+  const bezEkranu = silnikiBezEkranu(ZASADY_F1);
+  console.log(`   ⭐ (F1-2) funkcji liczących pracę BEZ ani jednego konsumenta: ${bezEkranu.length}`);
+  for (const s of bezEkranu) {
+    const poz = SILNIKI_BEZ_EKRANU.find((d) => d.klucz === s.klucz);
+    console.log(`      • ${s.klucz}`);
+    console.log(`        ${poz ? poz.kto : '⛔ NOWA — nie ma jej na liście zgłoszonych'}`);
+    if (poz) console.log(`        ${poz.dlaczego}`);
+  }
+
+  for (const w of bateriaF1(ZASADY_F1)) check(w.label, w.ok, w.detail);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
+// ═══════════════════════════════════════════════════════════════════
+// ⚠️ MUTACJE ŻYJĄ WYŁĄCZNIE W OBIEKTACH `ZasadyF1` przekazywanych do
+// `bateriaF1` — ani jedna nie dotyka dysku, `dzis.tsx` ani `profil.tsx`.
+// Cofnięcie jest STRUKTURALNE: nie ma czego cofać, bo nic nie zostało
+// zmienione. Osobna asercja na końcu sprawdza, że prawdziwe zasady przechodzą
+// tę samą baterię, którą mutanty oblewają.
+//
+// ⭐ SIEDEM Z OŚMIU MUTACJI TO KSZTAŁTY, KTÓRE NAPRAWDĘ BYŁY W TYM
+// REPOZYTORIUM JESZCZE 15.08.2026 PRZED TYM PASEM — nie wymyślone defekty,
+// tylko stan `main` na commicie `e27d5cc`. To jest kontrola historyczna
+// (**O70**) zapisana strukturalnie: dopóki te mutacje zapalają, żadna kolejna
+// sesja nie przywróci tamtego stanu niepostrzeżenie.
+{
+  const ROZMIAR = bateriaF1(ZASADY_F1).length;
+  const failePrawdziwe = bateriaF1(ZASADY_F1).filter((w) => !w.ok).length;
+
+  const MUTACJE: { nazwa: string; opis: string; zasady: ZasadyF1 }[] = [
+    {
+      nazwa: 'M1 · wraca `computeFocusBlockProgress` (stan `main` sprzed F1)',
+      opis: 'kafelek Celu znowu rysuje „0 z 12" tam, gdzie prawdą jest „nie wiemy, ile z 12"',
+      zasady: {
+        ...ZASADY_F1,
+        dzis: ZASADY_F1.dzis
+          .replace(/setWorkProgress\(computeFocusBlockProgressState\(/g, 'setWorkProgress(computeFocusBlockProgress(')
+          .replace(/workProgress\.stan === 'NIE_WIEM'/g, 'false'),
+      },
+    },
+    {
+      nazwa: 'M2 · druga liczba policzona i wyrzucona',
+      opis: '`policzPraceWeWszystkichBlokach` wraca do stanu z pasa E2: policzona, bez konsumenta',
+      zasady: {
+        ...ZASADY_F1,
+        dzis: ZASADY_F1.dzis.replace(/\bpoliczPraceWeWszystkichBlokach\(/g, 'nieistniejacaFunkcja('),
+      },
+    },
+    {
+      nazwa: 'M3 · render pracy w Blokach zdefiniowany, ale niewołany',
+      opis: 'najcichszy z możliwych sposobów odpięcia liczby — funkcja jest, `tsc` przechodzi, ekran milczy',
+      zasady: {
+        ...ZASADY_F1,
+        dzis: ZASADY_F1.dzis.replace(/\{renderPracaWBlokach\(\)\}/g, '{null}'),
+      },
+    },
+    {
+      nazwa: 'M4 · R5 skasowane — awaria odczytu udaje pustkę',
+      opis: '„nie udało się policzyć" rysuje to samo zdanie co „jeszcze nic nie ma"',
+      zasady: {
+        ...ZASADY_F1,
+        dzis: ZASADY_F1.dzis.replace(/dorobekBlokowNiePoliczony\(/g, 'String(DOROBEK_BLOKOW_PUSTO) + String('),
+      },
+    },
+    {
+      nazwa: 'M5 · pasek 0% wraca pod zdanie „nie wiemy"',
+      opis: 'kłamstwo narysowane zamiast napisanego — pasek na zero obok „nie wiemy, ile się odbyło"',
+      zasady: {
+        ...ZASADY_F1,
+        dzis: ZASADY_F1.dzis.replace(
+          /\{workProgress && workProgress\.stan === 'NIE_WIEM' && widokDzis\.pokazacPostepPracy \? \(/,
+          "{workProgress && workProgress.stan === 'NIE_WIEM' && widokDzis.pokazacPostepPracy ? (<View style={styles.workTrack}><View style={styles.workFill} /></View>) : null}\n{false ? (",
+        ),
+      },
+    },
+    {
+      nazwa: 'M6 · wraca `eventsRes.data ?? []` (stan `main` sprzed F1)',
+      opis: 'pusty dzień zamiast „Nie udało się sprawdzić." — dług bez właściciela po pasie C4',
+      zasady: {
+        ...ZASADY_F1,
+        dzis: `${ZASADY_F1.dzis}\nconst events = (eventsRes.data ?? []) as CalEvent[];`,
+      },
+    },
+    {
+      nazwa: 'M7 · wraca `injuryRes.data ?? []` (stan `main` sprzed F1)',
+      opis: 'historia kontuzji po nieudanym odczycie wygląda jak jej brak — dług bez właściciela po pasie L2',
+      zasady: {
+        ...ZASADY_F1,
+        profil: `${ZASADY_F1.profil}\nsetInjuryHistory(injuryRes.data ?? []);`,
+      },
+    },
+    {
+      nazwa: 'M8 · ⭐ nowa funkcja licząca pracę, której nikt nie woła',
+      opis: 'dokładnie ta choroba, dla której ten strażnik powstał — 33. pozycja „KOD GOTOWY"',
+      zasady: {
+        ...ZASADY_F1,
+        zrodlaLib: {
+          ...ZASADY_F1.zrodlaLib,
+          'lib/nowyLicznik.ts': 'export function policzNowaCiaglosc(x: number[]) { return x.length; }',
+        },
+      },
+    },
+  ];
+
+  console.log(`\nbateria F1 ma ${ROZMIAR} predykatów · na prawdziwych zasadach FAIL-i: ${failePrawdziwe}\n`);
+  check('⭐ bateria F1 na PRAWDZIWYM kodzie nie zapala ani jednego predykatu',
+    failePrawdziwe === 0, `FAIL-i: ${failePrawdziwe}`);
+
+  let bezEfektu = 0;
+  for (const m of MUTACJE) {
+    const zapalone = bateriaF1(m.zasady).filter((w) => !w.ok);
+    console.log(`${m.nazwa}`);
+    console.log(`   co psuje: ${m.opis}`);
+    console.log(`   FAIL-i przy tej mutacji: ${zapalone.length} / ${ROZMIAR}`);
+    for (const z of zapalone) console.log(`     • ${z.label}`);
+    if (zapalone.length === 0) bezEfektu++;
+    check(`⭐ mutacja „${m.nazwa}" podnosi liczbę FAIL-i`,
+      zapalone.length > 0, 'mutacja przeszła niezauważona — ta bateria niczego nie pilnuje');
+    console.log('');
+  }
+
+  // ⚠️ Liczba mutacji LICZONA, nie wpisana (**O71**) — „osiem" zestarzałoby się
+  // po cichu przy pierwszej dołożonej.
+  check(`⭐ KAŻDA z ${MUTACJE.length} mutacji została złapana`, bezEfektu === 0, `mutacji bez efektu: ${bezEfektu}`);
+  check(`⭐ po ${MUTACJE.length} mutacjach prawdziwe zasady są nadal nietknięte`,
+    bateriaF1(ZASADY_F1).filter((w) => !w.ok).length === 0,
+    'mutacja wyciekła poza swój obiekt ZasadyF1');
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // PLIK, KTÓRY TEN STRAŻNIK CZYTA, NAPRAWDĘ ZAWIERA BADANĄ LOGIKĘ
 // ═══════════════════════════════════════════════════════════════════
@@ -550,6 +1037,13 @@ function check(label: string, cond: boolean, detail: string) {
     && /from '\.\.\/\.\.\/lib\/wykonanieSesji'/.test(dzis)
     && dzis.includes('renderLicznikPracy') && dzis.includes('renderTydzienNaKarcie'),
     `dzis=${dzisSurowe.length}B surowo, ${dzis.length}B bez komentarzy`);
+
+  // ⭐ PLAN-D-F1 — to samo dla drugiego pliku, który ten strażnik od dziś czyta.
+  check('`profil.tsx` istnieje, czyta trzy pustki i zawiera badaną logikę',
+    profilSurowe.length > 50_000
+    && /from '\.\.\/\.\.\/lib\/trzyPustki'/.test(profilSurowe)
+    && profilSurowe.includes('loadProfile') && profilSurowe.includes('injuryHistory'),
+    `profil=${profilSurowe.length}B surowo`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

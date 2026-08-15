@@ -327,16 +327,17 @@ const EKRANY_BEZ_ODCZYTU: { plik: string; powod: string }[] = [
  * zamieniłby się w listę, na której da się przenocować dowolnie długo.
  */
 const DLUG_ZGLOSZONY: { plik: string; pas: string; znalezione: string }[] = [
-  {
-    plik: 'profil.tsx',
-    pas: 'L2 (raport rodzica) — pas w locie 15.08.2026',
-    znalezione: 'R10: nie woła `rozpoznajPustke` · R11: `injuryRes.data ?? []` w `loadProfile`',
-  },
-  {
-    plik: 'dzis.tsx',
-    pas: 'C4 (licznik bez zerowania) — pas w locie 15.08.2026',
-    znalezione: 'R11: `eventsRes.data ?? []` przy odczycie kalendarza',
-  },
+  // ⭐ PLAN-D-F1 15.08.2026 — LISTA JEST PUSTA I TO JEST WYNIK, NIE BRAK.
+  // Stały tu dwie pozycje: `profil.tsx` (pas L2 — R10: nie wołał
+  // `rozpoznajPustke`; R11: `injuryRes.data ?? []` w `loadProfile`)
+  // oraz `dzis.tsx` (pas C4 — R11: `eventsRes.data ?? []` przy odczycie
+  // kalendarza). **Pas F1 naprawił OBIE**, więc zapadka „naprawione pozycje
+  // wypadają z listy" zaczęła zapalać strażnika — dokładnie tak, jak ją
+  // zaprojektowano. Pozycje zdjęte przez sesję nawigującą 15.08.2026
+  // (odblokowanie noty zablokowania pasa F1, §10 jego noty).
+  // ⚠️ OD TEJ CHWILI oba ekrany wchodzą do `EKRANY_PRZEMIATANE` i są
+  // sprawdzane regułami R10 i R11 jak każdy inny ekran zakładek.
+  // To jest CEL tej zmiany, nie jej skutek uboczny.
 ];
 
 const NAZWY_WYJATKOW = new Set([
