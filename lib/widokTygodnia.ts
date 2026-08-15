@@ -62,6 +62,21 @@ import {
   type OpisZrodla,
   type RodzajWydarzenia,
 } from './meczWKalendarzu';
+// ⭐ PLAN-D-D1 08.2026 (14.08.2026) — REGUŁA CZTERECH STANÓW WYPROWADZIŁA SIĘ
+// STĄD DO `lib/wykonanieSesji.ts` i ten plik ją WOŁA, zamiast trzymać drugą
+// kopię. Powód jest policzalny: od pasa D1 ta sama reguła musi rozstrzygać
+// także POJEDYNCZE WYSTĄPIENIE reguły cyklicznej i uwzględniać werdykt
+// zawodnika („nie odbyłem"), a dwie kopie rozjechałyby się przy pierwszej
+// poprawce — każda z osobna wyglądając poprawnie.
+import {
+  rozstrzygnijWykonanie,
+  akcjaDlaWystapienia,
+  PLAKIETKI_WYKONANIA,
+  WERDYKTY_NIEPODANE,
+  type StanWykonania,
+  type WejscieWerdyktow,
+  type AkcjaWystapienia,
+} from './wykonanieSesji';
 
 // ═══════════════════════════════════════════════════════════════════
 // 1. WEJŚCIA — KAŻDE Z JAWNYM STANEM „NIE ODCZYTAŁEM"
@@ -110,6 +125,18 @@ export type WejscieTygodnia = {
    * `nie_odczytano`, a NIE „brak wpisu" i tym bardziej nie „nie wykonano".
    */
   wpisyDziennika: ReadonlySet<number> | null;
+  /**
+   * ⭐ PLAN-D-D1 — WERDYKTY ZAWODNIKA („odbyłem" / „nie odbyłem") o KONKRETNYCH
+   * WYSTĄPIENIACH, z `session_verdicts`.
+   *
+   * ⚠️ POLE JEST OPCJONALNE I TO JEST DECYZJA, NIE NIEDOPATRZENIE. Wołający,
+   * który o werdyktach nie wie (starszy ekran, test sprzed pasa D1), dostaje
+   * `WERDYKTY_NIEPODANE` — jawne wejście z powodem, zachowujące się identycznie
+   * jak `{rodzaj:'brak'}`. ⛔ To NIE JEST `?? []`: „brak" i „nie odczytałem"
+   * pozostają rozróżnialne, bo `nie_odczytano` trzeba podać JAWNIE i nie da się
+   * go dostać przez pominięcie pola.
+   */
+  werdykty?: WejscieWerdyktow;
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -227,58 +254,28 @@ export type KlasaKropki = 'blok' | 'klub' | 'mecz' | 'zadanie' | 'nieznana';
  * ⭐ TRZY STANY DNIA PRZESZŁEGO (WG-05) — plus czwarty, który jest brakiem
  * odpowiedzi, a nie odpowiedzią.
  *
- *   `odbylo_sie`     — mamy dowód, że pozycja się odbyła.
- *   `nie_odbylo_sie` — mamy dowód, że się NIE odbyła (ktoś ją anulował).
- *   `brak_wpisu`     — nie ma wpisu. NIE ZNACZY „nie wykonano".
- *   `nie_odczytano`  — nie udało się odczytać dziennika. To nie jest stan dnia,
- *                      tylko stan naszej wiedzy — i musi być rozróżnialny.
- *
- * ⛔ DO 14.08.2026 `kalendarz.tsx` DAWAŁ DWA STANY i renderował brak wpisu jako
- * „Nie wykonano" — czyli ZGADYWAŁ PRZECIWKO ZAWODNIKOWI. To jest złamanie Z0
- * na ekranie i ten plik je zamyka.
+ * ⚠️ PLAN-D-D1 14.08.2026 — DEFINICJA WYPROWADZIŁA SIĘ DO `lib/wykonanieSesji.ts`.
+ * Tu zostaje wyłącznie NAZWA, pod którą znają ją istniejące ekrany, żeby
+ * przeprowadzka nie kosztowała ani jednej zmiany u wołających.
+ * ⛔ NIE DOPISUJ TU PIĄTEGO STANU ANI DRUGIEJ TABELI PLAKIETEK — jedno miejsce.
  */
-export type StanPozycjiPrzeszlej = 'odbylo_sie' | 'nie_odbylo_sie' | 'brak_wpisu' | 'nie_odczytano';
+export type StanPozycjiPrzeszlej = StanWykonania;
 
 /**
- * Plakietki trzech stanów dnia przeszłego.
- * ⚠️ NOWE — makieta ma tylko tag „zrobione", pozostałych dwóch nie pokazuje.
+ * Plakietki czterech stanów. ⚠️ PLAN-D-D1 — re-eksport, jedno źródło.
  * ⛔ Nie ma tu „Nie wykonano" i nie będzie: to zdanie było oskarżeniem
  * postawionym na podstawie braku danych.
  */
-export const PLAKIETKI_STANU_PRZESZLEGO: Record<StanPozycjiPrzeszlej, string> = {
-  odbylo_sie: 'Zrobione',
-  nie_odbylo_sie: 'Nie odbyło się',
-  brak_wpisu: 'Bez wpisu',
-  nie_odczytano: 'Nie wiemy',
-};
-
-/**
- * ⭐ JEDNA REGUŁA TRZECH STANÓW, dwa miejsca użycia (wiersz dnia i karta na
- * liście). Gdyby stała w dwóch kopiach, jedna z nich prędzej czy później znów
- * zaczęłaby pisać „Nie wykonano" — i nikt by tego nie zauważył, bo drugi ekran
- * byłby w porządku.
- */
-export function rozstrzygnijStanPrzeszly(args: {
-  przeszly: boolean;
-  id: number;
-  status: string;
-  zRegulyCyklicznej: boolean;
-  wpisyDziennika: ReadonlySet<number> | null;
-}): StanPozycjiPrzeszlej | null {
-  if (!args.przeszly) return null;
-  if (args.status === 'cancelled') return 'nie_odbylo_sie';
-  // ⚠️ REGUŁA CYKLICZNA NIE MA WPISU NA POJEDYNCZY DZIEŃ. `daily_logs` wskazuje
-  // na WIERSZ REGUŁY, więc użycie go tutaj oznaczałoby „odbyło się" dla KAŻDEGO
-  // wtorku w historii po jednym wpisie — produkt policzyłby zawodnikowi pracę,
-  // której nie wykonał. Brak wpisu na konkretny dzień jest tu prawdą.
-  if (args.zRegulyCyklicznej) return 'brak_wpisu';
-  if (args.status === 'completed') return 'odbylo_sie';
-  if (args.wpisyDziennika === null) return 'nie_odczytano';
-  return args.wpisyDziennika.has(args.id) ? 'odbylo_sie' : 'brak_wpisu';
-}
+export const PLAKIETKI_STANU_PRZESZLEGO = PLAKIETKI_WYKONANIA;
 
 export type PozycjaDnia = {
   id: number;
+  /**
+   * ⭐ PLAN-D-D1 — DATA TEGO WYSTĄPIENIA, `YYYY-MM-DD`. Bez niej ekran nie ma
+   * jak zapisać werdyktu o konkretnym wtorku reguły cyklicznej: `id` jest dla
+   * wszystkich wtorków ten sam. Para `(id, dzien)` jest kluczem wystąpienia.
+   */
+  dzien: string;
   tytul: string;
   /** Z `opiszRodzaj` — NIE własne mapowanie. Ekran rysuje obie gałęzie. */
   rodzaj: OpisRodzaju;
@@ -296,6 +293,13 @@ export type PozycjaDnia = {
   zRegulyCyklicznej: boolean;
   /** Czy pozycja liczy się do wagi dnia. Anulowana — nie. */
   liczonaDoWagi: boolean;
+  /**
+   * ⭐ PLAN-D-D1 — CO ZAWODNIK MOŻE Z TYM WYSTĄPIENIEM ZROBIĆ: oznaczyć jako
+   * nieodbyte, cofnąć swój werdykt, albo nic. ⛔ Rozstrzyga to REGUŁA
+   * (`akcjaDlaWystapienia`), nie ekran — ekran, który sam liczy, kiedy pokazać
+   * przycisk, jest drugą kopią reguły pod inną nazwą.
+   */
+  akcja: AkcjaWystapienia;
 };
 
 export type PasekZajetosci =
@@ -573,24 +577,36 @@ type Zebrane = { pozycja: PozycjaDnia; rodzajZnany: RodzajWydarzenia | null };
 
 function zbudujPozycje(
   w: WierszWydarzenia,
-  opcje: { przeszly: boolean; zRegulyCyklicznej: boolean; wpisyDziennika: ReadonlySet<number> | null },
+  opcje: {
+    dzien: string;
+    przeszly: boolean;
+    zRegulyCyklicznej: boolean;
+    wpisyDziennika: ReadonlySet<number> | null;
+    werdykty: WejscieWerdyktow;
+  },
 ): Zebrane {
   const rodzaj = opiszRodzaj(w.event_type);
   const zrodlo = opiszZrodlo(w.source);
   const anulowane = w.status === 'cancelled';
 
-  const stanPrzeszly = rozstrzygnijStanPrzeszly({
-    przeszly: opcje.przeszly,
-    id: w.id,
+  // ⭐ PLAN-D-D1 — WSPÓLNA REGUŁA, WOŁANA O WYSTĄPIENIE `(id, dzien)`.
+  const weWykonania = {
+    idWydarzenia: w.id,
+    dzien: opcje.dzien,
+    przeszle: opcje.przeszly,
     status: w.status,
     zRegulyCyklicznej: opcje.zRegulyCyklicznej,
     wpisyDziennika: opcje.wpisyDziennika,
-  });
+    werdykty: opcje.werdykty,
+  };
+  const stanPrzeszly = rozstrzygnijWykonanie(weWykonania);
+  const akcja = akcjaDlaWystapienia(weWykonania);
 
   return {
     rodzajZnany: rodzaj.znany ? rodzaj.id : null,
     pozycja: {
       id: w.id,
+      dzien: opcje.dzien,
       tytul: w.title,
       rodzaj,
       zrodlo,
@@ -599,6 +615,7 @@ function zbudujPozycje(
       stanPrzeszly,
       zRegulyCyklicznej: opcje.zRegulyCyklicznej,
       liczonaDoWagi: !anulowane,
+      akcja,
     },
   };
 }
@@ -763,6 +780,10 @@ export function zbudujTydzien(we: WejscieTygodnia): Tydzien {
 
   const nieumieszczone: PozycjaNieumieszczona[] = [];
 
+  // ⭐ PLAN-D-D1 — pominięte pole ≠ nieudany odczyt. Patrz `WejscieTygodnia.werdykty`.
+  const werdykty: WejscieWerdyktow =
+    we.werdykty === undefined ? WERDYKTY_NIEPODANE : we.werdykty;
+
   // ── Rozłożenie wydarzeń na dni ────────────────────────────────────
   const wDniu: Record<string, Zebrane[]> = {};
   for (const d of daty) wDniu[d] = [];
@@ -776,7 +797,7 @@ export function zbudujTydzien(we: WejscieTygodnia): Tydzien {
         if (!(dzien in wDniu)) continue; // poza oglądanym tygodniem — to nie jest zgubienie
         const przeszly = dzien < we.dzisiaj;
         wDniu[dzien].push(zbudujPozycje(w, {
-          przeszly, zRegulyCyklicznej: false, wpisyDziennika: we.wpisyDziennika,
+          dzien, przeszly, zRegulyCyklicznej: false, wpisyDziennika: we.wpisyDziennika, werdykty,
         }));
         continue;
       }
@@ -796,7 +817,7 @@ export function zbudujTydzien(we: WejscieTygodnia): Tydzien {
           if (dzien === undefined) continue;
           const przeszly = dzien < we.dzisiaj;
           wDniu[dzien].push(zbudujPozycje(w, {
-            przeszly, zRegulyCyklicznej: true, wpisyDziennika: we.wpisyDziennika,
+            dzien, przeszly, zRegulyCyklicznej: true, wpisyDziennika: we.wpisyDziennika, werdykty,
           }));
         }
         continue;

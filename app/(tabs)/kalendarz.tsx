@@ -157,7 +157,6 @@ import {
   segmentyPaska,
   liczbaPozycji,
   opisTygodniaDoLogu,
-  rozstrzygnijStanPrzeszly,
   LEGENDA_KROPEK,
   PLAKIETKI_STANU_PRZESZLEGO,
   NIE_UDALO_SIE_ODCZYTAC_TYGODNIA,
@@ -166,6 +165,34 @@ import {
   type WierszDnia,
   type WagaDnia,
 } from '../../lib/widokTygodnia';
+// ⭐ PLAN-D-D1 08.2026 (14.08.2026) — „TEJ SESJI NIE ODBYŁEM".
+//
+// ── CZEGO TU NIE BYŁO DO DZIŚ ─────────────────────────────
+// Produkt umiał zapisać wyłącznie „ta sesja MA wpis". Nie miał ani jednego
+// miejsca, w którym zawodnik mógłby powiedzieć „nie odbyłem" — więc licznik
+// pracy potrafił podać tylko „ile sesji ma wpis", nigdy „ile odbyłeś".
+// Ten ekran jest tym JEDNYM miejscem. ⛔ Drugie miejsce to dwa źródła prawdy.
+//
+// ── ⛔ CZTERY WARUNKI TEJ AKCJI, KAŻDY PILNOWANY ASERCJĄ ────────
+// 1. NIE PYTAMY „DLACZEGO NIE". Pytanie o powód przy opuszczonej sesji jest
+//    konfrontacją (M1) i obniża wypełnialność u tych, którzy najbardziej
+//    odpadają. Powód wolno zapisać, gdy zawodnik sam go poda — nie wolno
+//    o niego prosić jako o warunek.
+// 2. ZERO ZDANIA OCENIAJĄCEGO PO ZAPISIE. „Szkoda" ocenia, „nic straconego"
+//    kłamie. Po dotknięciu zmienia się plakietka i nic więcej.
+// 3. AKCJA JEST ODWRACALNA I WIDAĆ, ŻE JEST — w tym samym miejscu, w którym
+//    było „Nie odbyłem", stoi potem „Cofnij". Kto kliknął przez pomyłkę
+//    i nie może cofnąć, przestaje klikać w ogóle.
+// 4. WERDYKT DOTYCZY WYSTĄPIENIA `(id, dzień)`, nie wiersza. Reguła cykliczna
+//    ma jeden wiersz i wiele wtorków.
+import {
+  rozstrzygnijWykonanie,
+  akcjaDlaWystapienia,
+  czytajWerdykty,
+  kluczWystapienia,
+  WERDYKTY_NIEPODANE,
+  type WejscieWerdyktow,
+} from '../../lib/wykonanieSesji';
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   club_training: 'Trening klubowy', own_training: 'Trening własny',
@@ -241,6 +268,11 @@ export default function KalendarzScreen() {
   const [events, setEvents] = useState<CalEvent[] | null>(null);
   const [loggedEventIds, setLoggedEventIds] = useState<ReadonlySet<number> | null>(null);
   const [planLekcji, setPlanLekcji] = useState<PlanTygodnia | null>(null);
+  // ⭐ PLAN-D-D1 — WERDYKTY ZAWODNIKA. Stan startowy to `WERDYKTY_NIEPODANE`,
+  // czyli jawne „ten ekran ich jeszcze nie czytał", a NIE pusta lista: pusta
+  // lista twierdziłaby, że sprawdziliśmy i nic nie ma.
+  const [werdykty, setWerdykty] = useState<WejscieWerdyktow>(WERDYKTY_NIEPODANE);
+  const [zapisWerdyktu, setZapisWerdyktu] = useState<string | null>(null);
   const [showCancelled, setShowCancelled] = useState(false);
   const [showPast, setShowPast] = useState(false);
 
@@ -321,6 +353,23 @@ export default function KalendarzScreen() {
       setPlanLekcji(parsujPlanLekcji((planRes.data || []) as WierszPlanuLekcji[]));
     }
 
+    // ⭐ PLAN-D-D1 — WERDYKTY. ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE, ten sam
+    // wzorzec co `school_week` wyżej: dopóki migracja
+    // `MIGRACJA_D1_WERDYKT_WYSTAPIENIA_14_08_2026.sql` nie jest wykonana,
+    // tabeli `session_verdicts` NIE MA i to zapytanie odpowie błędem.
+    // ⚠️ To NIE JEST to samo, co nieudany odczyt: `czytajWerdykty` rozróżnia
+    // „tabeli nie ma, więc werdyktu nie może być" od „nie udało mi się odczytać".
+    // Bez tego rozróżnienia KAŻDA przeszła pozycja bez wpisu dostałaby dziś
+    // plakietkę „Nie wiemy" — czyli spełniona obietnica WG-05 zgasłaby z powodu
+    // migracji, której nikt jeszcze nie wkleił.
+    const werdyktyRes = await supabase
+      .from('session_verdicts')
+      .select('calendar_event_id,occurred_on,verdict,withdrawn_at')
+      .eq('user_id', currentUser.id);
+    const werdyktyWe = czytajWerdykty({ dane: werdyktyRes.data, blad: werdyktyRes.error });
+    if (werdyktyWe.rodzaj !== 'jest') console.warn('[PLAN-D-D1] ' + werdyktyWe.powod);
+    setWerdykty(werdyktyWe);
+
     // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — STAN DOSTĘPU DO ZAPISU.
     // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE, POZA paczką wyżej: gdyby RPC
     // `stan_dostepu` nie istniało albo padło, kalendarz ma działać dalej.
@@ -359,6 +408,7 @@ export default function KalendarzScreen() {
     wydarzenia: events,
     planLekcji,
     wpisyDziennika: loggedEventIds,
+    werdykty,
   });
 
   // PLAN-D-C1 — pustka TYGODNIA (a nie sekcji). Rozstrzyga ta sama czysta
@@ -458,6 +508,91 @@ export default function KalendarzScreen() {
     await loadEvents();
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-D1 — JEDNA AKCJA, ODWRACALNA. „Tej sesji nie odbyłem".
+  //
+  // ⚠️ Dlaczego TUTAJ, a nie na karcie w zakładce „Listy": karta opisuje
+  // WIERSZ, a werdykt dotyczy WYSTĄPIENIA. Wiersz reguły cyklicznej nie ma
+  // daty w ogóle (`chk_recurrence_xor_date`), więc z karty nie da się wskazać,
+  // o który wtorek chodzi. Wiersz dnia wie to zawsze — i tylko on.
+  // ═══════════════════════════════════════════════════════════════════
+  async function oznaczNieodbyte(p: PozycjaDnia) {
+    if (!currentUser) return;
+    setError(null); setOk(null);
+    setZapisWerdyktu(kluczWystapienia(p.id, p.dzien));
+    // ⚠️ PLAN-D 14.08.2026, POPRAWKA SESJI NAWIGUJĄCEJ — RYZYKO 6 Z NOTY PASA D1.
+    // DO TEJ POPRAWKI STAŁO TU `.insert(...)`. Unikat
+    // `session_verdicts_jeden_na_wystapienie` obejmuje TAKŻE wiersze wycofane
+    // (i słusznie — inaczej po „Cofnij" powstałby drugi wiersz na ten sam dzień
+    // i „ostatni wygrywa" stałoby się niepisaną regułą). Skutek: ścieżka
+    // „Nie odbyłem" → „Cofnij" → „Nie odbyłem" zwracała `23505`, a zawodnik
+    // widział „Nie udało się zapisać" przy poprawnym zachowaniu.
+    // ⛔ `withdrawn_at: null` jest tu OBOWIĄZKOWE, nie kosmetyczne: bez niego
+    // ponowny werdykt trafiłby w wiersz wycofany i nadal by nie obowiązywał.
+    // Ślad zmiany stawia wyzwalacz `session_verdicts_pilnuj`, nie ten kod (P1).
+    const { data: wstawione, error: err } = await supabase
+      .from('session_verdicts')
+      .upsert({
+        user_id: currentUser.id,
+        calendar_event_id: p.id,
+        occurred_on: p.dzien,
+        verdict: 'nie_odbylo_sie',
+        origin: 'player',
+        withdrawn_at: null,
+      }, { onConflict: 'calendar_event_id,occurred_on' })
+      .select('id');
+    setZapisWerdyktu(null);
+    if (err) {
+      setError(toJestBrakDostepu(err)
+        ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+        : 'Nie udało się zapisać: ' + err.message);
+      return;
+    }
+    // ⚠️ O61 — OPERACJA, KTÓRA NIE RZUCIŁA WYJĄTKU, NIE JEST DOWODEM, ŻE COŚ
+    // SIĘ STAŁO. Zapis odrzucony przez RLS potrafi wyglądać jak sukces z pustą
+    // listą. Zawodnikowi nie kłamiemy, że zapisaliśmy.
+    if (!wstawione || wstawione.length === 0) {
+      setError('Nie udało się zapisać: baza nie przyjęła tego wpisu.');
+      console.warn('[PLAN-D-D1] insert session_verdicts dotknął ZERO wierszy '
+        + `(wydarzenie ${p.id}, dzień ${p.dzien}) — najpewniej RLS.`);
+      return;
+    }
+    // ⛔ ZERO ZDANIA PO ZAPISIE. „Szkoda" ocenia, „nic straconego" kłamie.
+    // Zmienia się plakietka i przycisk — i to jest cała odpowiedź produktu.
+    await loadEvents();
+  }
+
+  async function cofnijWerdykt(p: PozycjaDnia) {
+    if (!currentUser) return;
+    setError(null); setOk(null);
+    setZapisWerdyktu(kluczWystapienia(p.id, p.dzien));
+    // ⚠️ Werdyktu NIE KASUJEMY — wycofujemy. Wiersz zostaje, żeby ślad zmiany
+    // zdania nie zginął (P1), a wystąpienie wraca do stanu „bez wpisu".
+    // Wartość daty jest bez znaczenia: wyzwalacz `session_verdicts_pilnuj`
+    // podstawia `now()` bazy. Data z telefonu byłaby datą, której nikt nie zmierzył.
+    const { data: dotkniete, error: err } = await supabase
+      .from('session_verdicts')
+      .update({ withdrawn_at: new Date().toISOString() })
+      .eq('calendar_event_id', p.id)
+      .eq('occurred_on', p.dzien)
+      .eq('user_id', currentUser.id)
+      .select('id');
+    setZapisWerdyktu(null);
+    if (err) {
+      setError(toJestBrakDostepu(err)
+        ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+        : 'Nie udało się cofnąć: ' + err.message);
+      return;
+    }
+    if (!dotkniete || dotkniete.length === 0) {
+      setError('Nie udało się cofnąć: baza nie zmieniła żadnego wpisu.');
+      console.warn('[PLAN-D-D1] update session_verdicts dotknął ZERO wierszy '
+        + `(wydarzenie ${p.id}, dzień ${p.dzien}) — najpewniej RLS.`);
+      return;
+    }
+    await loadEvents();
+  }
+
   function renderEventCard(e: CalEvent) {
     // ⚠️ PLAN-D-A7 08.2026 — DO 14.08.2026 STAŁO TU `EVENT_TYPE_LABELS[…] || e.event_type`.
     // Rodzaj spoza piątki znanej appce (np. dołożony do CHECK-a w bazie i nie
@@ -476,12 +611,17 @@ export default function KalendarzScreen() {
     // — czyli brak wpisu w dzienniku był renderowany jako informacja o tym,
     // że zawodnik czegoś NIE ZROBIŁ. To jest domysł podany jako fakt (Z0).
     const badges: string[] = [];
-    const stanPrzeszly = rozstrzygnijStanPrzeszly({
-      przeszly: !!e.scheduled_date && e.scheduled_date < todayStr,
-      id: e.id,
+    // ⭐ PLAN-D-D1 — ta sama reguła co w wierszu dnia, wołana o wystąpienie.
+    // Karta opisuje wiersz, więc wystąpieniem jest jego własna data; wiersz
+    // cykliczny daty nie ma i dostaje stan „bez wpisu", tak jak dotąd.
+    const stanPrzeszly = rozstrzygnijWykonanie({
+      idWydarzenia: e.id,
+      dzien: e.scheduled_date ? e.scheduled_date.slice(0, 10) : '',
+      przeszle: !!e.scheduled_date && e.scheduled_date < todayStr,
       status: e.status,
       zRegulyCyklicznej: !!e.recurrence_rule,
       wpisyDziennika: loggedEventIds,
+      werdykty,
     });
     if (stanPrzeszly) badges.push(PLAKIETKI_STANU_PRZESZLEGO[stanPrzeszly]);
     else if (e.status === 'cancelled') badges.push('Anulowane');
@@ -534,6 +674,7 @@ export default function KalendarzScreen() {
   function renderPozycja(p: PozycjaDnia) {
     const nazwaRodzaju = p.rodzaj.znany ? EVENT_TYPE_LABELS[p.rodzaj.id] : p.rodzaj.komunikat;
     const przekreslone = p.stanPrzeszly === 'nie_odbylo_sie';
+    const zapisujeTo = zapisWerdyktu === kluczWystapienia(p.id, p.dzien);
     return (
       <View key={`${p.id}-${p.zRegulyCyklicznej ? 'c' : 'j'}`} style={styles.it}>
         <View style={[styles.dot, KOLOR_KROPKI[p.kropka]]} />
@@ -550,6 +691,29 @@ export default function KalendarzScreen() {
           </Text>
         ) : null}
         {!p.rodzaj.znany ? <Text style={styles.tag}>{nazwaRodzaju}</Text> : null}
+        {/* ⭐ PLAN-D-D1 — JEDNO DOTKNIĘCIE. ⛔ Gałąź `brak` NIE RYSUJE przycisku
+            wyszarzonego: przycisk, który nic nie robi, uczy, że klikanie nic
+            nie daje. Dziś `brak` zachodzi u wszystkich, bo migracja
+            `session_verdicts` czeka na wykonanie — a wtedy nie ma gdzie
+            zapisać werdyktu i przycisk obiecywałby zapis, który padnie. */}
+        {p.akcja.rodzaj === 'oznacz' ? (
+          <TouchableOpacity
+            style={styles.werdyktBtn}
+            disabled={zapisujeTo}
+            onPress={() => oznaczNieodbyte(p)}
+          >
+            <Text style={styles.werdyktTxt}>{p.akcja.etykieta}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {p.akcja.rodzaj === 'cofnij' ? (
+          <TouchableOpacity
+            style={styles.werdyktBtn}
+            disabled={zapisujeTo}
+            onPress={() => cofnijWerdykt(p)}
+          >
+            <Text style={styles.werdyktTxt}>{p.akcja.etykieta}</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
@@ -957,6 +1121,11 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   tag: { fontSize: 10, color: colors.textSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden' },
   tagOk: { color: colors.success, borderColor: colors.okSoft, backgroundColor: colors.okSoft },
+  // ⭐ PLAN-D-D1 — przycisk werdyktu. `minHeight: minTouchHeight` nie jest
+  // ozdobą: cel dotykowy mniejszy od progu to akcja, której zawodnik nie trafia,
+  // a nietrafiona akcja wygląda dokładnie jak akcja, której nie chciał wykonać.
+  werdyktBtn: { minHeight: minTouchHeight, justifyContent: 'center', paddingHorizontal: 8, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface },
+  werdyktTxt: { fontSize: 11, color: colors.textSecondary },
   empty2: { fontSize: 12, color: colors.textTertiary, fontStyle: 'italic', paddingLeft: 4, paddingVertical: 2 },
   tight: { fontSize: 12, color: colors.brand, paddingLeft: 19, paddingTop: 2 },
 });
