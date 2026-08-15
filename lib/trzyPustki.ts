@@ -370,3 +370,154 @@ export function opisBleduOdczytuDoLogu(gdzie: string, powod: unknown): string {
   return `[trzyPustki] ${gdzie}: ODCZYT PADŁ — ${tresc}. `
     + `Zawodnik widzi „${PUSTKA_BLAD_ODCZYTU_TEKST}", NIE zdanie o sobie.`;
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-C3b 15.08.2026 — WZORZEC „BŁĄD → PUSTA LISTA" JAKO CZYSTA FUNKCJA
+// ═════════════════════════════════════════════════════════════════════
+//
+// ── PO CO TO TU STOI, A NIE W STRAŻNIKU ──────────────────────────────
+// Do 15.08 ta reguła żyła wyłącznie w `lib/trzyPustki.selftest.ts` i pilnowała
+// siedmiu ekranów. Pas C3b przemiata nią CAŁE repozytorium
+// (`lib/pustkaWCalymRepo.selftest.ts`), więc czytelników jest dwóch.
+// Dwie kopie tej samej reguły rozjadą się — i wtedy jeden strażnik świeci
+// na zielono na tym, na czym drugi świeci na czerwono. Implementacja jest
+// JEDNA, wołana z obu miejsc (polecenie C3b, zadanie 3).
+//
+// ⛔ ANI JEDNEJ ZALEŻNOŚCI OD `node:fs`. To są czyste funkcje `string → wynik`;
+// chodzenie po dysku zostaje w selftestach. Ten plik jest importowany przez
+// dziewięć ekranów appki i nie ma prawa wciągnąć do bundla obsługi plików.
+//
+// ── DLACZEGO REGUŁA MA DWIE POŁOWY ───────────────────────────────────
+// ZMIERZONE 15.08.2026 na źródłach z `main`: sama analiza gałęzi `catch` /
+// `if (err)` łapie 4 z 7 ekranów pasa C3. Trzech nie łapie — `biblioteka.tsx`,
+// `ja.tsx` i `dziennik.tsx` — bo ich defekt NIE MIAŁ gałęzi błędu. Miał
+// `goalsRes.data ?? []` w głównym przepływie, przy odczycie, którego `.error`
+// nikt nigdy nie czytał. Błąd nie był obsłużony źle; był NIEZAUWAŻONY.
+
+/** Kod BEZ komentarzy — inaczej strażnik zapala się na własnej dokumentacji. */
+export function zyweZrodlo(zrodlo: string): string {
+  return zrodlo
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+/**
+ * Wycina ciała gałęzi błędu: każdy `catch (…) { … }` i każdy
+ * `if (<warunek zawierający err/error/Err>) { … }`. Dopasowanie nawiasów, nie
+ * regex na całość — inaczej pierwszy `}` w środku ucinałby blok w połowie.
+ */
+export function galezieBledu(zywy: string): string[] {
+  const out: string[] = [];
+  const naglowek = /\bcatch\s*(\([^)]*\))?\s*\{|\bif\s*\(([^)]*(?:err|error|Err|Error)[^)]*)\)\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = naglowek.exec(zywy)) !== null) {
+    const i = zywy.indexOf('{', m.index);
+    let glebokosc = 0;
+    let koniec = -1;
+    for (let k = i; k < zywy.length; k++) {
+      if (zywy[k] === '{') glebokosc++;
+      else if (zywy[k] === '}') {
+        glebokosc--;
+        if (glebokosc === 0) { koniec = k; break; }
+      }
+    }
+    if (koniec > i) out.push(zywy.slice(i, koniec + 1));
+  }
+  return out;
+}
+
+/** Czy ta gałąź błędu OPRÓŻNIA jakąś listę — jawnie albo przez `?? []`. */
+export function oprozniaListe(cialo: string): boolean {
+  return /\bset[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż0-9_]*\(\s*\[\s*\]\s*\)/.test(cialo)
+    || /\?\?\s*\[\s*\]/.test(cialo)
+    || /\|\|\s*\[\s*\]/.test(cialo);
+}
+
+/** Czy ta gałąź NAZYWA to, co się stało — logiem albo stanem odczytu. */
+export function nazywaOdczyt(cialo: string): boolean {
+  return /opisBleduOdczytuDoLogu\s*\(/.test(cialo)
+    || /setOdczyt[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż0-9_]*\(/.test(cialo);
+}
+
+/**
+ * ⚠️ DRUGA POŁOWA WZORCA, I TA GROŹNIEJSZA — bo nie widać jej w kodzie.
+ *
+ * Reguła: wynik zapytania wolno podeprzeć pustą listą tylko wtedy, gdy tuż
+ * przed tym ktoś zapytał o błąd. „Tuż przed" = 600 znaków żywego kodu — gałąź
+ * błędu odczytu zawsze stoi kilka linii nad jego użyciem, a szersze okno
+ * przepuściłoby plik, w którym słowo `error` pada gdziekolwiek indziej.
+ *
+ * ⛔ Wąsko dobrana lista nazw (`data`, `rows`, `…Res`, `…Surowe`) jest
+ * świadoma: `row.pain_entries || []` to zagnieżdżona relacja, która ma prawo
+ * być pusta, a nie wynik odczytu udający pustkę.
+ */
+export function niezauwazonyBlad(zywy: string): string[] {
+  const wynikZapytania =
+    /(?:(\w+)\.)?\b(\w*[Dd]ata|\w*[Rr]ows|\w+Res|\w*Surowe)\b\s*(?:\?\?|\|\|)\s*\[\s*\]/g;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = wynikZapytania.exec(zywy)) !== null) {
+    const okno = zywy.slice(Math.max(0, m.index - 600), m.index);
+    if (!/error|Err\b|\bErr/.test(okno)) {
+      out.push(zywy.slice(Math.max(0, m.index - 60), m.index + m[0].length).replace(/\s+/g, ' '));
+    }
+  }
+  return out;
+}
+
+/**
+ * ⭐ NAZWA FUNKCJI, W KTÓREJ SIEDZI TRAFIENIE (**O63**: „cytuj nazwę funkcji,
+ * nie numer linii" — dopisany komentarz przesuwa numer i przypisuje cudzy błąd
+ * nie temu, kto go popełnił).
+ *
+ * Szuka najbliższej deklaracji NAD trafieniem: `function x`, `const x = (`,
+ * `const x = useCallback`, `const x = async`, metoda obiektu.
+ * ⚠️ To jest heurystyka i tak ma być nazwana — przy zagnieżdżeniu poda
+ * najbliższą nazwę, nie zawsze tę najbardziej zewnętrzną.
+ */
+export function nazwaFunkcjiNad(zywy: string, pozycja: number): string {
+  const przed = zywy.slice(0, pozycja);
+  const deklaracja = /(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:useCallback\s*\(\s*)?(?:async\s*)?\(/g;
+  let nazwa = '(poziom modułu)';
+  let m: RegExpExecArray | null;
+  while ((m = deklaracja.exec(przed)) !== null) nazwa = m[1] ?? m[2] ?? nazwa;
+  return nazwa;
+}
+
+export type TrafienieWzorca = {
+  /** `galaz` — gałąź błędu czyści listę i milczy. `niezauwazony` — `?? []` bez pytania o błąd. */
+  postac: 'galaz' | 'niezauwazony';
+  /** Nazwa funkcji, nie numer linii (O63). */
+  funkcja: string;
+  /** Kawałek kodu, żeby dało się to znaleźć bez zgadywania. */
+  fragment: string;
+};
+
+/**
+ * ⭐ JEDNO WEJŚCIE DLA OBU STRAŻNIKÓW. Zwraca listę trafień w ŻYWYM kodzie
+ * (bez komentarzy) — pusta lista znaczy „ten plik nie ma wzorca".
+ */
+export function znajdzWzorzecPustki(zrodloSurowe: string): TrafienieWzorca[] {
+  const zywy = zyweZrodlo(zrodloSurowe);
+  const out: TrafienieWzorca[] = [];
+
+  for (const cialo of galezieBledu(zywy)) {
+    if (!oprozniaListe(cialo) || nazywaOdczyt(cialo)) continue;
+    out.push({
+      postac: 'galaz',
+      funkcja: nazwaFunkcjiNad(zywy, zywy.indexOf(cialo)),
+      fragment: cialo.replace(/\s+/g, ' ').slice(0, 100),
+    });
+  }
+
+  for (const fragment of niezauwazonyBlad(zywy)) {
+    out.push({
+      postac: 'niezauwazony',
+      funkcja: nazwaFunkcjiNad(zywy, Math.max(0, zywy.indexOf(fragment.trim().slice(0, 24)))),
+      fragment: fragment.slice(0, 100),
+    });
+  }
+
+  return out;
+}

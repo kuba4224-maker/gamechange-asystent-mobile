@@ -30,14 +30,58 @@ import {
   type GroupedSegment,
   type SegmentTier,
 } from './diagnosisProfile';
+// ⭐ PLAN-D-C3b 15.08.2026 — brzmienie „nie wiem" pochodzi z JEDNEJ funkcji
+// decyzyjnej, tej samej, którą pas C3 wpiął na sześciu ekranach. Ten plik
+// nie wymyśla własnego zdania (zakaz 4 polecenia C3b).
+import { rozpoznajPustke } from '../lib/trzyPustki';
+
+/**
+ * ⭐ PLAN-D-C3b 15.08.2026 — TRZY STANY WĄSKIEGO GARDŁA, NIE DWA.
+ *
+ * ── CO BYŁO NIE TAK ──────────────────────────────────────────────────
+ * Do dziś ten komponent brał `goalSegmentId: string | null` i renderował
+ * `null` jako zdanie **„Nie masz jeszcze wąskiego gardła."** `diagnoza.tsx`
+ * podawał `null` także wtedy, gdy odczyt `goals` PADŁ (`goalRes.error ? null`)
+ * — więc zawodnik z założonym wąskim gardłem czytał, że go nie ma, a razem
+ * z tym zdaniem dostawał zaproszenie do założenia drugiego.
+ * Pas C3 zmierzył tę ścieżkę i **nie mógł jej naprawić**: zdanie mieszka tutaj,
+ * a ten plik nie był na jego liście. Stąd nota zablokowania C3 §15 i ten pas.
+ *
+ * ── DLACZEGO TAGOWANA UNIA, A NIE OPCJONALNY PROP ────────────────────
+ * Polecenie C3b dało jedno kryterium wyboru kształtu: **pominięcie nowego
+ * stanu przez kolejny ekran ma ZAPALIĆ `tsc`.** Zmierzone na obu propozycjach:
+ *
+ *   • `odczytCeluUdanySie?: boolean | null` — **znak zapytania czyni prop
+ *     opcjonalnym**, więc nowy ekran, który go nie poda, kompiluje się
+ *     w ciszy. To jest dokładnie ten cichy brak, który ten pas usuwa.
+ *   • `goalSegmentId: string | null | 'nie_wiem'` — poszerzenie typu jest
+ *     nadtypem starego, więc ekran podający `string | null` też kompiluje się
+ *     w ciszy i nigdy nie obsłuży trzeciego stanu.
+ *
+ * Żaden z dwóch nie spełnia kryterium. Spełnia je **wymagany prop o typie
+ * tagowanej unii**: pominięcie to TS2741, podanie starego kształtu to TS2322,
+ * a dołożenie czwartego stanu zapala `never` w `SekcjaWaskiegoGardla`.
+ * ⚠️ Dowód nie jest deklaracją — trzy mutacje w `lib/trzyPustki.selftest.ts`
+ * (sekcja 12) sprawdzają, że każdy z tych trzech błędów naprawdę wychodzi.
+ */
+export type StanCelu =
+  /** Odczyt przeszedł i zawodnik ma priorytetowe wąskie gardło. */
+  | { stan: 'jest'; segmentId: string }
+  /** Odczyt przeszedł i zawodnik naprawdę żadnego nie ma. */
+  | { stan: 'brak' }
+  /** ⭐ Odczyt PADŁ. Nie wiemy, czy ma — i nie wolno nam zgadywać. */
+  | { stan: 'nie_wiem' };
 
 type Props = {
   /** Surowa zawartość `diagnostics.scores` — obiekt albo string JSON. */
   scoresRaw: unknown;
   /** `player_profiles.position_primary` (polska etykieta) albo null. */
   positionLabel: string | null;
-  /** `segment_id` aktywnego, priorytetowego Celu albo null. */
-  goalSegmentId: string | null;
+  /**
+   * ⭐ PLAN-D-C3b 15.08.2026 — było `goalSegmentId: string | null`.
+   * Prop jest WYMAGANY świadomie; patrz uzasadnienie przy `StanCelu`.
+   */
+  cel: StanCelu;
   onOpenGoals: () => void;
   onOpenProfile: () => void;
   /** Renderowane, gdy `scores` nie da się odczytać (patrz parseScores). */
@@ -81,7 +125,7 @@ function SegmentRow({ entry, color, showTier }: { entry: GroupedSegment; color: 
 }
 
 export default function DiagnosisProfileView({
-  scoresRaw, positionLabel, goalSegmentId, onOpenGoals, onOpenProfile, fallback,
+  scoresRaw, positionLabel, cel, onOpenGoals, onOpenProfile, fallback,
 }: Props) {
   const scores = parseScores(scoresRaw);
   if (!scores) return <>{fallback}</>;
@@ -100,8 +144,8 @@ export default function DiagnosisProfileView({
 
   // Powiązanie z Celem — bez ani jednego dodatkowego pytania do zawodnika:
   // wszystko liczone z danych, które system już ma.
-  const goalInGroup: GroupKey | null = goalSegmentId
-    ? (groupOrder.find((k) => groups[k].some((e) => e.id === goalSegmentId)) ?? null)
+  const goalInGroup: GroupKey | null = cel.stan === 'jest'
+    ? (groupOrder.find((k) => groups[k].some((e) => e.id === cel.segmentId)) ?? null)
     : null;
 
   return (
@@ -194,33 +238,97 @@ export default function DiagnosisProfileView({
 
       {/* POWIĄZANIE Z CELEM — domyka pętlę "skąd się to wzięło". */}
       {/* PLAN-D-A 08.2026 — ta sekcja czyta `goals`, czyli WĄSKIE GARDŁO. */}
+      {/* ⭐ PLAN-D-C3b 15.08.2026 — trzy gałęzie zamiast dwóch. Układ, karta
+          i style bez zmian; zmienia się wyłącznie to, że „nie masz" i „nie
+          wiem" przestały być jednym zdaniem. */}
       <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>Twoje wąskie gardło a ten profil</Text>
-      {!goalSegmentId ? (
-        <View style={styles.card}>
-          <Text style={styles.cardBody}>
-            Nie masz jeszcze wąskiego gardła. To ten profil decyduje, co system Ci podpowiada — najwięcej zmieni
-            praca w obszarze z pierwszej grupy powyżej.
-          </Text>
-          <TouchableOpacity onPress={onOpenGoals}>
-            <Text style={styles.link}>Wskaż pierwsze wąskie gardło →</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={[styles.card, goalInGroup === 'g1' && styles.cardHighlighted]}>
-          <Text style={styles.cardBody}>
-            {goalInGroup === 'g1'
-              ? `Twoje wąskie gardło to ${segmentLabel(goalSegmentId)} — obszar z grupy „${headings.g1.title}". Stąd biorą się zadania i rekomendacje, które dostajesz.`
-              : goalInGroup
-                ? `Twoje wąskie gardło to ${segmentLabel(goalSegmentId)} — obszar z grupy „${headings[goalInGroup].title}". Twoim najmocniejszym punktem zaczepienia jest dziś grupa „${headings.g1.title}" powyżej.`
-                : `Twoje wąskie gardło to ${segmentLabel(goalSegmentId)}. Ten obszar nie ma jeszcze wyniku w Twojej ostatniej diagnozie.`}
-          </Text>
-          <TouchableOpacity onPress={onOpenGoals}>
-            <Text style={styles.link}>Zobacz wąskie gardła →</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <SekcjaWaskiegoGardla
+        cel={cel}
+        goalInGroup={goalInGroup}
+        headings={headings}
+        onOpenGoals={onOpenGoals}
+      />
     </View>
   );
+}
+
+/**
+ * ⭐ PLAN-D-C3b 15.08.2026 — wydzielone z ciała `DiagnosisProfileView`, żeby
+ * `stanNieobsluzony` miał gdzie stanąć. To jest cała rzecz, która sprawia,
+ * że czwarty stan `StanCelu` NIE PRZEJDZIE po cichu: dołożenie go do unii
+ * bez dołożenia gałęzi tutaj zapala `tsc` na przypisaniu do `never`.
+ */
+function SekcjaWaskiegoGardla({
+  cel, goalInGroup, headings, onOpenGoals,
+}: {
+  cel: StanCelu;
+  goalInGroup: GroupKey | null;
+  headings: typeof GROUP_HEADINGS_WITH_POSITION;
+  onOpenGoals: () => void;
+}) {
+  // ⭐ „Nie wiem" idzie PRZED „nie masz" — ten sam porządek, który
+  // `rozpoznajPustke` ustaliła dla sześciu pozostałych ekranów.
+  if (cel.stan === 'nie_wiem') {
+    // ⛔ Brzmienie NIE JEST tu wymyślane. Pochodzi z tej samej funkcji
+    // decyzyjnej, co na sześciu ekranach pasa C3 — z wyjściem właściwym dla
+    // `diagnoza.tsx`, który jako jedyny z siedmiu NIE MA `RefreshControl`
+    // (zmierzone przez C3) i odświeża się dopiero przy wejściu na ekran.
+    const pustka = rozpoznajPustke({
+      maWpisy: false,
+      planLekcjiZnany: null,
+      moznaZapisywac: null,
+      odczytUdanySie: false,
+      daSieOdswiezyc: false,
+    });
+    if (!pustka) return null;
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardBody}>{pustka.tekst}</Text>
+        {/* ⛔ ANI JEDNEGO wejścia „Wskaż pierwsze wąskie gardło →". Nie wiemy,
+            czy zawodnik jakieś ma — a wysłanie go po drugie byłoby zdaniem
+            o nim postawionym na odczycie, który nie doszedł. Następnym krokiem
+            jest sprawdzenie jeszcze raz i tyle mu mówimy. */}
+        <Text style={styles.cardBody}>{pustka.cta}</Text>
+      </View>
+    );
+  }
+
+  if (cel.stan === 'brak') {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardBody}>
+          Nie masz jeszcze wąskiego gardła. To ten profil decyduje, co system Ci podpowiada — najwięcej zmieni
+          praca w obszarze z pierwszej grupy powyżej.
+        </Text>
+        <TouchableOpacity onPress={onOpenGoals}>
+          <Text style={styles.link}>Wskaż pierwsze wąskie gardło →</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (cel.stan === 'jest') {
+    return (
+      <View style={[styles.card, goalInGroup === 'g1' && styles.cardHighlighted]}>
+        <Text style={styles.cardBody}>
+          {goalInGroup === 'g1'
+            ? `Twoje wąskie gardło to ${segmentLabel(cel.segmentId)} — obszar z grupy „${headings.g1.title}". Stąd biorą się zadania i rekomendacje, które dostajesz.`
+            : goalInGroup
+              ? `Twoje wąskie gardło to ${segmentLabel(cel.segmentId)} — obszar z grupy „${headings[goalInGroup].title}". Twoim najmocniejszym punktem zaczepienia jest dziś grupa „${headings.g1.title}" powyżej.`
+              : `Twoje wąskie gardło to ${segmentLabel(cel.segmentId)}. Ten obszar nie ma jeszcze wyniku w Twojej ostatniej diagnozie.`}
+        </Text>
+        <TouchableOpacity onPress={onOpenGoals}>
+          <Text style={styles.link}>Zobacz wąskie gardła →</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // ⛔ NIEOSIĄGALNE I O TO CHODZI. Dołożenie czwartego stanu do `StanCelu`
+  // bez dołożenia gałęzi wyżej zapala tu `tsc` (TS2322: nie da się przypisać
+  // do `never`) — czyli dokładnie to, czego wymagało kryterium z C3b.1.
+  const stanNieobsluzony: never = cel;
+  return stanNieobsluzony;
 }
 
 const styles = StyleSheet.create({

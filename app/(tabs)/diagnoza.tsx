@@ -62,7 +62,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { colors, typography, spacing, radii, minTouchHeight } from '../../constants/theme';
-import DiagnosisProfileView from '../../components/DiagnosisProfileView';
+import DiagnosisProfileView, { type StanCelu } from '../../components/DiagnosisProfileView';
 // ⭐ PLAN-D-C3 15.08.2026 — patrz blok „TRZY PUSTKI" przy `loadDiagnoza`.
 import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
 
@@ -81,7 +81,11 @@ export default function DiagnozaScreen() {
   // WYNIK DIAGNOZY 07.08.2026 — nowy stan ekranu.
   const [scoresRaw, setScoresRaw] = useState<unknown>(null);
   const [positionLabel, setPositionLabel] = useState<string | null>(null);
-  const [goalSegmentId, setGoalSegmentId] = useState<string | null>(null);
+  // ⭐ PLAN-D-C3b 15.08.2026 — TRZY STANY, NIE DWA. Było
+  // `useState<string | null>(null)`, gdzie `null` znaczyło naraz „nie ma
+  // wąskiego gardła" i „nie udało się go odczytać". Pas C3 zmierzył, że to
+  // drugie znaczenie docierało do zawodnika jako pierwsze.
+  const [cel, setCel] = useState<StanCelu>({ stan: 'nie_wiem' });
 
   const loadDiagnoza = useCallback(async () => {
     if (!currentUser) return;
@@ -123,26 +127,35 @@ export default function DiagnozaScreen() {
       // pokazuje 3 grupy zamiast 4 (fallback już obsłużony w
       // groupSegmentsForDisplay), bez Celu — sekcję zachęty do jego założenia.
       //
-      // ⚠️ PLAN-D-C3 15.08.2026 — TO ZOSTAJE, ALE PRZESTAJE BYĆ CICHE.
-      // Oba `? null :` zlewają „nie udało się odczytać" z „zawodnik tego nie
-      // ma" i oba renderują na tej podstawie zdanie o zawodniku:
+      // ⚠️ PLAN-D-C3 15.08.2026 — OBA `? null :` BYŁY CICHE: zlewały
+      // „nie udało się odczytać" z „zawodnik tego nie ma" i renderowały na tej
+      // podstawie zdanie o zawodniku:
       //   • pozycja  → inne grupowanie 13 obszarów i inny scenariusz nagłówka,
-      //   • cel      → „Nie masz jeszcze wąskiego gardła." w
-      //                `components/DiagnosisProfileView.tsx` (linia sekcji
-      //                „Twoje wąskie gardło a ten profil").
-      // Drugiego z nich NIE DA SIĘ naprawić z tego pliku: zdanie mieszka
-      // w komponencie, którego pas C3 nie ma na liście plików, a prop
-      // `goalSegmentId: string | null` nie ma jak wyrazić „nie wiem".
-      // Patrz `claude/PRZEKAZANIE_PAS_C3_15_08_2026.md`, NOTA ZABLOKOWANIA.
-      // Do czasu odblokowania obie ścieżki mają przynajmniej GŁOŚNY log.
+      //   • cel      → „Nie masz jeszcze wąskiego gardła."
+      //
+      // ⭐ PLAN-D-C3b 15.08.2026 — DRUGI Z NICH JEST ZAMKNIĘTY.
+      // Blokada z noty C3 §15 zdjęta: `components/DiagnosisProfileView.tsx`
+      // wszedł do zakresu tego pasa, a prop `goalSegmentId: string | null`
+      // ustąpił miejsca WYMAGANEMU `cel: StanCelu` z trzema stanami. Zawodnik
+      // po nieudanym odczycie `goals` czyta „Nie udało się sprawdzić.",
+      // a nie zdanie o sobie.
+      //
+      // ⚠️ ŚCIEŻKA `player_profiles` ZOSTAJE CICHA i to jest świadome: nie
+      // stawia zdania, tylko po cichu zmienia grupowanie 13 obszarów. Naprawa
+      // wymaga miejsca na ekranie, czyli decyzji o układzie — poza zakazem 5
+      // tego pasa. Log zostaje, żeby nie była niewidoczna.
       if (profileRes.error) {
         console.warn(opisBleduOdczytuDoLogu('diagnoza.loadDiagnoza → player_profiles', profileRes.error));
       }
+      setPositionLabel(profileRes.error ? null : (profileRes.data?.[0]?.position_primary ?? null));
+
       if (goalRes.error) {
         console.warn(opisBleduOdczytuDoLogu('diagnoza.loadDiagnoza → goals', goalRes.error));
+        setCel({ stan: 'nie_wiem' });
+      } else {
+        const segmentId = goalRes.data?.[0]?.segment_id ?? null;
+        setCel(segmentId ? { stan: 'jest', segmentId } : { stan: 'brak' });
       }
-      setPositionLabel(profileRes.error ? null : (profileRes.data?.[0]?.position_primary ?? null));
-      setGoalSegmentId(goalRes.error ? null : (goalRes.data?.[0]?.segment_id ?? null));
 
       const latest = diagRes.data?.[0];
       if (latest) {
@@ -218,7 +231,7 @@ export default function DiagnozaScreen() {
           <DiagnosisProfileView
             scoresRaw={scoresRaw}
             positionLabel={positionLabel}
-            goalSegmentId={goalSegmentId}
+            cel={cel}
             onOpenGoals={() => router.push('/cele')}
             onOpenProfile={() => router.push('/profil')}
             fallback={doneWithoutScores}

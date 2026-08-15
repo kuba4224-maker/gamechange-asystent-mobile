@@ -39,7 +39,7 @@
 //
 // ⚠️ O53: żadnego `new URL(...)` — `readFileSync` + `fileURLToPath`.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,6 +63,12 @@ import {
   BRZMIENIE_DO_PRZEJRZENIA_C3,
   type Pustka,
   type WejsciePustki,
+  // ⭐ PLAN-D-C3b 15.08.2026 — JEDNA implementacja wzorca, dwóch czytelników.
+  zyweZrodlo,
+  galezieBledu,
+  oprozniaListe,
+  nazywaOdczyt,
+  niezauwazonyBlad,
 } from './trzyPustki';
 import { ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from './dostepKonta';
 
@@ -275,6 +281,80 @@ console.log('\n6. (T6) EKRANY NAPRAWDĘ PODPIĘŁY KOMUNIKAT — asercja na źr�
 //        nazywając tego ani logiem, ani stanem odczytu.
 //   R12. Brzmienia czwartego rodzaju są oznaczone jako nieprzejrzane.
 
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-C3b 15.08.2026 — STRAŻNIK PRZESTAJE WIERZYĆ LIŚCIE
+// ═════════════════════════════════════════════════════════════════════
+//
+// Do dziś stała tu lista SIEDMIU nazw plików, wpisana ręcznie przez pas C3.
+// Ósmy ekran wpadłby do `app/(tabs)/` i **nikt by go nie sprawdził**, a ten
+// strażnik świeciłby na zielono — czyli dokładnie ta klasa cichego braku,
+// przed którą stoi cały ten plik.
+//
+// To jest ten sam ruch, który zrobił u siebie `tests/run-selftests.mjs`
+// i uzasadnił go w nagłówku co do znaku: *„Odkrywanie zamiast listy na sztywno
+// […] Lista na sztywno prędzej czy później rozjechałaby się z katalogiem —
+// a runner, który po cichu nie uruchamia połowy testów, jest gorszy niż brak
+// runnera, bo daje fałszywą zieloną odpowiedź."*
+//
+// ⚠️ WYJĄTEK MUSI BYĆ ZASŁUŻONY, NIE WPISANY. Osobna asercja niżej sprawdza,
+// że każdy plik z tej listy naprawdę nie ma ani jednego odczytu — inaczej
+// „lista wyjątków" byłaby wygodnym miejscem na chowanie ekranów.
+const KATALOG_EKRANOW = join(appRoot, 'app', '(tabs)');
+
+const EKRANY_BEZ_ODCZYTU: { plik: string; powod: string }[] = [
+  {
+    plik: '_layout.tsx',
+    powod: 'konfiguracja paska zakładek — ZMIERZONE 15.08.2026: zero wystąpień `supabase`',
+  },
+  {
+    plik: 'wiecej.tsx',
+    powod: 'lista linków do tras chowanych — ZMIERZONE 15.08.2026: zero wystąpień `supabase`',
+  },
+];
+
+/**
+ * ⭐ DRUGA LISTA, ZUPEŁNIE INNA OD PIERWSZEJ — I TO JEST WAŻNE.
+ *
+ * `EKRANY_BEZ_ODCZYTU` to ekrany, które **nie mają czego łamać**.
+ * Ta lista to ekrany, które regułę łamią, **należą do innego pasa** i zostały
+ * ZGŁOSZONE, a nie naprawione. Wprost z O68: cudzy plik naprawiony przez ten
+ * pas znika bez śladu przy jego pushu, a jego autor widzi zielone i nie
+ * dowiaduje się, że coś było nie tak.
+ *
+ * ⚠️ TA LISTA MA SIĘ SAMA KASOWAĆ. Asercja niżej sprawdza, że każda pozycja
+ * NADAL ma opisany defekt — pozycja naprawiona przez właściciela zapala
+ * strażnika z poleceniem usunięcia jej stąd. Bez tego „dług zgłoszony"
+ * zamieniłby się w listę, na której da się przenocować dowolnie długo.
+ */
+const DLUG_ZGLOSZONY: { plik: string; pas: string; znalezione: string }[] = [
+  {
+    plik: 'profil.tsx',
+    pas: 'L2 (raport rodzica) — pas w locie 15.08.2026',
+    znalezione: 'R10: nie woła `rozpoznajPustke` · R11: `injuryRes.data ?? []` w `loadProfile`',
+  },
+  {
+    plik: 'dzis.tsx',
+    pas: 'C4 (licznik bez zerowania) — pas w locie 15.08.2026',
+    znalezione: 'R11: `eventsRes.data ?? []` przy odczycie kalendarza',
+  },
+];
+
+const NAZWY_WYJATKOW = new Set([
+  ...EKRANY_BEZ_ODCZYTU.map((e) => e.plik),
+  ...DLUG_ZGLOSZONY.map((e) => e.plik),
+]);
+
+/** Wszystkie ekrany zakładek poza jawnie nazwanymi wyjątkami. */
+const EKRANY_PRZEMIATANE = readdirSync(KATALOG_EKRANOW)
+  .filter((f) => f.endsWith('.tsx') && !NAZWY_WYJATKOW.has(f))
+  .sort()
+  .map((f) => `app/(tabs)/${f}`);
+
+/**
+ * Siedem ekranów pasa C3 — **nie po to, żeby po nich przemiatać** (od C3b
+ * przemiatamy katalog), tylko po to, żeby pokrycie nie mogło po cichu ZNIKNĄĆ.
+ * Gdyby ktoś dopisał któryś z nich do wyjątków, zapali się asercja niżej.
+ */
 const SIEDEM_EKRANOW_C3 = [
   'app/(tabs)/biblioteka.tsx',
   'app/(tabs)/diagnoza.tsx',
@@ -285,87 +365,17 @@ const SIEDEM_EKRANOW_C3 = [
   'app/(tabs)/cele.tsx',
 ];
 
-/** Kod BEZ komentarzy — inaczej strażnik zapala się na własnej dokumentacji. */
-function zyweZrodlo(zrodlo: string): string {
-  return zrodlo
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
-}
+// ⭐ PLAN-D-C3b 15.08.2026 — IMPLEMENTACJA WZORCA PRZEPROWADZIŁA SIĘ
+// do `lib/trzyPustki.ts` i jest wołana Z DWÓCH MIEJSC: stąd i z
+// `lib/pustkaWCalymRepo.selftest.ts`. Powód wprost z polecenia C3b.3:
+// dwie kopie tej samej reguły rozjadą się, a wtedy jeden strażnik będzie
+// świecił na zielono na tym, na czym drugi świeci na czerwono.
+// ⚠️ Chodzenie po dysku ZOSTAJE w selftestach — `lib/trzyPustki.ts` nie
+// dotyka `node:fs` i nie ma prawa zacząć.
 
 function wczytajZywe(plik: string): string {
   const sciezka = join(appRoot, plik);
   return existsSync(sciezka) ? zyweZrodlo(readFileSync(sciezka, 'utf8')) : '';
-}
-
-/**
- * Wycina ciała gałęzi błędu: każdy `catch (…) { … }` i każdy
- * `if (<warunek zawierający err/error/Err>) { … }`. Dopasowanie nawiasów, nie
- * regex na całość — inaczej pierwszy `}` w środku ucinałby blok w połowie.
- */
-function galezieBledu(zywy: string): string[] {
-  const out: string[] = [];
-  const naglowek = /\bcatch\s*(\([^)]*\))?\s*\{|\bif\s*\(([^)]*(?:err|error|Err|Error)[^)]*)\)\s*\{/g;
-  let m: RegExpExecArray | null;
-  while ((m = naglowek.exec(zywy)) !== null) {
-    let i = zywy.indexOf('{', m.index);
-    let glebokosc = 0;
-    let koniec = -1;
-    for (let k = i; k < zywy.length; k++) {
-      if (zywy[k] === '{') glebokosc++;
-      else if (zywy[k] === '}') {
-        glebokosc--;
-        if (glebokosc === 0) { koniec = k; break; }
-      }
-    }
-    if (koniec > i) out.push(zywy.slice(i, koniec + 1));
-  }
-  return out;
-}
-
-/** Czy ta gałąź błędu OPRÓŻNIA jakąś listę — jawnie albo przez `?? []`. */
-function oprozniaListe(cialo: string): boolean {
-  return /\bset[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż0-9_]*\(\s*\[\s*\]\s*\)/.test(cialo)
-    || /\?\?\s*\[\s*\]/.test(cialo)
-    || /\|\|\s*\[\s*\]/.test(cialo);
-}
-
-/** Czy ta gałąź NAZYWA to, co się stało — logiem albo stanem odczytu. */
-function nazywaOdczyt(cialo: string): boolean {
-  return /opisBleduOdczytuDoLogu\s*\(/.test(cialo)
-    || /setOdczyt[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż0-9_]*\(/.test(cialo);
-}
-
-/**
- * ⚠️ DRUGA POŁOWA WZORCA „BŁĄD → PUSTA LISTA", I TA GROŹNIEJSZA.
- *
- * ZMIERZONE 15.08.2026 na źródłach z `main`: sama analiza gałęzi `catch` /
- * `if (err)` łapie 4 z 7 ekranów. Trzech nie łapie — `biblioteka.tsx`,
- * `ja.tsx` i `dziennik.tsx` — bo ich defekt NIE MIAŁ gałęzi błędu. Miał
- * `goalsRes.data ?? []` w głównym przepływie, przy odczycie, którego `.error`
- * nikt nigdy nie czytał. Błąd nie był obsłużony źle; był NIEZAUWAŻONY.
- *
- * Reguła: wynik zapytania wolno podeprzeć pustą listą tylko wtedy, gdy tuż
- * przed tym ktoś zapytał o błąd. „Tuż przed" = 600 znaków żywego kodu — gałąź
- * błędu odczytu zawsze stoi kilka linii nad jego użyciem, a szersze okno
- * przepuściłoby plik, w którym słowo `error` pada gdziekolwiek indziej.
- *
- * ⛔ Wąsko dobrana lista nazw (`data`, `rows`, `…Res`, `…Surowe`) jest
- * świadoma: `row.pain_entries || []` to zagnieżdżona relacja, która ma prawo
- * być pusta, a nie wynik odczytu udający pustkę.
- */
-function niezauwazonyBlad(zywy: string): string[] {
-  const wynikZapytania =
-    /(?:(\w+)\.)?\b(\w*[Dd]ata|\w*[Rr]ows|\w+Res|\w*Surowe)\b\s*(?:\?\?|\|\|)\s*\[\s*\]/g;
-  const out: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = wynikZapytania.exec(zywy)) !== null) {
-    const okno = zywy.slice(Math.max(0, m.index - 600), m.index);
-    if (!/error|Err\b|\bErr/.test(okno)) {
-      out.push(zywy.slice(Math.max(0, m.index - 60), m.index + m[0].length).replace(/\s+/g, ' '));
-    }
-  }
-  return out;
 }
 
 // ── BATERIA — te same asercje na prawdziwych i na zepsutych zasadach ──
@@ -430,8 +440,8 @@ function bateria(z: Zasady): WynikBaterii[] {
       === PUSTKA_BLAD_ODCZYTU_TEKST,
     'ekran po nieudanym odczycie nadal mówi zawodnikowi, że nic nie ma');
 
-  // ── R10 · siedem ekranów woła `rozpoznajPustke` ────────────────────
-  for (const plik of SIEDEM_EKRANOW_C3) {
+  // ── R10 · KAŻDY przemiatany ekran woła `rozpoznajPustke` ───────────
+  for (const plik of EKRANY_PRZEMIATANE) {
     zapisz(`R10 · ${plik} woła \`rozpoznajPustke\``,
       /rozpoznajPustke\s*\(/.test(z.zrodla[plik] ?? ''),
       'ekran nadal sam decyduje, co znaczy jego pustka');
@@ -440,7 +450,7 @@ function bateria(z: Zasady): WynikBaterii[] {
   // ── R11 · żadnego wzorca „błąd → pusta lista", w OBU jego postaciach ──
   // (a) gałąź błędu, która opróżnia listę i nic nie mówi;
   // (b) wynik zapytania podparty pustą listą tam, gdzie nikt nie pytał o błąd.
-  for (const plik of SIEDEM_EKRANOW_C3) {
+  for (const plik of EKRANY_PRZEMIATANE) {
     const zywy = z.zrodla[plik] ?? '';
     const cicheGalezie = galezieBledu(zywy).filter((c) => oprozniaListe(c) && !nazywaOdczyt(c));
     const niezauwazone = niezauwazonyBlad(zywy);
@@ -458,7 +468,7 @@ function bateria(z: Zasady): WynikBaterii[] {
 
 const ZASADY_PRAWDZIWE: Zasady = {
   decyduj: rozpoznajPustke,
-  zrodla: Object.fromEntries(SIEDEM_EKRANOW_C3.map((p) => [p, wczytajZywe(p)])),
+  zrodla: Object.fromEntries(EKRANY_PRZEMIATANE.map((p) => [p, wczytajZywe(p)])),
 };
 
 // ═════════════════════════════════════════════════════════════════════
@@ -468,6 +478,54 @@ console.log('\n7. ⭐ (C3) CZWARTY RODZAJ + SIEDEM EKRANÓW — bateria na prawd
   check('(strażnik strażnika) mam co przemiatać — siedem plików istnieje',
     SIEDEM_EKRANOW_C3.every((p) => existsSync(join(appRoot, p))),
     SIEDEM_EKRANOW_C3.filter((p) => !existsSync(join(appRoot, p))).join(', '));
+
+  // ── ⭐ PLAN-D-C3b 15.08.2026 — asercje o SAMYM PRZEMIATANIU ──────────
+  console.log(`   przemiatam ${EKRANY_PRZEMIATANE.length} ekranów: ${EKRANY_PRZEMIATANE.map((p) => p.split('/').pop()).join(', ')}`);
+  console.log(`   wyjątki (${EKRANY_BEZ_ODCZYTU.length}): ${EKRANY_BEZ_ODCZYTU.map((e) => e.plik).join(', ')}`);
+
+  console.log(`   ⚠️ DŁUG ZGŁOSZONY, NIE NAPRAWIONY (${DLUG_ZGLOSZONY.length}) — cudze pasy, O68:`);
+  for (const d of DLUG_ZGLOSZONY) console.log(`      • ${d.plik} — ${d.pas} — ${d.znalezione}`);
+
+  const wszystkieEkrany = readdirSync(KATALOG_EKRANOW).filter((f) => f.endsWith('.tsx'));
+  check('⭐ przemiatam KATALOG, nie listę — suma się zgadza',
+    EKRANY_PRZEMIATANE.length + EKRANY_BEZ_ODCZYTU.length + DLUG_ZGLOSZONY.length === wszystkieEkrany.length,
+    `${EKRANY_PRZEMIATANE.length} + ${EKRANY_BEZ_ODCZYTU.length} + ${DLUG_ZGLOSZONY.length} ≠ ${wszystkieEkrany.length}`);
+
+  check('⛔ ⭐ każda pozycja długu wskazuje PAS, który za nią odpowiada',
+    DLUG_ZGLOSZONY.every((d) => /pas|L2|C4|C3/i.test(d.pas) && d.znalezione.includes('R1')),
+    DLUG_ZGLOSZONY.filter((d) => !d.znalezione.includes('R1')).map((d) => d.plik).join(', '));
+
+  // ⚠️ ⭐ LISTA DŁUGU KASUJE SIĘ SAMA. Pozycja, której właściciel naprawił
+  // defekt, przestaje mieć prawo tu stać — inaczej za tydzień nikt nie będzie
+  // wiedział, czy te dwa ekrany są jeszcze zepsute, czy tylko zapomniane.
+  const juzNaprawione = DLUG_ZGLOSZONY.filter((d) => {
+    const zywy = wczytajZywe(`app/(tabs)/${d.plik}`);
+    const madefekt = galezieBledu(zywy).some((c) => oprozniaListe(c) && !nazywaOdczyt(c))
+      || niezauwazonyBlad(zywy).length > 0
+      || !/rozpoznajPustke\s*\(/.test(zywy);
+    return !madefekt;
+  });
+  check('⛔ ⭐ dług zgłoszony NADAL istnieje — naprawione pozycje wypadają z listy',
+    juzNaprawione.length === 0,
+    `NAPRAWIONE przez właściciela, usuń z DLUG_ZGLOSZONY: ${juzNaprawione.map((d) => d.plik).join(', ')}`);
+
+  // ⚠️ WYJĄTEK MUSI BYĆ ZASŁUŻONY. Bez tej asercji lista wyjątków byłaby
+  // wygodnym miejscem na schowanie ekranu, który zapala strażnika.
+  const wyjatkiZOdczytem = EKRANY_BEZ_ODCZYTU
+    .filter((e) => /supabase\s*\.|from\(['"`]/.test(wczytajZywe(`app/(tabs)/${e.plik}`)));
+  check('⛔ ⭐ żaden wyjątek nie ma ODCZYTU — wyjątek jest zasłużony, nie wpisany',
+    wyjatkiZOdczytem.length === 0,
+    `ekran z odczytem schowany w wyjątkach: ${wyjatkiZOdczytem.map((e) => e.plik).join(', ')}`);
+
+  check('⛔ ⭐ każdy wyjątek ma NAPISANY powód, nie samą nazwę',
+    EKRANY_BEZ_ODCZYTU.every((e) => e.powod.length > 20 && /ZMIERZONE/.test(e.powod)),
+    EKRANY_BEZ_ODCZYTU.filter((e) => !/ZMIERZONE/.test(e.powod)).map((e) => e.plik).join(', '));
+
+  // ⚠️ Pokrycie z pasa C3 nie może po cichu ZNIKNĄĆ przez dopisanie ekranu
+  // do wyjątków. To jest ta sama reguła co „zakaz cichego zniknięcia".
+  const zgubione = SIEDEM_EKRANOW_C3.filter((p) => !EKRANY_PRZEMIATANE.includes(p));
+  check('⛔ ⭐ żaden z siedmiu ekranów pasa C3 nie wypadł z przemiatania',
+    zgubione.length === 0, `wypadły: ${zgubione.join(', ')}`);
 
   for (const w of bateria(ZASADY_PRAWDZIWE)) check(w.label, w.ok, w.detail);
 }
