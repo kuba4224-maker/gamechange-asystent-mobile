@@ -2,11 +2,27 @@
 // lib/matchSegmentSelection.ts — celowo OSOBNO od czystej logiki kaskady
 // (lib/livingDiagnosisCascade.ts), żeby dało się ją testować bez sieci/RN.
 import { supabase } from './supabase';
+import { zbierzStanOdczytu, type StanOdczytuKontekstu } from './matchSegmentSelection';
 import type { PlayerLivingDiagnosisContext } from './livingDiagnosisCascade';
 
 export type LivingDiagnosisLoadResult = {
   context: PlayerLivingDiagnosisContext;
   lastAnyPulseAt: string | null;
+  /**
+   * ⭐ PLAN-D-E1 15.08.2026 — stan odczytu, ten sam kształt i TA SAMA
+   * implementacja co w `lib/matchSegmentSelection.ts` (importowana, nie
+   * przepisana: dwie kopie rozjechałyby się i jedna warstwa meldowałaby błąd,
+   * a druga milczała na tym samym kształcie danych).
+   *
+   * ⚠️ Do dziś `pulsesRes.error` nie występował w tym pliku ANI RAZU.
+   * `pulsesRes.data ?? []` po odmowie RLS dawał „zawodnik nigdy nie
+   * odpowiedział na żaden puls" — a `isPulseDueToday(null)` czyta to jako
+   * „pierwszy puls w życiu, pokaż go dziś". Zawodnik dostawał pytanie,
+   * na które być może odpowiadał wczoraj.
+   *
+   * ⛔ Warstwa I/O NIE rysuje z tego zdania. Przekazuje wyżej; decyduje ekran.
+   */
+  odczyt: StanOdczytuKontekstu;
 };
 
 export async function fetchPlayerLivingDiagnosisContext(userId: string): Promise<LivingDiagnosisLoadResult> {
@@ -45,6 +61,16 @@ export async function fetchPlayerLivingDiagnosisContext(userId: string): Promise
 
   const activeGoalSegmentId: string | null = goalRes.data?.[0]?.segment_id ?? null;
 
+  // ⭐ PLAN-D-E1 15.08.2026 — ten sam defekt co w `matchSegmentSelection.ts`
+  // i ten sam kształt co w `biblioteka.tsx` naprawionej rano przez C3:
+  // cztery odpowiedzi z polem `.error`, którego nie czytała żadna.
+  const odczyt = zbierzStanOdczytu('livingDiagnosisPulses.fetchPlayerLivingDiagnosisContext', [
+    ['player_profiles', profileRes.error],
+    ['diagnostics', diagnosisRes.error],
+    ['goals', goalRes.error],
+    ['living_diagnosis_pulses', pulsesRes.error],
+  ]);
+
   const segmentLastPulsedAt: Partial<Record<string, string>> = {};
   let lastAnyPulseAt: string | null = null;
   for (const row of pulsesRes.data ?? []) {
@@ -61,6 +87,7 @@ export async function fetchPlayerLivingDiagnosisContext(userId: string): Promise
   return {
     context: { profilePosition, latestScores, activeGoalSegmentId, segmentLastPulsedAt },
     lastAnyPulseAt,
+    odczyt,
   };
 }
 

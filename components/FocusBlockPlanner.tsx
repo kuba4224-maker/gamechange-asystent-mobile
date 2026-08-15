@@ -67,6 +67,14 @@ import {
   type StanOgraniczen,
 } from '../lib/ograniczenia';
 import { poniedzialekTygodnia as poniedzialekGlosu } from '../lib/glosTygodnia';
+// ⭐ PLAN-D-E1 15.08.2026 — ten komponent prowadzi TEN SAM przepływ
+// Obszar→Element co `app/(tabs)/cele.tsx` i miał DWA BLIŹNIACZE defekty tego,
+// który pas C3 naprawił tam rano. Naprawa ekranu nie naprawiła komponentu:
+// ten sam `catch { setObszary([]) }` żył dalej w drugiej kopii.
+// ⛔ Ani jednego nowego brzmienia — oba zdania „pusto" idą do `rozpoznajPustke`
+// co do znaku takie, jakie były, i wychodzą z niej takie same. Zmienia się
+// wyłącznie to, KIEDY zawodnik je czyta.
+import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../lib/trzyPustki';
 
 const FOCUS_BLOCK_DOSING_API_URL = 'https://gamechange-app.vercel.app/api/generate-focus-block-dosing';
 
@@ -149,6 +157,10 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
   // ── PLAN-D-A 08.2026 — budżet uwagi, ładowany PRZED pierwszym wyborem ──
   const [budzet, setBudzet] = useState<BudzetView>({ kind: 'loading' });
   const [otwarteBloki, setOtwarteBloki] = useState<OtwartyBlok[]>([]);
+  // ⭐ PLAN-D-E1 15.08.2026 — TRZY WARTOŚCI, NIE DWIE. `null` znaczy „jeszcze
+  // nie czytałem", a NIE „odczyt przeszedł". Bez tego rozróżnienia pierwsze
+  // renderowanie wygląda identycznie jak nieudany odczyt.
+  const [odczytOtwartychBlokowUdanySie, setOdczytOtwartychBlokowUdanySie] = useState<boolean | null>(null);
 
   // PLAN-D-J 08.2026 — stan początkowy to `nie_odczytane`, nigdy „nic nie
   // obowiązuje". Przed odczytem nie wiadomo, czy zawodnik jest w Osłonie.
@@ -183,10 +195,20 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
       .eq('user_id', currentUserId)
       .eq('status', 'active');
     if (err) {
-      console.warn('[budzet] Nie udało się odczytać otwartych Bloków:', err.message);
-      setOtwarteBloki([]);
+      // ⭐ PLAN-D-E1 15.08.2026 — było: log własnymi słowami + `setOtwarteBloki([])`.
+      // ZNIKA CZYSZCZENIE LISTY. Ta lista istnieje wyłącznie po to, żeby zdanie
+      // o przekroczonym budżecie mogło powiedzieć, KTÓRY Blok zamknąć. Opróżnienie
+      // jej po nieudanym odświeżeniu odbierało zawodnikowi jedyną konkretną
+      // informację w tym zdaniu i zostawiało go z „zamknij jeden z otwartych" —
+      // czyli z odesłaniem go tam, skąd właśnie przyszedł. Wiersze sprzed
+      // nieudanego odczytu są prawdziwsze niż ich brak (`maWpisy` bije wszystko).
+      // ⚠️ Log idzie przez `opisBleduOdczytuDoLogu`, tak jak na siedmiu ekranach
+      // pasa C3 — jedno brzmienie w konsoli zamiast siedmiu własnych.
+      console.warn(opisBleduOdczytuDoLogu('FocusBlockPlanner.loadOtwarteBloki → focus_blocks', err));
+      setOdczytOtwartychBlokowUdanySie(false);
       return;
     }
+    setOdczytOtwartychBlokowUdanySie(true);
     setOtwarteBloki(((data ?? []) as any[]).map((r) => ({
       id: r.id,
       label: r.custom_description ?? r.segment_components?.name ?? r.segment_id,
@@ -234,9 +256,11 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
   const [browsing, setBrowsing] = useState(!goal.refinement_note);
   const [obszary, setObszary] = useState<SegmentComponent[]>([]);
   const [obszaryLoading, setObszaryLoading] = useState(false);
+  const [odczytObszarowUdanySie, setOdczytObszarowUdanySie] = useState<boolean | null>(null);
   const [selectedObszarId, setSelectedObszarId] = useState<string | null>(null);
   const [elementy, setElementy] = useState<SegmentComponent[]>([]);
   const [elementyLoading, setElementyLoading] = useState(false);
+  const [odczytElementowUdanySie, setOdczytElementowUdanySie] = useState<boolean | null>(null);
   const [freeTextMode, setFreeTextMode] = useState(false);
   const [freeText, setFreeText] = useState('');
 
@@ -252,11 +276,22 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
       if (err) throw err;
       const rows = (data ?? []) as SegmentComponent[];
       setObszary(rows);
+      setOdczytObszarowUdanySie(true);
       // Segment bez Obszarów w bazie (dziś: wyłącznie techSpec) — bezpieczny
       // spadek na "opisz sam", tak samo jak w cele.tsx.
       if (rows.length === 0) setFreeTextMode(true);
-    } catch {
+    } catch (e) {
+      // ⭐ PLAN-D-E1 15.08.2026 — BLIŹNIAK defektu, który C3 naprawił rano
+      // w `cele.tsx :: loadObszary`. Naprawa ekranu nie naprawiła komponentu.
+      // FALLBACK ZOSTAJE — zawodnik nadal może opisać cel własnymi słowami
+      // i ta droga nie może zniknąć. Cichy być przestaje: `setObszary([])`
+      // po nieudanym odczycie wyświetlał zdanie „Ten segment nie ma jeszcze
+      // gotowej listy obszarów", czyli TWIERDZENIE O TREŚCI PRODUKTU
+      // postawione na zapytaniu, które nie doszło. Zawodnik nie ma jak zgadnąć,
+      // że ta lista istnieje — więc nie ma też powodu tu wracać.
+      console.warn(opisBleduOdczytuDoLogu('FocusBlockPlanner.loadObszary → segment_components (obszary)', e));
       setObszary([]);
+      setOdczytObszarowUdanySie(false);
       setFreeTextMode(true);
     } finally {
       setObszaryLoading(false);
@@ -278,8 +313,14 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
         .order('display_order', { ascending: true });
       if (err) throw err;
       setElementy((data ?? []) as SegmentComponent[]);
-    } catch {
+      setOdczytElementowUdanySie(true);
+    } catch (e) {
+      // ⭐ PLAN-D-E1 15.08.2026 — DRUGI BLIŹNIAK z `cele.tsx :: loadElementy`.
+      // `setElementy([])` po nieudanym odczycie wyświetlało „Brak elementów dla
+      // tego obszaru." — zdanie o zawartości bazy postawione bez zajrzenia do niej.
+      console.warn(opisBleduOdczytuDoLogu('FocusBlockPlanner.loadElementy → segment_components (elementy)', e));
       setElementy([]);
+      setOdczytElementowUdanySie(false);
     } finally {
       setElementyLoading(false);
     }
@@ -288,6 +329,9 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
   const selectObszar = (id: string) => {
     setSelectedObszarId(id);
     setElementy([]);
+    // ⭐ PLAN-D-E1: nowy Obszar to nowy odczyt — stan wraca do „jeszcze nie
+    // czytałem", żeby wynik POPRZEDNIEGO obszaru nie orzekał o bieżącym.
+    setOdczytElementowUdanySie(null);
     loadElementy(id);
   };
 
@@ -571,6 +615,41 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
     );
   };
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-E1 15.08.2026 — DWA ZDANIA „PUSTO" PRZEZ JEDNĄ FUNKCJĘ DECYZYJNĄ
+  // ═══════════════════════════════════════════════════════════════════
+  // Oba brzmienia idą CO DO ZNAKU takie, jakie były (zakaz 4) — zmienia się
+  // wyłącznie to, KIEDY zawodnik je czyta. Wzorzec wzięty z `cele.tsx`, czyli
+  // z ekranu, którego bliźniakiem jest ten komponent.
+  //
+  // ⚠️ `daSieOdswiezyc: false` — ZMIERZONE, nie założone. Planer renderuje się
+  // inline wewnątrz `cele.tsx`, który MA `RefreshControl`, ale jego `onRefresh`
+  // woła wyłącznie `loadGoals()` i `loadActiveBlocks()`. Pociągnięcie w dół NIE
+  // przeładowuje ani Obszarów, ani Elementów — więc „Pociągnij w dół, żeby
+  // sprawdzić jeszcze raz." byłoby obietnicą, której produkt nie dotrzymuje.
+  // Te dwa odczyty wracają przy ponownym wejściu w krok wyboru, i to jest
+  // dokładnie kształt, dla którego pas C3 zrobił drugie wyjście.
+  const bezZakresu = { planLekcjiZnany: null, moznaZapisywac: null, daSieOdswiezyc: false } as const;
+  const pustkaObszarow = rozpoznajPustke({
+    ...bezZakresu,
+    maWpisy: obszary.length > 0,
+    odczytUdanySie: odczytObszarowUdanySie,
+    tekstBrakuDanych: 'Ten segment nie ma jeszcze gotowej listy obszarów — opisz swój cel własnymi słowami.',
+  });
+  const pustkaElementow = rozpoznajPustke({
+    ...bezZakresu,
+    maWpisy: elementy.length > 0,
+    odczytUdanySie: odczytElementowUdanySie,
+    tekstBrakuDanych: 'Brak elementów dla tego obszaru.',
+  });
+
+  const renderPustke = (p: ReturnType<typeof rozpoznajPustke>, styl: any) => (p ? (
+    <>
+      <Text style={styl}>{p.tekst}</Text>
+      {p.krokWTekscie ? null : <Text style={styl}>{p.cta}</Text>}
+    </>
+  ) : null);
+
   const renderRefineStep = () => {
     if (!browsing) {
       return (
@@ -610,9 +689,10 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
               )}
             </TouchableOpacity>
           ))}
-          {!elementyLoading && elementy.length === 0 && (
-            <Text style={styles.empty}>Brak elementów dla tego obszaru.</Text>
-          )}
+          {/* ⭐ PLAN-D-E1: było `elementy.length === 0 → „Brak elementów…"`.
+              Pusta lista po NIEUDANYM odczycie wygląda tak samo jak pusta lista
+              po udanym — i tylko jedna z tych dwóch rzeczy jest prawdą o bazie. */}
+          {!elementyLoading && renderPustke(pustkaElementow, styles.empty)}
           <TouchableOpacity onPress={() => setFreeTextMode(true)} style={{ marginTop: 4 }}>
             <Text style={styles.linkText}>Opisz sam zamiast wybierać z listy</Text>
           </TouchableOpacity>
@@ -623,11 +703,11 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
     if (freeTextMode) {
       return (
         <View>
-          {obszary.length === 0 && !obszaryLoading && (
-            <Text style={styles.hintText}>
-              Ten segment nie ma jeszcze gotowej listy obszarów — opisz swój cel własnymi słowami.
-            </Text>
-          )}
+          {/* ⭐ PLAN-D-E1: to zdanie twierdziło coś o TREŚCI PRODUKTU („segment
+              nie ma gotowej listy") na podstawie odczytu, który mógł nie dojść.
+              Pole do opisania celu własnymi słowami stoi niżej i ZOSTAJE
+              niezależnie od tego, którą pustkę zawodnik przeczyta. */}
+          {!obszaryLoading && renderPustke(pustkaObszarow, styles.hintText)}
           <TextInput
             style={[styles.input, styles.textarea]}
             placeholderTextColor={colors.textSecondary}

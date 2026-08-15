@@ -126,40 +126,30 @@ const PLIKI_PRZEMIATANE = WSZYSTKIE_PLIKI.filter((p) => !czyPomijamy(p));
 type PozycjaDlugu = { klucz: string; kto: string; co: string };
 
 const DLUG_ZASTANY: PozycjaDlugu[] = [
+  // ⭐ PLAN-D-E1 15.08.2026 — PIĘĆ POZYCJI ZDJĘTYCH, DWIE ZOSTAJĄ.
+  //
+  // Zdjęte (naprawione w pasie E1): `lib/matchSegmentSelection.ts`,
+  // `lib/livingDiagnosisPulses.ts` i trzy miejsca w
+  // `components/FocusBlockPlanner.tsx`. Zapadka w dół zapaliła się dokładnie
+  // wtedy, kiedy miała — po naprawie, przed usunięciem ich stąd — i to jest
+  // jedyny dowód, że ta lista nie gnije.
+  //
+  // ⚠️ DWIE ZOSTAJĄCE MIAŁY OPIS, KTÓRY PRZESTAŁ BYĆ PRAWDĄ, I ZOSTAŁ POPRAWIONY
+  // POMIAREM, NIE Z PAMIĘCI. C3b zapisał je jako „PAS W LOCIE". Zmierzone
+  // 15.08.2026 ok. 17:20 CEST: oba pasy są WYPCHNIĘTE (`1ad6eaf` L2, `931bb16`
+  // C4, oba w `origin/main`), a mimo to **oba defekty nadal są w kodzie** —
+  // ten strażnik znajduje je na tym samym `main`. Czyli nie są już „w locie";
+  // są długiem bez właściciela. Zostawienie ich z etykietą „w locie" kazałoby
+  // następnemu pasowi czekać na coś, co już się skończyło (**O55**).
   {
     klucz: 'app/(tabs)/dzis.tsx :: (poziom modułu)',
-    kto: '⏳ PAS C4 W LOCIE (15.08.2026) — nie tykać, O68',
+    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — pas C4 WYPCHNIĘTY (`931bb16`), defekt ZOSTAŁ. Zmierzone 15.08.2026 przez E1',
     co: '`eventsRes.data ?? []` przy odczycie kalendarza',
   },
   {
     klucz: 'app/(tabs)/profil.tsx :: loadProfile',
-    kto: '⏳ PAS L2 W LOCIE (15.08.2026) — nie tykać, O68',
+    kto: '⛔ DŁUG BEZ WŁAŚCICIELA — pas L2 WYPCHNIĘTY (`1ad6eaf`), defekt ZOSTAŁ. Zmierzone 15.08.2026 przez E1',
     co: '`injuryRes.data ?? []` — historia kontuzji po nieudanym odczycie wygląda jak jej brak',
-  },
-  {
-    klucz: 'components/FocusBlockPlanner.tsx :: loadOtwarteBloki',
-    kto: '⭐ NICZYJ — znalezione przez C3b, do rozdzielenia',
-    co: 'gałąź błędu opróżnia listę i tylko loguje `console.warn`, bez stanu odczytu',
-  },
-  {
-    klucz: 'components/FocusBlockPlanner.tsx :: rows',
-    kto: '⭐ NICZYJ — znalezione przez C3b, do rozdzielenia',
-    co: '`catch { setObszary([]); setFreeTextMode(true); }` — BLIŹNIAK defektu, który C3 naprawił w `cele.tsx`',
-  },
-  {
-    klucz: 'components/FocusBlockPlanner.tsx :: loadElementy',
-    kto: '⭐ NICZYJ — znalezione przez C3b, do rozdzielenia',
-    co: '`catch { setElementy([]) }` — drugi bliźniak z `cele.tsx`',
-  },
-  {
-    klucz: 'lib/livingDiagnosisPulses.ts :: fetchPlayerLivingDiagnosisContext',
-    kto: '⭐ NICZYJ — znalezione przez C3b, do rozdzielenia',
-    co: '`pulsesRes.data ?? []` — `.error` nie jest czytany ANI RAZU (ten sam kształt co defekt `biblioteka.tsx`)',
-  },
-  {
-    klucz: 'lib/matchSegmentSelection.ts :: fetchPlayerMatchSelectionContext',
-    kto: '⭐ NICZYJ — znalezione przez C3b, do rozdzielenia',
-    co: '`answersRes.data ?? []` — `.error` nie jest czytany ANI RAZU; karmi kaskadę pytań meczowych',
   },
 ];
 
@@ -295,7 +285,7 @@ console.log('\n2. ⭐ CO ZNALAZŁEM — pełna lista, nazwa pliku i funkcji');
 }
 
 // ═════════════════════════════════════════════════════════════════════
-console.log('\n3. ⭐ TEST MUTACYJNY — sześć mutacji, liczba FAIL-i przy każdej');
+console.log('\n3. ⭐ TEST MUTACYJNY — liczba FAIL-i przy każdej mutacji');
 // ═════════════════════════════════════════════════════════════════════
 // ⚠️ MUTACJA, KTÓRA NIE PODNOSI LICZBY FAIL-i, OZNACZA ASERCJĘ, KTÓRA NICZEGO
 // NIE PILNUJE. Wszystkie żyją w obiektach `Zasady` — ani jedna nie dotyka
@@ -322,7 +312,10 @@ console.log('\n3. ⭐ TEST MUTACYJNY — sześć mutacji, liczba FAIL-i przy ka�
       opis: 'lista długu gnije i nikt nie wie, co jest jeszcze zepsute',
       zasady: {
         ...ZASADY_PRAWDZIWE,
-        zrodla: zeZrodlem('lib/matchSegmentSelection.ts', 'export const nic = 1;'),
+        // ⚠️ PLAN-D-E1: było `lib/matchSegmentSelection.ts` — plik, który ten pas
+        // NAPRAWIŁ i zdjął z listy, więc mutacja przestałaby cokolwiek udowadniać.
+        // Musi wskazywać na pozycję, która NA LIŚCIE JEST.
+        zrodla: zeZrodlem('app/(tabs)/profil.tsx', 'export const nic = 1;'),
       },
     },
     {
@@ -360,6 +353,56 @@ console.log('\n3. ⭐ TEST MUTACYJNY — sześć mutacji, liczba FAIL-i przy ka�
       zasady: {
         ...ZASADY_PRAWDZIWE,
         szukaj: (zrodlo) => znajdzWzorzecPustki(zrodlo).filter((t) => t.postac !== 'galaz'),
+        // ⚠️ PLAN-D-E1 — ZMIERZONE, ŻE TA MUTACJA PRZESTAŁA COKOLWIEK ŁAPAĆ.
+        // Do dziś opierała się na tym, że trzy pozycje długu (`FocusBlockPlanner`)
+        // miały postać „gałąź". Ten pas je naprawił, więc po naprawie oślepienie
+        // reguły na gałęzie NIE ZMIENIAŁO ANI JEDNEGO WYNIKU — mutacja świeciła
+        // na zielono, udając, że coś sprawdza.
+        // ⭐ Dlatego dostaje własną pozycję długu w postaci „gałąź": bez tego
+        // druga połowa reguły nie ma dziś w repozytorium NICZEGO, na czym mogłaby
+        // się wyłożyć — a to jest dokładnie ten stan, w którym strażnik zaczyna
+        // być zbiorem zdań (**O70**).
+        zrodla: zeZrodlem('app/(tabs)/profil.tsx',
+          'const loadProfile = useCallback(async () => {'
+          + ' try { const { data, error: err } = await q(); if (err) throw err; setInjuries(data); }'
+          + ' catch { setInjuries([]); } }, []);'),
+      },
+    },
+    // ═══════════════════════════════════════════════════════════════════
+    // ⭐ PLAN-D-E1 15.08.2026 — DWIE MUTACJE, KTÓRE COFAJĄ NAPRAWĘ TEGO PASA
+    // ═══════════════════════════════════════════════════════════════════
+    // Sześć mutacji wyżej pochodzi z C3b i pilnuje strażnika. Te dwie pilnują
+    // NAPRAWY: podstawiają kształt SPRZED pasa E1 i sprawdzają, czy strażnik
+    // zapala się na obu postaciach wzorca, które ten pas usunął.
+    //
+    // ⚠️ Bez nich zejście z 7 na 2 byłoby twierdzeniem, że kod się zmienił —
+    // a nie dowodem, że to WŁAŚNIE naprawa go wyciszyła. Strażnik, którego nie
+    // puszczono na chorobie, dla której powstał, jest zbiorem zdań (**O70**).
+    {
+      nazwa: 'M7 · naprawa E1 cofnięta w `lib/matchSegmentSelection.ts` (postać „niezauważony")',
+      opis: '`answersRes.data ?? []` wraca bez ani jednego odczytu `.error` — kaskada meczowa znowu połyka odmowę RLS',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: zeZrodlem('lib/matchSegmentSelection.ts',
+          'export async function fetchPlayerMatchSelectionContext(userId, st) {'
+          + ' const [profileRes, answersRes] = await Promise.all([qa(), qb()]);'
+          + ' const profilePosition = profileRes.data?.[0]?.position_primary ?? null;'
+          + ' const segmentLastAskedAt = {};'
+          + ' for (const row of answersRes.data ?? []) { segmentLastAskedAt[row.segment_id] = row.created_at; }'
+          + ' return { profilePosition, segmentLastAskedAt }; }'),
+      },
+    },
+    {
+      nazwa: 'M8 · naprawa E1 cofnięta w `components/FocusBlockPlanner.tsx` (postać „gałąź")',
+      opis: '`catch { setElementy([]) }` wraca bez słowa — bliźniak defektu z `cele.tsx` odtworzony co do znaku',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: zeZrodlem('components/FocusBlockPlanner.tsx',
+          'const loadElementy = useCallback(async (obszarId) => {'
+          + ' setElementyLoading(true);'
+          + ' try { const { data, error: err } = await q(); if (err) throw err; setElementy(data); }'
+          + ' catch { setElementy([]); }'
+          + ' finally { setElementyLoading(false); } }, []);'),
       },
     },
   ];
@@ -381,8 +424,11 @@ console.log('\n3. ⭐ TEST MUTACYJNY — sześć mutacji, liczba FAIL-i przy ka�
     console.log('');
   }
 
-  check('⭐ KAŻDA z sześciu mutacji została złapana', bezEfektu === 0, `mutacji bez efektu: ${bezEfektu}`);
-  check('⭐ po sześciu mutacjach prawdziwe zasady są nadal nietknięte',
+  // ⚠️ Liczba mutacji jest LICZONA, nie wpisana — etykieta „sześć" zestarzałaby
+  // się po cichu przy pierwszej dołożonej mutacji (**O71**: asercja, której
+  // treść rozjeżdża się z tym, czego pilnuje).
+  check(`⭐ KAŻDA z ${MUTACJE.length} mutacji została złapana`, bezEfektu === 0, `mutacji bez efektu: ${bezEfektu}`);
+  check(`⭐ po ${MUTACJE.length} mutacjach prawdziwe zasady są nadal nietknięte`,
     bateria(ZASADY_PRAWDZIWE).filter((w) => !w.ok).length === 0,
     'mutacja wyciekła poza swój obiekt Zasady');
 }
