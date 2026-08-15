@@ -343,6 +343,49 @@ import {
   type WpisMeczuWglad,
   type ProfilWglad,
 } from '../../lib/wgladyZAlgorytmu';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-B5 08.2026 (15.08.2026), zadania B5.2 i B5.3 — PĘTLA SIĘ ZAMYKA.
+//
+// Dwie czyste funkcje, obie przetestowane, obie BEZ KONSUMENTA na tym ekranie.
+// Zmierzone 15.08.2026 na kopii zgodnej z dyskiem co do bajtu:
+//   grep -rn "policzWykonanaPrace" app components  →  0  (ZERO konsumentów)
+//   grep -rn "zbudujTydzien"       app components  →  1  (tylko kalendarz.tsx)
+//
+// `lib/wykonanieSesji.ts` (pas D1, 84 asercje) umie policzyć WYKONANĄ PRACĘ
+// i do dziś nikt jej o to nie pytał. `lib/widokTygodnia.ts` (pas C1, 73
+// asercje) umie zbudować siedem wierszy dnia i robił to wyłącznie w Kalendarzu,
+// czyli o jedno dotknięcie od startu — a „jak wygląda mój tydzień" jest rzeczą
+// ważną, więc wg P0 należy do głębokości 0.
+//
+// ⛔ ZERO WŁASNEJ PĘTLI PO DNIACH. Tydzień na tej karcie buduje `zbudujTydzien`,
+// a nie druga kopia rozwijania reguły cyklicznej. Dwie kopie tej reguły znaczą,
+// że pierwsza poprawka wejdzie do jednej z nich, oba ekrany będą wyglądały
+// poprawnie i nikt nie zauważy różnicy — bo nikt nie ogląda obu naraz.
+//
+// ⛔ TEN EKRAN CZYTA WERDYKTY, NIE ZAPISUJE ICH. Zapis („Nie odbyłem") mieszka
+// w Kalendarzu (pas D1, `renderPozycja`). Dwa miejsca zapisu to dwa źródła
+// prawdy o tym samym wystąpieniu.
+//
+// ⛔ ZERO SIATKI GODZINOWEJ (WT-34). Karta pokazuje siedem wierszy dnia,
+// tak jak Kalendarz — nie siatkę godzin. WT-34 jest dziś spełnione i tego
+// pasa nie wolno użyć do jego zgaszenia.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  zbudujTydzien,
+  przesunTydzien,
+  PLAKIETKI_STANU_PRZESZLEGO,
+  type Tydzien,
+  type WierszWydarzenia,
+  type WierszDnia,
+} from '../../lib/widokTygodnia';
+import {
+  policzWykonanaPrace,
+  czytajWerdykty,
+  opisLicznikaDoLogu,
+  type LicznikPracy,
+  type WejscieWerdyktow,
+  type WystapienieDoLicznika,
+} from '../../lib/wykonanieSesji';
 
 const SEG_LABELS = SEGMENT_LABELS;
 
@@ -394,6 +437,32 @@ type DaneEkranu = {
    * dostać DWÓCH RÓŻNYCH dni. Jeden napis, jedno źródło.
    */
   wejsciaWgladow: Omit<WejsciaWgladow, 'dzis'>;
+  /**
+   * ⭐ PLAN-D-B5 — WEJŚCIA TYGODNIA I LICZNIKA. Trzy pola, każde w kształcie,
+   * którego wymagają czyste funkcje pasów C1 i D1.
+   *
+   * ⚠️ `wydarzeniaTygodnia` NIE JEST tym samym co `wejscia.kalendarz` ani co
+   * `wydarzeniaDnia` — i to jest cała treść osobnego zapytania (§ niżej,
+   * „ZAPYTANIE B5"). Tamte dwa jadą z odpowiedzi zawężonej do
+   * `status in ('scheduled','completed')`, a licznik pracy MUSI widzieć
+   * `cancelled`: odwołanie jest dziś JEDYNYM dowodem „nie odbyło się"
+   * (`session_verdicts` ma 0 wierszy, `status='completed'` 0 z 24,
+   * `daily_logs.calendar_event_id` 0 z 10 — zmierzone 15.08.2026).
+   * Bez odwołań licznik oddałby `brak_podstawy` u zawodnika, u którego
+   * poprawną odpowiedzią jest „0 z 2".
+   *
+   * ⛔ `null` znaczy ODCZYT SIĘ NIE UDAŁ, nie „nic nie ma". Pusta tablica
+   * znaczy „odczytałem i nic nie ma". Sklejenie tych dwóch to `?? []` pod
+   * inną nazwą.
+   */
+  wydarzeniaTygodnia: WierszWydarzenia[] | null;
+  /** `calendar_event_id` z Dziennika. ⛔ `null` = odczyt się nie udał. */
+  wpisyDziennika: ReadonlySet<number> | null;
+  /**
+   * ⭐ Trzy stany, nie dwa: `brak` (tabeli nie ma) · `nie_odczytano` (inny
+   * błąd) · `jest`. ⛔ NIGDY `?? []` — patrz `czytajWerdykty`.
+   */
+  werdykty: WejscieWerdyktow;
 };
 
 type WierszBolu = {
@@ -616,6 +685,72 @@ const WGLAD_DO_ZROBIENIA = 'JEDNA RZECZ DO ZROBIENIA';
 const OS_POKAZ = 'Pokaż pomiary';
 const OS_UKRYJ = 'Ukryj pomiary';
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-B5 08.2026 (15.08.2026) — BRZMIENIA KARTY I LICZNIKA.
+// WSZYSTKIE PONIŻSZE SĄ NOWE I WSZYSTKIE SĄ **DO PRZEJRZENIA PRZEZ KUBĘ**.
+// ═══════════════════════════════════════════════════════════════════
+const BRZMIENIE_DO_PRZEJRZENIA_B5 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-B5, 15.08.2026)';
+
+/** WT-02 — przełącznik na karcie. Domyślnie „Dziś": karta ma dalej odpowiadać
+ *  na pytanie „co mam dzisiaj", a tydzień jest ROZWINIĘCIEM, nie zamianą. */
+const KARTA_ZAKRES_DZIS = 'Dziś';
+const KARTA_ZAKRES_TYDZIEN = 'Tydzień';
+
+/** Okno licznika pracy. Jedna liczba, jedno miejsce — WG-28 mówi o 14 dniach. */
+const OKNO_LICZNIKA_DNI = 14;
+
+/** Nagłówek licznika. Ten sam kształt, co pozostałe nadtytuły tej karty. */
+const LICZNIK_NAGLOWEK = 'WYKONANA PRACA';
+
+/**
+ * ⭐ ZDANIE STANU `policzony`.
+ *
+ * ⚠️ TRZECIA OSOBA JEST TREŚCIĄ, NIE STYLEM. „2 z 3 sesji odbyte" opisuje
+ * NASZĄ WIEDZĘ; „Odbyłeś 2 z 3" jest zdaniem o zawodniku — a `nieodbyte`
+ * zawiera dziś także sesje ODWOŁANE, których zawodnik nie opuścił. Druga
+ * osoba przypisałaby mu więc cudzą decyzję jako własną porażkę (Z0).
+ * Ta sama zasada, co przy plakietkach pasa C1: produkt opisuje, co wie.
+ */
+const LICZNIK_POLICZONY = (odbyte: number, mianownik: number, oknoDni: number) =>
+  `${odbyte} z ${mianownik} sesji odbyte · ostatnie ${oknoDni} dni`;
+
+/**
+ * ⭐ ZDANIE STANU `brak_podstawy` — ⛔ INNA STAŁA, NIE TA SAMA Z ZEREM.
+ *
+ * ⛔ TU NIE MA I NIE MOŻE BYĆ „0 z 0". Kształt `brak_podstawy` świadomie nie
+ * ma pól `odbyte` ani `mianownik` (pas D1), więc zera nie da się nawet
+ * przypadkiem narysować — a zdanie „0 z 0" wygląda jak pomiar i nim nie jest.
+ * Ten stan mówi, CZEGO BRAKUJE, a nie ile czego zrobiono.
+ */
+const LICZNIK_BRAK_PODSTAWY = (bezWpisu: number, nieodczytane: number) => {
+  if (bezWpisu > 0 && nieodczytane > 0) {
+    return `${bezWpisu} sesji bez wpisu i ${nieodczytane} nieodczytanych — nie wiem, które się odbyły.`;
+  }
+  if (bezWpisu > 0) return `${bezWpisu} sesji bez wpisu — nie wiem, które się odbyły.`;
+  if (nieodczytane > 0) return `${nieodczytane} sesji nie udało mi się odczytać — nie wiem, które się odbyły.`;
+  return 'Nie masz w kalendarzu ani jednej sesji z ostatnich dwóch tygodni.';
+};
+
+/** Trzecia liczba WG-28 — „bez wpisu" JAWNIE, i jawnie POZA licznikiem. */
+const LICZNIK_BEZ_WPISU = (ile: number) =>
+  `${ile} bez wpisu — nie liczą się ani do jednej z tych liczb.`;
+const LICZNIK_NIEODCZYTANE = (ile: number) =>
+  `${ile} nie udało mi się odczytać — też są poza licznikiem.`;
+
+/**
+ * ⭐ M4 — LICZBA KOŃCZY SIĘ RZECZĄ DO ZROBIENIA. „2 z 3" bez wyjścia jest oceną.
+ * Obie prowadzą do Kalendarza, bo tam mieszka zapis werdyktu (pas D1) i tam
+ * planuje się sesję. ⛔ Ten ekran werdyktu NIE ZAPISUJE.
+ */
+const LICZNIK_ROBOTA_ZAZNACZ = 'Zaznacz w Kalendarzu, których nie odbyłeś →';
+const LICZNIK_ROBOTA_ZAPLANUJ = 'Zaplanuj kolejną sesję w Kalendarzu →';
+
+/** Dzień tygodnia bez pozycji w skróconym tygodniu na karcie. */
+const KARTA_TYDZIEN_DZIEN_PUSTY = '—';
+/** Gdy nie udało się odczytać wydarzeń — ⛔ NIE „nic nie masz". */
+const KARTA_TYDZIEN_NIEODCZYTANY =
+  'Nie udało się odczytać Twojego tygodnia. To nie znaczy, że nic w nim nie masz — pociągnij w dół.';
+
 /**
  * ⭐ PLAN-D-B4 — TRZECIA CZĘŚĆ WGLĄDU I OŚ POMIARÓW.
  *
@@ -709,6 +844,13 @@ export default function DzisScreen() {
   // `dodatkowi`) oraz dzisiejsze wydarzenia dla karty kalendarza.
   // ⚠️ `null` = jeszcze nie odczytano. To NIE jest pusta kolejka.
   const [dane, setDane] = useState<DaneEkranu | null>(null);
+  /**
+   * ⭐ PLAN-D-B5 (WT-02) — ZAKRES KARTY „DZIŚ W KALENDARZU".
+   * ⛔ DOMYŚLNIE `'dzis'`: karta ma dalej odpowiadać na pytanie „co mam
+   * dzisiaj". Tydzień jest ROZWINIĘCIEM dla dociekliwego, nie zamianą
+   * odpowiedzi na listę.
+   */
+  const [zakresKarty, setZakresKarty] = useState<'dzis' | 'tydzien'>('dzis');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
@@ -849,8 +991,10 @@ export default function DzisScreen() {
 
     // ⭐ PLAN-D-B4 — TRZY NOWE ZAPYTANIA (`meczeRes`, `katalogRes`, `odcinkiRes`).
     // Nadal JEDNA paczka `Promise.all`, więc kosztują jedną rundę sieci, nie trzy.
+    // ⭐ PLAN-D-B5 — DWA NOWE ZAPYTANIA (`tydzienRes`, `werdyktyRes`), DOŁOŻONE
+    // DO TEJ SAMEJ PACZKI. Koszt: zero dodatkowych rund sieci.
     const [goalsRes, dziennikRes, recsRes, eventsRes, blocksRes, bolRes, zadaniaRes, userRes, diagRes, glosRes,
-      meczeRes, katalogRes, odcinkiRes] = await Promise.all([
+      meczeRes, katalogRes, odcinkiRes, tydzienRes, werdyktyRes] = await Promise.all([
       supabase.from('goals').select('id,segment_id,is_priority,status,created_at,origin,suggestion_note,refinement_note')
         .eq('user_id', currentUser.id).eq('status', 'active')
         .order('is_priority', { ascending: false }).order('created_at', { ascending: false }),
@@ -958,6 +1102,43 @@ export default function DzisScreen() {
       // łączy tabel, między którymi relacji nie ma. Trzy liczby katalogu
       // kosztują więc DWA zapytania — nie trzy i nie jedno.
       supabase.from('road_segments').select('id', { count: 'exact', head: true }),
+      // ⭐ PLAN-D-B5, NOWE ZAPYTANIE nr 1 — WYDARZENIA BEZ FILTRA STATUSU.
+      //
+      // ⚠️ TO NIE JEST DUBLET ZAPYTANIA `eventsRes` I POWÓD JEST POLICZALNY.
+      // Tamto ma `.in('status', ['scheduled','completed'])` i musi je mieć:
+      // karmi rankera, sześć wejść wglądów, listę „Dziś w kalendarzu" i pasek
+      // postępu Bloku — a każdy z tych czterech konsumentów policzyłby
+      // odwołane wydarzenie jako pracę do zrobienia.
+      //
+      // ⛔ LICZNIK PRACY MUSI WIDZIEĆ `cancelled`. Zmierzone 15.08.2026 na
+      // produkcji: `session_verdicts` 0 wierszy · `status='completed'` 0 z 24 ·
+      // `daily_logs.calendar_event_id` 0 z 10. **Odwołanie jest dziś JEDYNYM
+      // dowodem „nie odbyło się" w całej bazie.** Bez tych 12 wierszy licznik
+      // oddałby `brak_podstawy` zawodnikowi, u którego poprawną odpowiedzią
+      // jest „0 z 2" — czyli milczałby, mając czym mówić.
+      //
+      // ⚠️ ROZSZERZENIE TAMTEGO ZAPYTANIA O `cancelled` BYŁO ROZWAŻONE
+      // I ODRZUCONE: jedna tablica dla pięciu konsumentów znaczy, że każdy
+      // z nich musi pamiętać o odfiltrowaniu odwołań, a pierwszy, który
+      // zapomni, zepsuje się CICHO. Osobna, wąska odpowiedź nie ma tej wady.
+      supabase.from('calendar_events')
+        .select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,source')
+        .eq('user_id', currentUser.id),
+      // ⭐ PLAN-D-B5, NOWE ZAPYTANIE nr 2 — WERDYKTY ZAWODNIKA (pas D1).
+      // Ten sam wąski kształt co w `app/(tabs)/kalendarz.tsx` — cztery kolumny,
+      // bo tyle czyta `czytajWerdykty`.
+      //
+      // ⛔ TEN EKRAN WERDYKTÓW NIE ZAPISUJE. Zapis mieszka w Kalendarzu
+      // (pas D1, `oznaczNieodbyte`). Drugie miejsce zapisu byłoby drugim
+      // źródłem prawdy o tym samym wystąpieniu.
+      //
+      // ⚠️ ZMIERZONE 15.08.2026: tabela `session_verdicts` ISTNIEJE na
+      // produkcji (migracja D1 wykonana, 3 polityki, granty dokładnie
+      // INSERT/SELECT/UPDATE) i ma 0 wierszy. Gałąź `brak` z `czytajWerdykty`
+      // NIE POWINNA już wchodzić — jeżeli wejdzie, to jest znalezisko.
+      supabase.from('session_verdicts')
+        .select('calendar_event_id,occurred_on,verdict,withdrawn_at')
+        .eq('user_id', currentUser.id),
     ]);
 
     // PLAN-D-F 08.2026 — trzy różne powody, dla których tu może nic nie być:
@@ -1197,6 +1378,44 @@ export default function DzisScreen() {
     })();
     // ⬆⬆⬆ WEJŚCIA WGLĄDÓW — KONIEC ⬆⬆⬆
 
+    // ═══════════════════════════════════════════════════════════════
+    // ⬇⬇⬇ WEJŚCIA TYGODNIA I LICZNIKA — POCZĄTEK ⬇⬇⬇  (PLAN-D-B5, B5.2/B5.3)
+    //
+    // ⛔ W TEJ SEKCJI NIE MA PRAWA PAŚĆ ANI JEDNO `?? []` ANI `|| []`.
+    // Każde z trzech wejść ma stan „nie odczytałem", ODRÓŻNIALNY od „pusto":
+    // wydarzenia i wpisy Dziennika przez `null`, werdykty przez trzy gałęzie
+    // `czytajWerdykty`. Sklejenie ich zamieniłoby awarię odczytu w zdanie
+    // „nie odbyłeś nic" — czyli w nieprawdę o zawodniku (Z0).
+    // Pilnuje tego asercja nr 4 w `lib/kartaDzisILicznik.selftest.ts`.
+    // ═══════════════════════════════════════════════════════════════
+    const wydarzeniaTygodnia: WierszWydarzenia[] | null =
+      tydzienRes.error || !Array.isArray(tydzienRes.data)
+        ? null
+        : (tydzienRes.data as unknown as WierszWydarzenia[]);
+    if (wydarzeniaTygodnia === null) {
+      console.warn(`dzis: nie odczytałem wydarzeń tygodnia — ${powodBledu(tydzienRes.error)}`);
+    }
+
+    // ⚠️ ŚWIADOMIE NIE UŻYWAM `doneEventIds` policzonego wyżej dla paska Bloku:
+    // tamten powstaje z `(dziennikRes.data ?? [])`, czyli po nieudanym odczycie
+    // oddaje PUSTY zbiór nieodróżnialny od „żaden wpis nie wskazuje sesji".
+    // Dla plakietek i licznika ta różnica jest cała: pusty zbiór znaczy
+    // „bez wpisu", a `null` znaczy „nie wiemy" — i to są dwa różne zdania
+    // na ekranie. Tamtej linii nie ruszam (należy do innego pasa i do innej
+    // liczby); tutaj liczę to samo drugi raz, uczciwie.
+    const wpisyDziennikaIds: ReadonlySet<number> | null = (() => {
+      if (dziennikRes.error) return null;
+      if (!Array.isArray(dziennikRes.data)) return null;
+      const ids = (dziennikRes.data as WierszDziennika[])
+        .map((l) => l.calendar_event_id)
+        .filter((x): x is number => typeof x === 'number');
+      return new Set(ids);
+    })();
+
+    const werdyktyWe = czytajWerdykty({ dane: werdyktyRes.data, blad: werdyktyRes.error });
+    if (werdyktyWe.rodzaj !== 'jest') console.warn(`dzis: [PLAN-D-D1] ${werdyktyWe.powod}`);
+    // ⬆⬆⬆ WEJŚCIA TYGODNIA I LICZNIKA — KONIEC ⬆⬆⬆
+
     setDane({
       wejscia: {
         dzis: todayStr,
@@ -1225,6 +1444,10 @@ export default function DzisScreen() {
         mecze: wgMecze,
         profil: wgProfil,
       },
+      // ⭐ PLAN-D-B5 — trzy wejścia tygodnia i licznika pracy.
+      wydarzeniaTygodnia,
+      wpisyDziennika: wpisyDziennikaIds,
+      werdykty: werdyktyWe,
     });
     // ⬆⬆⬆ WEJŚCIA KOLEJKI — KONIEC ⬆⬆⬆
   }, [currentUser, markShownAsViewed, loadHint, loadNewDose]);
@@ -1255,6 +1478,105 @@ export default function DzisScreen() {
   }, [dane]);
 
   const todayEvents: CalEvent[] = dane === null ? [] : dane.wydarzeniaDnia;
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-B5 — TYDZIEŃ NA KARCIE (WT-02) I LICZNIK PRACY (WG-28, WG-37).
+  //
+  // Ten ekran WYNIK RYSUJE, a nie liczy. Obie reguły są czystymi funkcjami
+  // z własnymi strażnikami (73 i 84 asercje) i dają się sprawdzić bez appki —
+  // a reguła, której nie da się sprawdzić, cicho przestaje obowiązywać.
+  // ═══════════════════════════════════════════════════════════════════
+  const poniedzialekTegoTygodnia = poniedzialekGlosu(new Date());
+  /**
+   * ⚠️ „DZIŚ" BIERZE SIĘ Z WEJŚCIA KOLEJKI, NIE Z DRUGIEGO ODCZYTU ZEGARA.
+   * Ten sam napis karmi rankera, producenta wglądów, tydzień i licznik —
+   * inaczej o północy cztery części jednego ekranu mówiłyby o dwóch różnych
+   * dniach, a rozjazd trwałby dokładnie tyle, ile jedno wejście na ekran.
+   */
+  const dzisNapis: string | null = dane === null ? null : dane.wejscia.dzis;
+
+  /**
+   * ⛔ TRZY TYGODNIE, NIE JEDEN — I TO NIE JEST NADMIAR.
+   *
+   * Okno licznika to `[dziś − 13, dziś]`, czyli 14 dni. Tygodnie ISO zaczynają
+   * się w poniedziałek, więc te 14 dni potrafią wejść w TRZY różne tygodnie:
+   * dla dnia `pon + k` okno sięga do `pon + k − 13`, czyli w skrajnym
+   * przypadku (`k = 0`) do `pon − 13` — a to jest przedostatni tydzień.
+   * Dwa tygodnie zostawiłyby dziurę jednego dnia, której nikt by nie zauważył,
+   * bo licznik po prostu pokazywałby o jedno wystąpienie mniej.
+   *
+   * ⛔ I DLATEGO NIE MA TU WŁASNEJ PĘTLI PO DNIACH. Rozwinięcie reguły
+   * cyklicznej w konkretne wtorki jest regułą pasa C1 i ma zostać jedną kopią;
+   * napisanie jej tutaj drugi raz znaczyłoby, że pierwsza poprawka wejdzie
+   * do jednej z nich, oba ekrany będą wyglądały poprawnie, a różnicy nie
+   * zauważy nikt.
+   */
+  const tygodnie: Tydzien[] = useMemo(() => {
+    if (dane === null || dzisNapis === null) return [];
+    const dwaWstecz = przesunTydzien(poniedzialekTegoTygodnia, -2);
+    const jedenWstecz = przesunTydzien(poniedzialekTegoTygodnia, -1);
+    const poniedzialki = [dwaWstecz, jedenWstecz, poniedzialekTegoTygodnia]
+      .filter((p): p is string => p !== null);
+    return poniedzialki.map((poniedzialek) => zbudujTydzien({
+      poniedzialek,
+      dzisiaj: dzisNapis,
+      wydarzenia: dane.wydarzeniaTygodnia,
+      // ⚠️ `null` znaczy „w ogóle nie próbowano odczytać", i to jest prawda:
+      // ten ekran NIE pyta o `school_week`. Skutek jest zaprojektowany —
+      // pasek zajętości wychodzi `NIE_WIEM`, więc się nie rysuje, a zdanie
+      // o napięciu nie powstaje. Pełny tydzień z paskiem szkoły stoi
+      // w Kalendarzu, jedno dotknięcie dalej. ⛔ Dokładanie tu zapytania
+      // o plan lekcji zrobiłoby z karty drugi Kalendarz, a nie jego skrót.
+      planLekcji: null,
+      wpisyDziennika: dane.wpisyDziennika,
+      werdykty: dane.werdykty,
+    }));
+  }, [dane, dzisNapis, poniedzialekTegoTygodnia]);
+
+  /** Bieżący tydzień — ten, który rysuje przełącznik. Zawsze ostatni z trzech. */
+  const tydzienBiezacy: Tydzien | null = tygodnie.length > 0 ? tygodnie[tygodnie.length - 1] : null;
+
+  /**
+   * ⭐ LICZNIK PRACY — pierwszy konsument `policzWykonanaPrace` w całej appce.
+   *
+   * Wystąpienia bierzemy z tych samych trzech tygodni, więc reguła rozwijania
+   * cyklicznej stoi w jednym miejscu. `status` dokładamy z surowego wiersza:
+   * `PozycjaDnia` go nie niesie, bo widok tygodnia potrzebuje stanu, nie
+   * statusu — a licznik potrzebuje obu.
+   *
+   * ⛔ NIE FILTRUJEMY OKNA TUTAJ. `policzWykonanaPrace` ma własne okno
+   * `[dziś − 13, dziś]` i sam odcina przyszłość. Drugie odcinanie na ekranie
+   * byłoby drugą kopią granicy okna — i pierwszą rzeczą, która by się z nią
+   * rozjechała przy zmianie `oknoDni`.
+   */
+  const licznik: LicznikPracy | null = useMemo(() => {
+    if (dane === null || dzisNapis === null) return null;
+    const statusy = new Map<number, string>();
+    const surowe = dane.wydarzeniaTygodnia;
+    if (surowe !== null) for (const w of surowe) statusy.set(w.id, w.status);
+
+    const wystapienia: WystapienieDoLicznika[] | null = surowe === null
+      ? null
+      : tygodnie.flatMap((t) => t.dni.flatMap((d) => d.pozycje.map((p) => ({
+        idWydarzenia: p.id,
+        dzien: p.dzien,
+        // ⚠️ Wiersz, którego nie ma w mapie, nie istnieje — ale gdyby kiedyś
+        // zaistniał, `''` NIE jest żadnym ze statusów bazy, więc reguła
+        // potraktuje go jako „nie odwołany i nie completed", czyli najostrożniej.
+        status: statusy.get(p.id) ?? '',
+        zRegulyCyklicznej: p.zRegulyCyklicznej,
+      }))));
+
+    return policzWykonanaPrace({
+      dzis: dzisNapis,
+      oknoDni: OKNO_LICZNIKA_DNI,
+      wystapienia,
+      wpisyDziennika: dane.wpisyDziennika,
+      werdykty: dane.werdykty,
+    });
+  }, [dane, dzisNapis, tygodnie]);
+
+  if (licznik !== null) console.log(`dzis: ${opisLicznikaDoLogu(licznik)}`);
 
   // PIERWSZE URUCHOMIENIE 10.08.2026 — stan „zawodnik zero": ani diagnozy,
   // ani Celu. Świadomie WYMAGA OBU warunków: kto zdążył założyć Cel sam,
@@ -1527,6 +1849,128 @@ export default function DzisScreen() {
     zakres: 'dzis',
   });
   if (pustkaDzis) console.log(`dzis: ${opisPustkiDoLogu(pustkaDzis)}`);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-B5, B5.2 — SIEDEM WIERSZY DNIA NA KARCIE „DZIŚ W KALENDARZU".
+  //
+  // ⛔ ZERO WŁASNEJ PĘTLI PO DNIACH: `tydzienBiezacy.dni` MA już siedem
+  // wierszy — także przy zerze wydarzeń i przy nieudanym odczycie. Ta funkcja
+  // wyłącznie je rysuje.
+  //
+  // ⛔ ZERO SIATKI GODZINOWEJ (WT-34). Pozycje zostają LISTĄ przy dniu.
+  //
+  // ⚠️ CZEGO TU ŚWIADOMIE NIE MA, a jest w Kalendarzu: paska zajętości ze
+  // szkoły, zdania o napięciu, legendy kropek, strzałek ‹ › i wagi dnia.
+  // Powód nie jest estetyczny: pasek i napięcie wymagają planu lekcji, którego
+  // ten ekran nie czyta (patrz `planLekcji: null` wyżej), a strzałki zrobiłyby
+  // z karty drugi Kalendarz zamiast jego skrótu. Pełny tydzień stoi JEDNO
+  // dotknięcie dalej i ten pas tego nie zmienia (§5 pkt 4 polecenia).
+  // ═══════════════════════════════════════════════════════════════════
+  function renderWierszDnia(d: WierszDnia) {
+    return (
+      <View key={d.data} style={styles.kartaDzienRzad}>
+        <Text style={[styles.kartaDzienEtykieta, d.dzisiaj && styles.kartaDzienEtykietaDzis]}>
+          {d.etykieta}
+        </Text>
+        <View style={styles.kartaDzienTresc}>
+          {d.pozycje.length === 0 ? (
+            <Text style={styles.kartaDzienPusty}>{KARTA_TYDZIEN_DZIEN_PUSTY}</Text>
+          ) : d.pozycje.map((p) => (
+            <Text key={`${p.id}-${p.dzien}`} style={styles.kartaPozycja}>
+              <Text style={p.liczonaDoWagi ? styles.kartaPozycjaTytul : styles.kartaPozycjaOdwolana}>
+                {p.tytul}
+              </Text>
+              {p.godzina ? `  ·  ${p.godzina}` : ''}
+              {/* ⭐ WT-17 — POZYCJA, KTÓRA SIĘ ODBYŁA, DOSTAJE PLAKIETKĘ.
+                  Cztery stany i cztery plakietki biorą się z JEDNEJ tabeli
+                  (`PLAKIETKI_STANU_PRZESZLEGO` = `PLAKIETKI_WYKONANIA`),
+                  tej samej, z której czyta Kalendarz. ⛔ Druga kopia tej
+                  tabeli znaczyłaby, że jeden ekran mówi „Zrobione", a drugi
+                  „Bez wpisu" o tym samym wystąpieniu — i nikt tego nie
+                  zauważy, bo nikt nie ogląda obu naraz. */}
+              {p.stanPrzeszly !== null
+                ? <Text style={styles.kartaPlakietka}>{'  ·  ' + PLAKIETKI_STANU_PRZESZLEGO[p.stanPrzeszly]}</Text>
+                : null}
+            </Text>
+          ))}
+        </View>
+      </View>
+    );
+  }
+
+  function renderTydzienNaKarcie() {
+    // ⛔ NIEUDANY ODCZYT NIE JEST PUSTYM TYGODNIEM. Bez tej gałęzi awaria
+    // sieci wyglądałaby jak siedem dni bez nic — czyli jak nieprawda o tym,
+    // co zawodnik ma zaplanowane (Z0).
+    if (tydzienBiezacy === null || !tydzienBiezacy.odczyt.wydarzenia) {
+      return <Text style={styles.cardBody}>{KARTA_TYDZIEN_NIEODCZYTANY}</Text>;
+    }
+    return (
+      <>
+        <Text style={styles.kartaTydzienZakres}>{tydzienBiezacy.zakresDat}</Text>
+        {/* ⚠️ Zdanie nad tygodniem POWSTAJE ALBO NIE POWSTAJE — nigdy nie
+            jest ogólne. `zbudujZdanie` oddaje `null`, gdy nie ma czego
+            podsumować, i wtedy nie rysujemy nic. */}
+        {tydzienBiezacy.zdanie !== null
+          ? <Text style={styles.kartaTydzienZdanie}>{tydzienBiezacy.zdanie.podsumowanie}</Text>
+          : null}
+        {tydzienBiezacy.dni.map(renderWierszDnia)}
+      </>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-B5, B5.3 — LICZNIK PRACY NA EKRANIE.
+  //
+  // CZTERY ZAKAZY, KAŻDY Z POWODEM (§6 polecenia):
+  //
+  //  1. ⛔ `brak_podstawy` NIE RYSUJE SIĘ JAKO „0 z 0" ANI JAKO „0". Prowadzi
+  //     do INNEJ STAŁEJ (`LICZNIK_BRAK_PODSTAWY`), mówiącej, CZEGO BRAKUJE.
+  //     Kształt danych celowo nie ma pól `odbyte` ani `mianownik` — i nie
+  //     dorabiamy ich tutaj.
+  //  2. ⛔ LICZNIK NIE ZERUJE SIĘ I NIE LICZY DNI Z RZĘDU (N1). Nie ma tu
+  //     ani jednego warunku zerującego, bo cała arytmetyka siedzi w czystej
+  //     funkcji, a ta nie zna pojęcia serii.
+  //  3. ⛔ „BEZ WPISU" NIE WCHODZI DO MIANOWNIKA — pilnuje tego funkcja,
+  //     a ekran ma tego NIE OBCHODZIĆ. Rysujemy `bezWpisu` jako TRZECIĄ,
+  //     osobną liczbę i mówimy wprost, że nie liczy się do żadnej z dwóch.
+  //  4. ⭐ LICZBA KOŃCZY SIĘ RZECZĄ DO ZROBIENIA (M4). „2 z 3" bez wyjścia
+  //     jest oceną, nie pomocą.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderLicznikPracy() {
+    if (licznik === null) return null;
+
+    // ⚠️ Wyjście dobiera się do TEGO, CZEGO BRAKUJE, a nie do stanu licznika:
+    // przy sesjach bez wpisu brakuje rozstrzygnięcia (a to robi się w
+    // Kalendarzu), a bez sesji brakuje sesji.
+    const doZrobienia = licznik.bezWpisu > 0 ? LICZNIK_ROBOTA_ZAZNACZ : LICZNIK_ROBOTA_ZAPLANUJ;
+
+    return (
+      <View style={styles.licznikCzesc}>
+        <Text style={styles.odpowiedzNaglowek}>{LICZNIK_NAGLOWEK}</Text>
+        {licznik.rodzaj === 'policzony' ? (
+          <>
+            <Text style={styles.licznikLiczba}>
+              {LICZNIK_POLICZONY(licznik.odbyte, licznik.mianownik, licznik.oknoDni)}
+            </Text>
+            {licznik.bezWpisu > 0
+              ? <Text style={styles.licznikPodpis}>{LICZNIK_BEZ_WPISU(licznik.bezWpisu)}</Text>
+              : null}
+            {licznik.nieodczytane > 0
+              ? <Text style={styles.licznikPodpis}>{LICZNIK_NIEODCZYTANE(licznik.nieodczytane)}</Text>
+              : null}
+          </>
+        ) : (
+          <Text style={styles.licznikBrakPodstawy}>
+            {LICZNIK_BRAK_PODSTAWY(licznik.bezWpisu, licznik.nieodczytane)}
+          </Text>
+        )}
+        <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/kalendarz')}>
+          <Text style={styles.cardAction}>{doZrobienia}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const allRecsLinkLabel = otherUnreadCount > 0
     ? `Wszystkie rekomendacje (${otherUnreadCount} nowe) →`
@@ -1905,44 +2349,94 @@ export default function DzisScreen() {
             zamiast osobnej karty na każde wydarzenie (patrz nagłówek: co ustąpiło). */}
         <View style={{ marginTop: 24 }}>
           <Text style={styles.sectionLabel}>Dziś w kalendarzu</Text>
-          <TouchableOpacity style={styles.card} onPress={() => router.push('/kalendarz')}>
-            {/* ⚠️ PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI.
-                Stało tu jedno zdanie („Nic zaplanowanego na dziś.") na trzy
-                różne sytuacje. Zawodnik z wygasłym dostępem czytał, że nic nie
-                ma — zamiast dowiedzieć się, że produkt przestał przyjmować
-                jego wpisy. */}
-            {pustkaDzis ? (
+          {/* ⚠️ PLAN-D-B5 15.08.2026 — KARTA PRZESTAŁA BYĆ JEDNYM WIELKIM
+              PRZYCISKIEM I TO JEST WYMUSZONE, NIE KOSMETYCZNE. Do dziś całe
+              `styles.card` było `TouchableOpacity` prowadzącym do Kalendarza.
+              Przełącznik Dziś / Tydzień wewnątrz takiego przycisku znaczyłby,
+              że każde przełączenie zakładki JEDNOCZEŚNIE opuszcza ekran —
+              czyli przełącznik nie dałby się użyć ani razu.
+              ⛔ WEJŚCIE DO KALENDARZA NIE PODROŻAŁO: link na dole karty jest
+              osobnym przyciskiem i nadal kosztuje JEDNO dotknięcie (§5 pkt 4).
+              To jedyna rzecz, która w tej karcie ustąpiła, i jest wymieniona
+              w nocie przekazania jako odstąpienie. */}
+          <View style={styles.card}>
+            {/* ── ⭐ WT-02: PRZEŁĄCZNIK DZIŚ / TYDZIEŃ ──────────────────
+                Ten sam kształt segmentu, co zakładki Tydzień / Listy
+                w Kalendarzu — jeden wzorzec przełącznika w appce, nie dwa. */}
+            <View style={styles.seg}>
+              <TouchableOpacity
+                style={[styles.segBtn, zakresKarty === 'dzis' && styles.segBtnOn]}
+                onPress={() => setZakresKarty('dzis')}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.segTxt, zakresKarty === 'dzis' && styles.segTxtOn]}>
+                  {KARTA_ZAKRES_DZIS}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.segBtn, zakresKarty === 'tydzien' && styles.segBtnOn]}
+                onPress={() => setZakresKarty('tydzien')}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.segTxt, zakresKarty === 'tydzien' && styles.segTxtOn]}>
+                  {KARTA_ZAKRES_TYDZIEN}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {zakresKarty === 'dzis' ? (
               <>
-                <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
-                <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
+                {/* ⚠️ PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI.
+                    Stało tu jedno zdanie („Nic zaplanowanego na dziś.") na trzy
+                    różne sytuacje. Zawodnik z wygasłym dostępem czytał, że nic nie
+                    ma — zamiast dowiedzieć się, że produkt przestał przyjmować
+                    jego wpisy. ⛔ NIETKNIĘTE PRZEZ PAS B5. */}
+                {pustkaDzis ? (
+                  <>
+                    <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
+                    <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
+                  </>
+                ) : (
+                  todayEvents.map((e) => {
+                    // ⚠️ PLAN-D 14.08.2026 — DO DZIŚ STAŁO TU
+                    // `EVENT_TYPE_LABELS[e.event_type] || e.event_type`.
+                    // Rodzaj spoza piątki znanej appce (dołożony do CHECK-a w bazie
+                    // i nie dołożony tutaj) pokazywał się zawodnikowi jako SUROWA
+                    // WARTOŚĆ Z KOLUMNY — „club_training" wygląda jak etykieta, więc
+                    // nikt nigdy nie zgłosiłby, że etykiety brakuje. Reguła R5: brak
+                    // wiedzy ma mieć własny, jawny stan, a nie udawać wiedzę.
+                    const opisRodzaju = opiszRodzaj(e.event_type);
+                    if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
+                    return (
+                      <Text key={e.id} style={styles.eventLine}>
+                        <Text style={styles.eventTitle}>{e.title}</Text>
+                        {'  ·  '}
+                        {opisRodzaju.znany ? EVENT_TYPE_LABELS[opisRodzaju.id] : opisRodzaju.komunikat}
+                      </Text>
+                    );
+                  })
+                )}
               </>
             ) : (
-              todayEvents.map((e) => {
-                // ⚠️ PLAN-D 14.08.2026 — DO DZIŚ STAŁO TU
-                // `EVENT_TYPE_LABELS[e.event_type] || e.event_type`.
-                // Rodzaj spoza piątki znanej appce (dołożony do CHECK-a w bazie
-                // i nie dołożony tutaj) pokazywał się zawodnikowi jako SUROWA
-                // WARTOŚĆ Z KOLUMNY — „club_training" wygląda jak etykieta, więc
-                // nikt nigdy nie zgłosiłby, że etykiety brakuje. Reguła R5: brak
-                // wiedzy ma mieć własny, jawny stan, a nie udawać wiedzę.
-                const opisRodzaju = opiszRodzaj(e.event_type);
-                if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
-                return (
-                  <Text key={e.id} style={styles.eventLine}>
-                    <Text style={styles.eventTitle}>{e.title}</Text>
-                    {'  ·  '}
-                    {opisRodzaju.znany ? EVENT_TYPE_LABELS[opisRodzaju.id] : opisRodzaju.komunikat}
-                  </Text>
-                );
-              })
+              renderTydzienNaKarcie()
             )}
+
+            {/* ── ⭐ B5.3: LICZNIK PRACY (WG-28, WG-37, WT-15) ─────────
+                Pierwszy konsument `policzWykonanaPrace` w całej appce.
+                Stoi POD zakresem i NIEZALEŻNIE od niego: „ile pracy odbyłem
+                w dwa tygodnie" jest tą samą odpowiedzią bez względu na to,
+                czy patrzę na dziś, czy na tydzień. ⛔ Zero dotknięć (P0). */}
+            {renderLicznikPracy()}
+
             {/* NAWIGACJA B3 08.08.2026 — to jest JEDYNE wejście do Kalendarza
                 po zabraniu jego zakładki z paska, więc link musi nazywać obie
                 rzeczy, które są po drugiej stronie: przeglądanie i dodawanie.
                 „Otwórz Kalendarz →" nie mówiłoby zawodnikowi, że stamtąd
                 planuje się trening. */}
-            <Text style={styles.cardAction}>Kalendarz — dodaj i zaplanuj →</Text>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/kalendarz')}>
+              <Text style={styles.cardAction}>Kalendarz — dodaj i zaplanuj →</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -2079,4 +2573,34 @@ const styles = StyleSheet.create({
   inlineLink: { minHeight: minTouchHeight, justifyContent: 'center' },
   eventLine: { ...typography.body, fontSize: 14, color: colors.textPrimary, marginBottom: 6, lineHeight: 20 },
   eventTitle: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-B5 — PRZEŁĄCZNIK, TYDZIEŃ NA KARCIE I LICZNIK PRACY.
+  // ⚠️ Przełącznik ma DOKŁADNIE te same wartości, co zakładki Tydzień / Listy
+  // w `app/(tabs)/kalendarz.tsx`. To jest ten sam element interfejsu w dwóch
+  // miejscach; dwa różne wyglądy znaczyłyby, że zawodnik musi się go uczyć
+  // dwa razy.
+  // ═══════════════════════════════════════════════════════════════════
+  seg: { flexDirection: 'row', backgroundColor: colors.surfaceElevated, borderRadius: radii.md, padding: 3, marginBottom: 14 },
+  segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: minTouchHeight, borderRadius: radii.sm },
+  segBtnOn: { backgroundColor: colors.surface },
+  segTxt: { ...typography.bodyMedium, fontSize: 13, color: colors.textSecondary },
+  segTxtOn: { ...typography.bodySemiBold, color: colors.textPrimary },
+  kartaTydzienZakres: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6 },
+  kartaTydzienZdanie: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginBottom: 12 },
+  kartaDzienRzad: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
+  kartaDzienEtykieta: { ...typography.bodyMedium, fontSize: 12, color: colors.textTertiary, width: 62 },
+  kartaDzienEtykietaDzis: { color: colors.brand },
+  kartaDzienTresc: { flex: 1 },
+  kartaDzienPusty: { ...typography.body, fontSize: 13, color: colors.textTertiary, lineHeight: 19 },
+  kartaPozycja: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 19, marginBottom: 2 },
+  kartaPozycjaTytul: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary },
+  kartaPozycjaOdwolana: { ...typography.body, fontSize: 13, color: colors.textTertiary, textDecorationLine: 'line-through' },
+  kartaPlakietka: { ...typography.bodyMedium, fontSize: 12, color: colors.textTertiary },
+  licznikCzesc: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  licznikLiczba: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary },
+  // ⛔ CELOWO TEN SAM ROZMIAR, CO `licznikLiczba`, A NIE MNIEJSZY. Zdanie
+  // „nie wiem, które się odbyły" jest pełnoprawną odpowiedzią, a nie
+  // przypisem do liczby, której nie ma.
+  licznikBrakPodstawy: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary },
+  licznikPodpis: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 4 },
 });
