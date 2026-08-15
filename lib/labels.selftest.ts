@@ -48,7 +48,19 @@ import {
   GARDLO_BADGE_DONE,
   GARDLO_BADGE_CLOSED,
   GARDLA_SCREEN_TITLE,
+  // ⭐ PLAN-D-F2 15.08.2026 — segment, którego nie znamy (sekcja na końcu pliku).
+  SEGMENTY_ZNANE,
+  czyZnanySegment,
+  opiszSegment,
+  opisNieznanegoSegmentuDoLogu,
+  SEGMENT_NIEZNANY_KOMUNIKAT,
 } from './labels';
+
+// ⚠️ O53: żadnego `new URL(...)` — `tsconfig.json` ciągnie DOM i `tsc` pada
+// wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 let passed = 0;
 let failed = 0;
@@ -140,8 +152,40 @@ check('Picker pokazuje nową nazwę w Filarze 4',
 // ─── Odwrót na surowe id ───
 check('segmentLabel zwraca nazwę dla znanego id',
   segmentLabel('moc') === 'Moc', segmentLabel('moc'));
-check('segmentLabel NIGDY nie zwraca pustego — nieznane id wraca jako id',
-  segmentLabel('nie-ma-takiego') === 'nie-ma-takiego', segmentLabel('nie-ma-takiego'));
+
+// ═══════════════════════════════════════════════════════════════
+// ⛔ ⭐ PLAN-D-F2 15.08.2026 — TU STAŁA ASERCJA, KTÓRA ZAMYKAŁA DEFEKT
+//     NA KLUCZ. USUNIĘTA, I TO JEST NAJWAŻNIEJSZA ZMIANA TEGO PASA.
+// ═══════════════════════════════════════════════════════════════
+// Do 15.08.2026 stało tutaj, co do znaku:
+//
+//     check('segmentLabel NIGDY nie zwraca pustego — nieznane id wraca jako id',
+//       segmentLabel('nie-ma-takiego') === 'nie-ma-takiego', …);
+//
+// ⛔ TA ASERCJA WYMAGAŁA DEFEKTU. Wyciek surowej wartości z bazy na ekran —
+// ten sam, który pas A7 usunął z kalendarza, a pas E2 z dziennika — był tu
+// zapisany jako WYMAGANIE. Ktokolwiek spróbowałby go naprawić, dostałby
+// czerwony test mówiący, że coś zepsuł, i najprawdopodobniej cofnąłby naprawę.
+//
+// ⭐ To jest gorszy stan niż brak strażnika. Strażnik, którego nie ma, po prostu
+// nie chroni. Strażnik, który chroni DEFEKT, aktywnie odwraca kolejne sesje od
+// naprawy — i robi to NA ZIELONO, dokładnie jak lista na sztywno z **O69**,
+// tylko z drugiej strony: tam strażnik nie widział defektu, tu go bronił.
+//
+// Zastępuje ją asercja NAZYWAJĄCA to defektem, z właścicielem i z datą.
+check('⛔ ⭐ segmentLabel NADAL oddaje surowe id — defekt ZNANY, nie naprawiony '
+  + '(nie da się z lib/: 11 wywołań w 4 cudzych plikach, patrz nagłówek w labels.ts)',
+  segmentLabel('nie-ma-takiego') === 'nie-ma-takiego',
+  `NAPRAWIONE? Jeżeli tak — usuń tę asercję, zdejmij pozycję \`lib/labels.ts\` `
+  + `z DLUG_SUROWEJ_WARTOSCI w meczWKalendarzu.selftest.ts i z WYCIEK_PRZEZ_HELPER `
+  + `w surowaWartosc.selftest.ts. Dziś zwraca: ${segmentLabel('nie-ma-takiego')}`);
+
+// ⭐ …i asercja, która mówi, JAK defekt wygląda od strony zawodnika. Bez niej
+// zdanie wyżej jest tylko liczbą; z nią widać, że produkt oddaje identyfikator
+// z bazy w miejscu, w którym zawodnik spodziewa się słowa.
+check('⛔ dowód defektu: dla nieznanego id wynik jest RÓWNY wartości z bazy, '
+  + 'czyli zawodnik czyta „explosive_power" jako nazwę swojego obszaru',
+  segmentLabel('explosive_power') === 'explosive_power', segmentLabel('explosive_power'));
 
 // ─── 17 lokalizacji bólu ───
 check('17 lokalizacji bólu', BODY_LOCATIONS.length === 17, String(BODY_LOCATIONS.length));
@@ -249,6 +293,167 @@ check('odznaki w historii są rozróżnialne',
 check('tytuł ekranu to liczba mnoga wąskich gardeł',
   GARDLA_SCREEN_TITLE === GARDLO_LABEL_PL, `${GARDLA_SCREEN_TITLE} / ${GARDLO_LABEL_PL}`);
 check('tytuł ekranu NIE brzmi już „Cele"', rozne(GARDLA_SCREEN_TITLE, 'Cele'), GARDLA_SCREEN_TITLE);
+
+// ═══════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-F2 08.2026 (15.08.2026) — SEGMENT, KTÓREGO NIE ZNAMY
+//
+// Kształt wzięty co do znaku z `opiszRodzaj()` (pas A7): dwie gałęzie,
+// struktura zamiast napisu, ślad w konsoli z surową wartością.
+//
+// PO CO TE ASERCJE. Nazwa segmentu jest jedyną rzeczą, po której zawodnik
+// poznaje obszar, który SAM wybrał jako swoje wąskie gardło. Produkt, który
+// w tym miejscu pokazuje `explosive_power`, przestaje być asystentem —
+// i robi to po cichu, bo surowa wartość wygląda jak nazwa.
+// ═══════════════════════════════════════════════════════════════
+
+const libDir = dirname(fileURLToPath(import.meta.url));
+const appRoot = dirname(libDir);
+
+// ─── Dziedzina wyprowadzona ze słownika, nie wpisana obok ───
+check('F2: SEGMENTY_ZNANE to DOKŁADNIE klucze SEGMENT_LABELS — zero drugiej listy',
+  JSON.stringify([...SEGMENTY_ZNANE].sort()) === JSON.stringify(Object.keys(SEGMENT_LABELS).sort()),
+  JSON.stringify(SEGMENTY_ZNANE));
+
+// ⚠️ Pomiar, nie definicja: `SEGMENT_ORDER` jest listą KOLEJNOŚCI (display_order
+// w bazie), a nie listą tego, co umiemy nazwać. Dziś oba zbiory są równe i ta
+// asercja pilnuje, że rozjazd nie przejdzie niezauważony.
+check('F2: zbiór nazywalnych = zbiór z SEGMENT_ORDER (dziś; rozjazd ma zapalić)',
+  JSON.stringify([...SEGMENTY_ZNANE].sort()) === JSON.stringify([...SEGMENT_ORDER].sort()),
+  `nazywalne: ${[...SEGMENTY_ZNANE].sort().join(',')} / kolejność: ${[...SEGMENT_ORDER].sort().join(',')}`);
+
+check('F2: czyZnanySegment przepuszcza trzynastkę i odrzuca wszystko inne',
+  SEGMENT_ORDER.every((id) => czyZnanySegment(id))
+  && !czyZnanySegment('explosive_power') && !czyZnanySegment('') && !czyZnanySegment(null)
+  && !czyZnanySegment(undefined) && !czyZnanySegment(7),
+  'type guard nie odróżnia znanego od nieznanego');
+
+// ⚠️ `Object.prototype.hasOwnProperty`, nie `SEGMENT_LABELS[x] !== undefined` —
+// inaczej `czyZnanySegment('toString')` odpowiedziałoby „tak" (dziedziczenie
+// po prototypie), a `opiszSegment('constructor')` oddałby ekranowi kod funkcji
+// jako nazwę obszaru. To nie jest hipoteza: `Record<string,string>` w JS
+// naprawdę odpowiada na te klucze.
+check('⭐ F2: klucz z prototypu Object NIE udaje znanego segmentu',
+  !czyZnanySegment('toString') && !czyZnanySegment('constructor')
+  && !czyZnanySegment('hasOwnProperty') && opiszSegment('toString').znany === false,
+  `toString → ${JSON.stringify(opiszSegment('toString'))}`);
+
+// ─── Dwie gałęzie, nie jedna ───
+{
+  const znany = opiszSegment('moc');
+  const nieznany = opiszSegment('explosive_power');
+
+  check('F2: znany segment oddaje GOTOWĄ ETYKIETĘ, tę samą co słownik',
+    znany.znany === true && znany.znany && znany.etykieta === SEGMENT_LABELS['moc'] && znany.id === 'moc',
+    JSON.stringify(znany));
+
+  check('⭐ F2: nieznany segment oddaje KOMUNIKAT, a NIE surową wartość jako nazwę',
+    nieznany.znany === false && !nieznany.znany
+    && nieznany.komunikat.length > 0 && nieznany.komunikat !== nieznany.surowy,
+    JSON.stringify(nieznany));
+
+  check('F2: …i niesie surową wartość osobno, do logu — nie gubi jej',
+    !nieznany.znany && nieznany.surowy === 'explosive_power', JSON.stringify(nieznany));
+
+  // ⚠️ FUNKCJA Z lib/ NIE RYSUJE. Gdyby `opiszSegment` oddawał jeden sklejony
+  // napis, ekran nie miałby jak odróżnić nazwy od komunikatu — czyli dokładnie
+  // ten stan, który ten pas ma usunąć, tylko o poziom wyżej.
+  check('⭐ F2: wynik jest STRUKTURĄ z rozstrzygnięciem, a nie sklejonym napisem',
+    typeof znany === 'object' && typeof nieznany === 'object'
+    && 'znany' in znany && 'znany' in nieznany,
+    'opiszSegment zaczął zwracać napis — ekran nie ma czego rozstrzygać');
+
+  check('F2: ślad w konsoli powstaje TYLKO dla nieznanego i niesie surową wartość',
+    (opisNieznanegoSegmentuDoLogu(nieznany) ?? '').includes('explosive_power')
+    && opisNieznanegoSegmentuDoLogu(znany) === null,
+    String(opisNieznanegoSegmentuDoLogu(nieznany)));
+
+  // ⛔ Log, który nie mówi, GDZIE szukać, każe następnej sesji zgadywać.
+  // Trzy kolumny bez FK i bez CHECK-a to jedyne miejsca, którymi taka wartość
+  // może dziś wejść do bazy (zmierzone 15.08.2026, `pg_constraint`).
+  check('F2: ślad w konsoli nazywa trzy kolumny bez FK i bez CHECK-a',
+    ['focus_blocks', 'component_hints', 'player_insights']
+      .every((t) => (opisNieznanegoSegmentuDoLogu(nieznany) ?? '').includes(t)),
+    String(opisNieznanegoSegmentuDoLogu(nieznany)));
+
+  check('F2: wartość spoza typu `string` też dostaje jawny stan, nie wysypkę',
+    opiszSegment(null).znany === false && opiszSegment(undefined).znany === false
+    && opiszSegment(42).znany === false,
+    'opiszSegment przewrócił się na wartości, która nie jest napisem');
+}
+
+// ─── Brzmienie: instancja wzorca A7, nie nowe zdanie ───
+check('F2: komunikat jest instancją wzorca A7 „Nie znam tego …"',
+  /^Nie znam tego /.test(SEGMENT_NIEZNANY_KOMUNIKAT), SEGMENT_NIEZNANY_KOMUNIKAT);
+check('F2: komunikat mówi o NIEWIEDZY PRODUKTU, nie o zawodniku (Z0)',
+  !/\b(twoj|twój|masz|nie masz)\b/i.test(SEGMENT_NIEZNANY_KOMUNIKAT), SEGMENT_NIEZNANY_KOMUNIKAT);
+check('F2: komunikat NIE jest żadnym z id segmentów ani żadną z ich nazw',
+  !SEGMENTY_ZNANE.includes(SEGMENT_NIEZNANY_KOMUNIKAT)
+  && !Object.values(SEGMENT_LABELS).includes(SEGMENT_NIEZNANY_KOMUNIKAT),
+  SEGMENT_NIEZNANY_KOMUNIKAT);
+
+// ═══════════════════════════════════════════════════════════════
+// ⭐⭐ E2-4 — „FUNKCJA ZBUDOWANA I SPRAWDZONA BYWA MYLONA Z FUNKCJĄ,
+//     KTÓRĄ ZAWODNIK WIDZI". TA ASERCJA JEST PO TO, ŻEBY TEGO NIE UDAWAĆ.
+// ═══════════════════════════════════════════════════════════════
+// Pas A1 (14.08) zbudował `computeFocusBlockProgressState` — zero konsumentów.
+// Pas E2 (15.08) zbudował `policzPraceWeWszystkichBlokach` — zero konsumentów.
+// `opiszSegment()` jest trzeci z rzędu i mówię to WPROST, zamiast pozwolić,
+// żeby zielona suita wyglądała jak naprawiony ekran.
+//
+// ⚠️ Asercja jest DWUSTRONNA i to jest jej sedno: dziś wymaga ZERA konsumentów
+// (bo brzmienie czeka na decyzję Kuby, §6 noty F2), a w chwili, gdy pierwszy
+// konsument się pojawi, ZAPALA SIĘ z poleceniem: przejrzyj brzmienie i zdejmij
+// odpowiednie wywołanie `segmentLabel()`. Nie da się więc ani po cichu wpuścić
+// nieprzejrzanego brzmienia na ekran, ani po cichu zapomnieć o podpięciu.
+{
+  const KATALOGI = ['app', 'components', 'lib'];
+  const POMIN = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+
+  const PLIKI = KATALOGI
+    .flatMap((k) => chodz(join(appRoot, k)))
+    .map((p) => relative(appRoot, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const konsumenci = PLIKI.filter((p) =>
+    p !== 'lib/labels.ts' && /\bopiszSegment\s*\(/.test(readFileSync(join(appRoot, p), 'utf8')));
+
+  console.log(`   ⚠️ (F2) opiszSegment() — konsumentów w app/ components/ lib/: ${konsumenci.length}`
+    + (konsumenci.length === 0
+      ? '  ⛔ ZERO. Funkcja jest zbudowana i sprawdzona, ale ŻADEN EKRAN JEJ NIE RYSUJE (E2-4).'
+      : `  → ${konsumenci.join(', ')}`));
+
+  check('⭐ F2/E2-4: opiszSegment nie ma jeszcze konsumenta — i mówię to wprost, '
+    + 'zamiast pozwolić zielonej suicie udawać naprawiony ekran',
+    konsumenci.length === 0,
+    `PIERWSZY KONSUMENT: ${konsumenci.join(', ')} — (1) przejrzyj SEGMENT_NIEZNANY_KOMUNIKAT `
+    + 'z Kubą (§6 noty F2), bo od teraz zawodnik go widzi; (2) zdejmij z tego pliku wywołanie '
+    + '`segmentLabel()`; (3) zaktualizuj tę asercję.');
+}
+
+// ─── Hardening: wewnętrzna droga do Pickera nie może oddać surowego id ───
+// `SEGMENTS_BY_PILLAR` przechodzi przez `segmentLabel()`, czyli przez tę samą
+// zepsutą funkcję. Dziś nie jest to wyciek WYŁĄCZNIE dlatego, że jej wejście
+// (`SEGMENTS_BY_PILLAR_IDS`) jest listą wpisaną ręcznie. ⚠️ Asercja wyżej
+// („SEGMENTS_BY_PILLAR niesie nazwy zgodne z SEGMENT_LABELS") przechodzi
+// PUSTO dla id spoza słownika: `SEGMENT_LABELS[id]` jest wtedy `undefined`,
+// a `name` to surowe id — dwa różne błędy, których porównanie nie widzi.
+// Ta asercja porównuje ZBIORY, więc widzi.
+check('⛔ ⭐ F2: każde id z filarów jest NAZYWALNE — inaczej Picker na ekranie '
+  + 'Wąskie gardła pokazałby surowe id jako pozycję do wyboru',
+  SEGMENTS_BY_PILLAR_IDS.flatMap(([, ids]) => ids).every((id) => czyZnanySegment(id)),
+  SEGMENTS_BY_PILLAR_IDS.flatMap(([, ids]) => ids).filter((id) => !czyZnanySegment(id)).join(', '));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 // Celowo `throw`, a nie `process.exit(1)`: `process` wymaga `@types/node`,

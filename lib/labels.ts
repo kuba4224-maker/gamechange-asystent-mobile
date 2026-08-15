@@ -171,7 +171,148 @@ export const SEGMENT_LABELS: Record<string, string> = {
   decyzja: 'Szybkość decyzji',
 };
 
-/** Nazwa segmentu, z bezpiecznym odwrotem na surowe id (nigdy nie zwraca pustego). */
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-F2 08.2026 (15.08.2026) — SEGMENT, KTÓREGO NIE ZNAMY
+// ═══════════════════════════════════════════════════════════════════
+//
+// ── CO JEST ZEPSUTE ──────────────────────────────────────────────────
+// `segmentLabel()` niżej oddaje SUROWE `id` z bazy, gdy nie ma dla niego
+// nazwy. Zawodnik czyta wtedy „Twoje wąskie gardło to explosive_power"
+// zamiast słowa, które sam wybrał — a ponieważ surowa wartość WYGLĄDA jak
+// nazwa, nikt nigdy nie zgłosi, że nazwy brakuje. To jest ta sama choroba,
+// którą pas A7 usunął z kalendarza (`EVENT_TYPE_LABELS[x] || x`), tylko
+// schowana o jeden skok dalej — WEWNĄTRZ funkcji, a nie w miejscu wywołania.
+//
+// ⚠️ I dlatego DETEKTOR PASA E2 JEJ NIE WIDZI u konsumentów. `(E2-5)` szuka
+// zapisu `SLOWNIK[x] ?? x` w pliku, który rysuje. Tutaj plik, który rysuje,
+// pisze `segmentLabel(id)` — zapis czysty jak łza. ZMIERZONE 15.08.2026:
+// wyciek dosięga PIĘCIU plików, z których ANI JEDEN nie stoi na liście
+// długu `(E2-5)`.
+//
+// ── DZIEDZINA — ZMIERZONA, NIE ZAŁOŻONA (`select distinct`, 15.08.2026) ──
+//   `public.segments`                       13 wierszy, ZERO kolumn z nazwą
+//                                           → jedynym źródłem nazw jest ten plik
+//   z FK → segments (domena zamknięta):     goals · segment_components ·
+//                                           knowledge_base_entries ·
+//                                           living_diagnosis_pulses ·
+//                                           match_context_answers ·
+//                                           decision_recommendations
+//   ⛔ BEZ FK I BEZ CHECK (domena OTWARTA): focus_blocks.segment_id ·
+//                                           component_hints.segment_id ·
+//                                           player_insights.segment_id
+//   ⛔ bez żadnego ograniczenia:            klucze w `diagnostics.scores` (jsonb)
+//
+// ⭐ Dziś ani jedna wartość nie wypada poza trzynastkę (zmierzone na wszystkich
+// dziewięciu kolumnach i na 50 kluczach `scores`). ⚠️ ALE trzy z nich nie mają
+// ani FK, ani CHECK-a — więc gałąź „nie znam" jest osiągalna BEZ ŻADNEJ
+// MIGRACJI, jednym `insert`em. To NIE jest ten sam przypadek, co
+// `daily_logs.session_type` w pasie E2, gdzie CHECK domykał dziedzinę.
+
+/**
+ * ⭐ ROZSTRZYGNIĘCIE, NIE NAPIS — kształt wzięty co do znaku z `opiszRodzaj()`
+ * (`lib/meczWKalendarzu.ts`, pas A7).
+ *
+ * ⚠️ FUNKCJA Z `lib/` NIE RYSUJE. Oddaje strukturę, z której ekran wie, co
+ * pokazać: `znany: true` → gotowa etykieta; `znany: false` → surowa wartość
+ * (do logu, NIE na ekran) i komunikat. Sklejenie tego w jeden napis jest
+ * dokładnie tym błędem, przez który dziś nie da się odróżnić nazwy od
+ * identyfikatora.
+ */
+export type OpisSegmentu =
+  | { znany: true; id: string; etykieta: string }
+  | { znany: false; surowy: string; komunikat: string };
+
+/**
+ * ⭐ DZIEDZINA WYPROWADZONA ZE SŁOWNIKA, A NIE WPISANA OBOK NIEGO.
+ *
+ * Druga lista rozjechałaby się z pierwszą — i wtedy funkcja mówiłaby „nie znam"
+ * o segmencie, dla którego nazwa stoi dziesięć linii wyżej. Ten sam ruch, co
+ * `Object.keys` w pasie E2 (`dziennik.tsx`), i z tego samego powodu.
+ *
+ * ⚠️ `SEGMENT_ORDER` NIE nadaje się na to źródło: jest listą KOLEJNOŚCI
+ * (`display_order` w bazie), a nie listą tego, co umiemy nazwać. Asercja
+ * w `labels.selftest.ts` pilnuje, że oba zbiory są dziś równe — ale to jest
+ * pomiar, nie definicja.
+ */
+export const SEGMENTY_ZNANE: readonly string[] = Object.keys(SEGMENT_LABELS);
+
+export function czyZnanySegment(wartosc: unknown): wartosc is string {
+  return typeof wartosc === 'string' && Object.prototype.hasOwnProperty.call(SEGMENT_LABELS, wartosc);
+}
+
+/**
+ * ⚠️ BRZMIENIE WIDOCZNE DLA ZAWODNIKA — DO DECYZJI KUBY (nota F2 §6).
+ *
+ * ⛔ Nie jest wymyślone tutaj. Jest INSTANCJĄ wzorca `Nie znam tego …`
+ * przyjętego w pasie A7 (`Nie znam tego rodzaju wydarzenia`), z rzeczownikiem,
+ * którym produkt NAZYWA DZIŚ SEGMENT we własnym tekście — „obszar"
+ * (`components/DiagnosisProfileView.tsx`: „…to X — obszar z grupy „…"").
+ *
+ * ⭐ ZERO KONSUMENTÓW NA DZIŚ. Ani jeden ekran tego nie rysuje, więc zawodnik
+ * tego nie zobaczy do czasu decyzji. Pilnuje tego asercja w `labels.selftest.ts`,
+ * która ZAPALA SIĘ, gdy konsument się pojawi — żeby brzmienie nie weszło na
+ * ekran bez przejścia przez §6 noty. Zmiana to jedna stała.
+ */
+export const SEGMENT_NIEZNANY_KOMUNIKAT = 'Nie znam tego obszaru';
+
+/**
+ * Rozstrzyga, czy `id` segmentu jest jednym z tych, które umiemy nazwać.
+ *
+ * Przy nieznanym NIE zgaduje nazwy i NIE oddaje surowej wartości jako nazwy —
+ * oddaje jawny stan plus wartość do logu. Ekran ma wtedy co narysować,
+ * a autor ma po czym poznać, że baza urosła o segment, którego appka nie zna.
+ */
+export function opiszSegment(wartosc: unknown): OpisSegmentu {
+  if (czyZnanySegment(wartosc)) {
+    return { znany: true, id: wartosc, etykieta: SEGMENT_LABELS[wartosc] };
+  }
+  const surowy = typeof wartosc === 'string' ? wartosc : String(wartosc);
+  return { znany: false, surowy, komunikat: SEGMENT_NIEZNANY_KOMUNIKAT };
+}
+
+/**
+ * Tekst do konsoli — ma NAZWAĆ wartość, której appka nie rozumie, i powiedzieć,
+ * gdzie jej szukać. Kolumny wymienione z pomiaru, nie z pamięci (patrz nagłówek).
+ */
+export function opisNieznanegoSegmentuDoLogu(opis: OpisSegmentu): string | null {
+  if (opis.znany) return null;
+  return `[PLAN-D-F2] segment_id = „${opis.surowy}" — poza trzynastką znaną appce `
+    + `(${SEGMENTY_ZNANE.join(', ')}). Trzy kolumny nie mają ani FK, ani CHECK-a `
+    + '(focus_blocks, component_hints, player_insights), więc wartość mogła tam wejść '
+    + 'bez migracji. Zawodnik widzi tę pozycję bez nazwy obszaru.';
+}
+
+/**
+ * ⛔ ⭐ ZNANY DEFEKT, ŚWIADOMIE NIEZMIENIONY PRZEZ PAS F2 — I OTO DLACZEGO.
+ *
+ * Ta funkcja oddaje SUROWE `id`, gdy nie ma dla niego nazwy. To jest jedna
+ * z pozycji długu `(E2-5)` i pas F2 dostał ją jako swoje główne zadanie.
+ * ⛔ NIE DA SIĘ JEJ ZAMKNĄĆ Z `lib/` — i to jest POMIAR, nie wygoda:
+ *
+ *  1. ZMIERZONE 15.08.2026: `segmentLabel()` ma **12 wywołań w 5 plikach** —
+ *     `app/(tabs)/ja.tsx :: load` · `components/DiagnosisProfileView.tsx`
+ *     (`tiers` ×3, `SekcjaWaskiegoGardla` ×3) · `components/diagnosisProfile.ts`
+ *     (`nameOf` ×2, `classify`) · `lib/rediagnosis.ts :: buildRediagnosisView` ·
+ *     ten plik (`SEGMENTS_BY_PILLAR`, id zawsze znane — nie wyciek).
+ *  2. ⭐ W CZTERECH Z NICH WYNIK JEST WPLATANY W ZDANIE, a nie stawiany
+ *     samodzielnie: „Twoje wąskie gardło to ${segmentLabel(id)} — obszar
+ *     z grupy „…"" (`SekcjaWaskiegoGardla`), `.map(segmentLabel).join(' + ')`
+ *     (`nameOf`). Jeden napis nie obsłuży obu miejsc naraz: etykieta stoi sama,
+ *     a w zdaniu musi być frazą. Podmiana odwrotu na komunikat dałaby tam
+ *     „Twoje wąskie gardło to Nie znam tego obszaru — obszar z grupy…".
+ *  3. ⛔ Wszystkie pięć plików jest POZA listą pasa F2 (`app/`, `components/`
+ *     i cudze `lib/`). Polecenie mówi wprost: nie wchodzisz, wypisujesz.
+ *
+ * ⚠️ ZAPIS `SEGMENT_LABELS[id] ?? id` ZOSTAJE CO DO ZNAKU CELOWO. Przepisanie
+ * go na `opiszSegment(...)` wyciszyłoby detektor `(E2-5)`, nie naprawiając ani
+ * jednego ekranu — czyli pozycja długu zniknęłaby z listy, a defekt zostałby.
+ * To jest dokładnie ten ruch, którego zapadka w `meczWKalendarzu.selftest.ts`
+ * ma zabronić.
+ *
+ * ⭐ CO MA ZROBIĆ NASTĘPNY PAS: podmienić te 11 wywołań na `opiszSegment()`
+ * (wyżej) i narysować OBIE gałęzie, a potem skasować tę funkcję. Strażnik
+ * `lib/surowaWartosc.selftest.ts` liczy je i nie pozwala im przybyć.
+ */
 export function segmentLabel(id: string): string {
   return SEGMENT_LABELS[id] ?? id;
 }
