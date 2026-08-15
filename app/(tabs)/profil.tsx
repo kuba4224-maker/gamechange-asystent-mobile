@@ -37,20 +37,45 @@
 // każdym etapie, nie tylko na jednym.
 //
 // PAKIET 9 (03.08.2026, noc — decyzja Kuby w rozmowie: appka mobilna, ten
-// ekran). Nowy blok "Raport dla rodzica" w Etapie 0, ten sam wzorzec co
-// Wzrost tuż nad nim: formularz NIEZALEŻNY od zapisu etapu, własny stan,
-// własny handler zapisu. Zapisuje WYŁĄCZNIE nowy wiersz do
-// public.parent_report_subscriptions (player_user_id, parent_email) —
-// backend (tabela, get_parent_report, parent_report_unsubscribe) już
-// istnieje na żywo, potwierdzone 03.08.2026 (RAPORT_RODZICA_SQL.md). Bez
-// odczytu istniejącej subskrypcji z powrotem — tabela świadomie NIE ma
-// polityki RLS SELECT dla zwykłego zawodnika (dostęp tylko przez token,
-// patrz RAPORT_RODZICA_SQL.md), więc appka nie próbuje pokazać "już
-// zapisane", tylko potwierdza sam fakt udanego zapisu. `access_token`
-// świadomie NIE wysyłany z appki — zakładam DEFAULT po stronie bazy
-// (ten sam wzorzec co reszta tokenów w projekcie, np. session_bridge_codes)
-// — do potwierdzenia przy pierwszym realnym teście, patrz DO_ZROBIENIA_
-// PRZEZ_KUBE.md, Pakiet 9.
+// ekran). Blok "Raport dla rodzica". Zapisuje do
+// public.parent_report_subscriptions (player_user_id, parent_email);
+// `access_token` świadomie NIE wysyłany z appki — baza ma DEFAULT
+// gen_random_uuid() (zmierzone w information_schema.columns 15.08.2026,
+// nie zakładane).
+//
+// PLAN-D-L2 08.2026 (15.08.2026) — RAPORT O MNIE JEST MÓJ.
+//
+// ⚠️ SPROSTOWANIE ZDANIA, KTÓRE STAŁO TU OD 06.08.2026. Ten nagłówek i blok
+// przy stanie `savedParentEmail` twierdziły, że `parent_report_subscriptions`
+// świadomie nie wystawia zawodnikowi odczytu jego własnego wiersza, więc appka
+// nie ma jak zapytać bazy. TO BYŁA NIEPRAWDA — dosłowne brzmienie tamtego
+// zdania stoi w `claude/PRZEKAZANIE_PAS_L2_15_08_2026.md` i strażnik pilnuje,
+// żeby nie wróciło do tego pliku. Zmierzone 15.08.2026 zapytaniem do
+// `pg_policies` na produkcji (projekt kqrbztsvepjtggjmmcdx) — polityki są
+// TRZY, wszystkie właściciela:
+//   parent_report_owner_select [SELECT] using (auth.uid() = player_user_id)
+//   parent_report_owner_insert [INSERT] check (auth.uid() = player_user_id)
+//   parent_report_owner_update [UPDATE] using + check (auth.uid() = player_user_id)
+// Skutek nieaktualnego komentarza: przez dziewięć dni appka NIE PYTAŁA bazy
+// o coś, o co wolno jej było zapytać, opierała się na pamięci urządzenia
+// (AsyncStorage) i dziecko nie mogło ani zobaczyć, ani wyłączyć raportu,
+// który co miesiąc opisuje jego życie obcej osobie (O67).
+//
+// CO SIĘ ZMIENIŁO: appka PYTA BAZĘ (`wczytajRaportRodzica`), rozróżnia
+// CZTERY stany odczytu (nie pytałem / nie ma / jest / nie udało się —
+// reguła R5) i ma przycisk wyłączenia. Blok wyszedł z Etapu 0 poza numerację
+// etapów, tym samym wzorcem i z tego samego powodu co Plan lekcji niżej:
+// zawodnik z wypełnionym profilem ląduje na etapie 5 z 5, więc w Etapie 0
+// rzecz kosztowała SZEŚĆ dotknięć (Ja → Profil → cztery razy „Wstecz").
+// Poza etapami kosztuje DWA.
+//
+// ⛔ Wypisanie to `active = false` + `unsubscribed_at`. Wiersza NIE KASUJEMY
+//    i polityki DELETE nie ma — jej brak jest stanem prawidłowym.
+// ⛔ Wyłączenie NIE POWIADAMIA nikogo. Rodzic nie dostaje maila „dziecko Cię
+//    wyłączyło" — to jest decyzja o relacji i należy do Kuby, nie do pasa.
+// ⚠️ Cała logika bez ekranu stoi w `lib/raportRodzica.ts` i ma tam własnego
+//    strażnika (`lib/raportRodzica.selftest.ts`). Druga implementacja
+//    rozróżnienia stanów po tej stronie to gwarantowany rozjazd.
 //
 // KOD DRUŻYNY W APPCE MOBILNEJ (05.08.2026 — na wyraźną prośbę Kuby:
 // "pracujmy tylko na appce mobilnej", w kontekście pilotażu Parasol
@@ -72,7 +97,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
 import Checkbox from 'expo-checkbox';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 import { toLocalDateStr } from '../../lib/date-utils';
@@ -117,6 +141,33 @@ import {
   type PlanTygodnia,
   type WierszPlanuLekcji,
 } from '../../lib/planLekcji';
+// PLAN-D-L2 08.2026 (15.08.2026) — RAPORT O MNIE JEST MÓJ.
+// ⚠️ Ten ekran NIE ROZSTRZYGA sam, co znaczy pusta odpowiedź bazy — robi to
+// `czytajSubskrypcje`, żeby dało się to sprawdzić testem bez ekranu. Druga
+// implementacja rozróżnienia „nie ma" od „nie udało się odczytać" jest tym
+// samym rozjazdem, przed którym stoi ostrzeżenie przy planie lekcji niżej.
+import {
+  TABELA_SUBSKRYPCJI,
+  KOLUMNY_SUBSKRYPCJI,
+  czytajSubskrypcje,
+  opisStanuRaportu,
+  opisOstatniejWysylki,
+  sprawdzEmail,
+  sciezkaZapisu,
+  wynikZmiany,
+  ladunekWylaczenia,
+  ladunekReaktywacji,
+  toJestDuplikat,
+  KOMUNIKAT_JUZ_DOSTAJE,
+  KOMUNIKAT_WYLACZONY,
+  KOMUNIKAT_WLACZONY_PONOWNIE,
+  KOMUNIKAT_ZAPISANY,
+  KOMUNIKAT_BLAD_WYLACZENIA,
+  KOMUNIKAT_BLAD_ZAPISU,
+  ETYKIETA_WYLACZ,
+  type StanRaportuRodzica,
+  type WierszSubskrypcji,
+} from '../../lib/raportRodzica';
 
 // ── Stałe — 1:1 z asystent_app.html (kontrakt, sekcje 1-4) ──
 const POSITIONS = [
@@ -248,19 +299,24 @@ export default function ProfilScreen() {
   // sam wzorzec co Wzrost tuż wyżej — patrz komentarz na górze pliku.
   const [parentEmailInput, setParentEmailInput] = useState('');
   const [savingParentEmail, setSavingParentEmail] = useState(false);
-  // AUDYT 06.08.2026 — pamięć lokalna ostatnio zapisanego adresu rodzica.
-  // `parent_report_subscriptions` świadomie NIE ma polityki RLS SELECT dla
-  // zawodnika (dostęp tylko przez token, RAPORT_RODZICA_SQL.md), więc appka nie
-  // ma jak zapytać bazy "czy już zapisałem". Skutkiem było to, że zawodnik nie
-  // widział żadnego śladu wcześniejszego zapisu i przy każdym wejściu w Profil
-  // klikał jeszcze raz — a każde kliknięcie tworzyło NOWY wiersz subskrypcji,
-  // czyli rodzic dostawałby raport tyle razy, ile razy dziecko kliknęło.
-  // To obejście po stronie urządzenia: nie przetrwa reinstalacji ani zmiany
-  // telefonu, ale odcina najczęstszy przypadek (kliknięcie dwa razy z rzędu).
-  // PEŁNE ROZWIĄZANIE WYMAGA SQL — patrz REJESTR_NAPRAW_AUDYT_06_08_2026.md:
-  // unikalny indeks na (player_user_id, parent_email) + polityka SELECT dla
-  // właściciela wiersza. Do wklejenia przez Kubę, nie przez sesję.
-  const [savedParentEmail, setSavedParentEmail] = useState<string | null>(null);
+  // PLAN-D-L2 15.08.2026 — STAN SUBSKRYPCJI CZYTANY Z BAZY, nie z pamięci
+  // urządzenia. Do 15.08 stał tu `savedParentEmail` z AsyncStorage, bo
+  // komentarz w tym pliku twierdził, że baza nie wpuści zawodnika do jego
+  // własnego wiersza. Wpuszcza
+  // (`pg_policies`, zmierzone 15.08.2026 — patrz nagłówek pliku), a pamięć
+  // urządzenia nie przeżywała reinstalacji ani zmiany telefonu: dziecko po
+  // przesiadce nie widziało ŻADNEGO śladu tego, że raport o nim chodzi.
+  //
+  // `null` znaczy „jeszcze nie pytałem" — CZWARTY stan obok „nie ma", „jest"
+  // i „nie udało się odczytać". Ten sam wzorzec co `stanDostepu`
+  // i `stanPlanuLekcji` niżej.
+  const [stanRaportu, setStanRaportu] = useState<StanRaportuRodzica | null>(null);
+  // Wszystkie wiersze zawodnika, także wypisane — bez nich nie da się
+  // odróżnić „zapisz nowy" od „włącz z powrotem ten, który już był".
+  const [wierszeRaportu, setWierszeRaportu] = useState<WierszSubskrypcji[]>([]);
+  // Id subskrypcji, którą właśnie wyłączamy — żeby zablokować sam ten
+  // przycisk, a nie wszystkie naraz, gdy adresów jest kilka.
+  const [wylaczanyId, setWylaczanyId] = useState<number | null>(null);
 
   // Sekcja 2d — Kod drużyny (05.08.2026). RPC join_team_with_code, formularz
   // NIEZALEŻNY od zapisu etapu, ten sam wzorzec co Raport dla rodzica wyżej
@@ -451,13 +507,33 @@ export default function ProfilScreen() {
 
   useEffect(() => { wczytajPlanLekcji(); }, [wczytajPlanLekcji]);
 
-  // AUDYT 06.08.2026 — odczyt lokalnie zapamiętanego adresu rodzica (patrz wyżej).
-  useEffect(() => {
+  // PLAN-D-L2 08.2026 (15.08.2026) — ODCZYT SUBSKRYPCJI RAPORTU DLA RODZICA.
+  //
+  // ⚠️ ŚWIADOMIE OSOBNE, WĄSKIE WYWOŁANIE, poza paczką w `loadProfile` — ten
+  // sam wzorzec co stan dostępu i plan lekcji. Gdyby polityka SELECT zniknęła
+  // albo odczyt padł, cały ekran Profilu ma działać dalej.
+  //
+  // ⛔ ŻADNEGO `data ?? []`. Odpowiedź z błędem i pusta lista to DWIE RÓŻNE
+  // rzeczy, a sklejenie ich napisałoby dziecku „Nikt nie dostaje raportu
+  // o Tobie" w chwili, w której nie wiemy, czy ktoś dostaje. Rozróżnienie
+  // robi `czytajSubskrypcje`, które dostaje CAŁĄ odpowiedź.
+  const wczytajRaportRodzica = useCallback(async () => {
     if (!currentUser) return;
-    AsyncStorage.getItem(`parent_report_email:${currentUser.id}`)
-      .then((v) => setSavedParentEmail(v))
-      .catch(() => { /* brak pamięci lokalnej nie może blokować ekranu */ });
+    const { data, error } = await supabase
+      .from(TABELA_SUBSKRYPCJI)
+      .select(KOLUMNY_SUBSKRYPCJI)
+      .eq('player_user_id', currentUser.id)
+      .order('created_at', { ascending: false });
+
+    const stan = czytajSubskrypcje(data, error ? error.message : null);
+    setStanRaportu(stan);
+    setWierszeRaportu(
+      stan.rodzaj === 'nie_udalo_sie' || !Array.isArray(data) ? [] : (data as unknown as WierszSubskrypcji[]),
+    );
+    if (error) console.warn('[PLAN-D-L2] nie odczytałem subskrypcji raportu:', error.message);
   }, [currentUser]);
+
+  useEffect(() => { wczytajRaportRodzica(); }, [wczytajRaportRodzica]);
 
   useEffect(() => {
     let mounted = true;
@@ -601,40 +677,124 @@ export default function ProfilScreen() {
     }
   };
 
-  // Pakiet 9 (03.08.2026 noc) — zapisuje NOWĄ subskrypcję raportu dla
-  // rodzica. Walidacja "zawiera @" — ten sam, świadomie prosty wzorzec co
-  // logowanie (components/LoginScreen.tsx), nie pełny regex. `access_token`
-  // świadomie pominięty w payloadzie — patrz komentarz na górze pliku.
+  // Pakiet 9 (03.08.2026 noc) → PRZEPISANE W PLAN-D-L2 (15.08.2026).
+  //
+  // ⚠️ DRUGA POŁÓWKA MIGRACJI `MIGRACJA_L2_JEDNA_SUBSKRYPCJA.sql`. Po założeniu
+  // częściowego unikatu na `(player_user_id, lower(parent_email)) where active`
+  // drugie kliknięcie „Zapisz" na ten sam adres przestaje po cichu tworzyć
+  // duplikat i zaczyna zwracać `23505`. Sam surowy błąd bazy na ekranie
+  // dziecka jest tak samo zły jak cichy duplikat — dlatego appka najpierw
+  // czyta, co NAPRAWDĘ jest, i wybiera ścieżkę.
+  //
+  // ⚠️ DLACZEGO NIE `upsert`: PostgREST przyjmuje w `on_conflict` wyłącznie
+  // nazwy kolumn, a unikat stoi na WYRAŻENIU `lower(parent_email)`. Postgres
+  // odpowiada wtedy `42P10 there is no unique or exclusion constraint matching
+  // the ON CONFLICT specification` — zmierzone na PostgreSQL 16, nie założone
+  // (patrz nota pasa L2). `23505` zostaje jako siatka na wyścig dwóch urządzeń.
   const addParentReportSubscription = async () => {
     if (!currentUser) return;
     setProfileError(null);
     setProfileOk(null);
-    const trimmedEmail = parentEmailInput.trim();
-    if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      setProfileError('Podaj prawidłowy adres email rodzica.');
+
+    const sprawdzony = sprawdzEmail(parentEmailInput);
+    if (!sprawdzony.ok) {
+      setProfileError(sprawdzony.blad);
       return;
     }
-    // AUDYT 06.08.2026 — nie twórz drugiej subskrypcji na ten sam adres.
-    if (savedParentEmail && trimmedEmail.toLowerCase() === savedParentEmail.toLowerCase()) {
+
+    const sciezka = sciezkaZapisu(stanRaportu, sprawdzony.email, wierszeRaportu);
+    // ⛔ Nie wiemy, co jest w bazie → NIE ZGADUJEMY. Zapis „na ślepo" wprost
+    // pod unikat kończy się surowym błędem bazy na ekranie dziecka.
+    if (sciezka.rodzaj === 'nie_wiem') {
+      setProfileError(KOMUNIKAT_BLAD_ZAPISU);
+      return;
+    }
+    if (sciezka.rodzaj === 'juz_aktywny') {
       setParentEmailInput('');
-      setProfileOk('Ten adres jest już zapisany — nie trzeba go dodawać drugi raz.');
+      setProfileOk(KOMUNIKAT_JUZ_DOSTAJE);
       return;
     }
+
     setSavingParentEmail(true);
     try {
-      const { error } = await supabase
-        .from('parent_report_subscriptions')
-        .insert({ player_user_id: currentUser.id, parent_email: trimmedEmail });
-      if (error) throw error;
-
-      setParentEmailInput('');
-      setSavedParentEmail(trimmedEmail);
-      AsyncStorage.setItem(`parent_report_email:${currentUser.id}`, trimmedEmail).catch(() => {});
-      setProfileOk('Zapisano e-mail rodzica — raporty zaczną przychodzić po włączeniu wysyłki.');
-    } catch (e: any) {
-      setProfileError('Nie udało się zapisać e-maila rodzica: ' + e.message);
+      if (sciezka.rodzaj === 'reaktywuj') {
+        // ⛔ NIE drugi `insert`. Wiersz historyczny wraca do życia razem
+        // ze skasowanym znacznikiem wypisania — inaczej dziennik kłamie.
+        const { data, error } = await supabase
+          .from(TABELA_SUBSKRYPCJI)
+          .update(ladunekReaktywacji())
+          .eq('id', sciezka.id)
+          .select('id');
+        // O61: dowodem jest LICZBA wierszy, nie brak błędu.
+        const wynik = wynikZmiany(data, error ? error.message : null);
+        if (!wynik.ok) {
+          // ⚠️ `23505` znaczy, że baza wie coś, czego ekran nie wiedział
+          // (drugie urządzenie zdążyło zapisać). Wtedy trzeba ODCZYTAĆ PONOWNIE,
+          // inaczej lista dalej pokazuje nieaktualny stan obok komunikatu,
+          // który mu przeczy.
+          if (toJestDuplikat(error)) { setProfileError(KOMUNIKAT_JUZ_DOSTAJE); await wczytajRaportRodzica(); }
+          else setProfileError(KOMUNIKAT_BLAD_ZAPISU);
+          return;
+        }
+        setParentEmailInput('');
+        setProfileOk(KOMUNIKAT_WLACZONY_PONOWNIE);
+      } else {
+        const { data, error } = await supabase
+          .from(TABELA_SUBSKRYPCJI)
+          .insert({ player_user_id: currentUser.id, parent_email: sprawdzony.email })
+          .select('id');
+        const wynik = wynikZmiany(data, error ? error.message : null);
+        if (!wynik.ok) {
+          // Ten sam powód co przy reaktywacji wyżej: duplikat znaczy, że stan
+          // ekranu jest starszy niż stan bazy.
+          if (toJestDuplikat(error)) { setProfileError(KOMUNIKAT_JUZ_DOSTAJE); await wczytajRaportRodzica(); }
+          else setProfileError(KOMUNIKAT_BLAD_ZAPISU);
+          return;
+        }
+        setParentEmailInput('');
+        setProfileOk(KOMUNIKAT_ZAPISANY);
+      }
+      // Stan bierzemy z POWTÓRNEGO ODCZYTU, nie z tego, co chcieliśmy zapisać
+      // — ten sam powód co przy planie lekcji: inaczej ekran pokazuje życzenie
+      // appki, a nie zawartość bazy, i różnicy nikt nie zobaczy.
+      await wczytajRaportRodzica();
     } finally {
       setSavingParentEmail(false);
+    }
+  };
+
+  // PLAN-D-L2 (15.08.2026) — WYŁĄCZENIE RAPORTU.
+  //
+  // ⛔ `update`, NIE `delete`. Polityki DELETE nie ma i nie ma być: wiersz jest
+  //    zapisem tego, co wyszło na zewnątrz o nieletnim, i zostaje.
+  // ⛔ ZERO AUTOMATYCZNEGO POWIADOMIENIA. Rodzic nie dostaje maila „dziecko Cię
+  //    wyłączyło". To jest decyzja o relacji — należy do Kuby, nie do pasa.
+  // ⚠️ O61: `update` pod RLS, który nie trafił w żaden wiersz, NIE RZUCA
+  //    wyjątku. Bez `.select('id')` i sprawdzenia liczby wierszy ekran
+  //    powiedziałby „Raport wyłączony." komuś, komu nic nie wyłączył.
+  const wylaczRaport = async (id: number) => {
+    if (!currentUser) return;
+    setProfileError(null);
+    setProfileOk(null);
+    setWylaczanyId(id);
+    try {
+      const { data, error } = await supabase
+        .from(TABELA_SUBSKRYPCJI)
+        .update(ladunekWylaczenia(new Date().toISOString()))
+        .eq('id', id)
+        .select('id');
+      const wynik = wynikZmiany(data, error ? error.message : null);
+      if (!wynik.ok) {
+        console.warn('[PLAN-D-L2] wyłączenie nie objęło wiersza:', wynik.powod, 'wierszy:', wynik.ile);
+        setProfileError(KOMUNIKAT_BLAD_WYLACZENIA);
+        return;
+      }
+      // FAKT O TOBIE — i tylko tyle. Zdanie „rodzic nie dostanie kolejnego"
+      // jest PROPOZYCJĄ (dyspozytor go nie potwierdził) i nie wychodzi na ekran.
+      setProfileOk(KOMUNIKAT_WYLACZONY);
+      await wczytajRaportRodzica();
+    } finally {
+      setWylaczanyId(null);
     }
   };
 
@@ -872,39 +1032,15 @@ export default function ProfilScreen() {
             )}
           </View>
 
-          {/* Raport dla rodzica — Pakiet 9 (03.08.2026 noc). Formularz
-              NIEZALEŻNY od zapisu etapu, ten sam wzorzec co Wzrost wyżej. */}
-          <View style={styles.block}>
-            <Text style={styles.blockLabel}>Raport dla rodzica</Text>
-            <Text style={styles.hint}>
-              Podaj e-mail rodzica lub opiekuna, żeby cyklicznie dostawał krótkie
-              podsumowanie Twojego rozwoju — bez logowania, bez dostępu do Twojego
-              dziennika czy samopoczucia.
-            </Text>
-            {/* AUDYT 06.08.2026 — potwierdzenie, że adres już jest zapisany.
-                Bez tego ekran nie dawał ŻADNEGO śladu wcześniejszego zapisu. */}
-            {savedParentEmail ? (
-              <Text style={styles.hint}>
-                Zapisany adres: {savedParentEmail}. Jeśli wpiszesz inny, raport będzie chodził
-                na oba — ten sam adres nie zostanie dodany drugi raz.
-              </Text>
-            ) : null}
-            <Text style={styles.label}>Email rodzica</Text>
-            <TextInput
-              style={styles.input} placeholderTextColor={colors.textSecondary} value={parentEmailInput} onChangeText={setParentEmailInput}
-              autoCapitalize="none" keyboardType="email-address" placeholder="np. rodzic@przyklad.pl"
-            />
-            <TouchableOpacity
-              style={[styles.btnSecondary, savingParentEmail && styles.btnDisabled]}
-              disabled={savingParentEmail}
-              onPress={addParentReportSubscription}
-            >
-              <Text style={styles.btnSecondaryText}>{savingParentEmail ? 'Zapisuję...' : 'Zapisz e-mail rodzica'}</Text>
-            </TouchableOpacity>
-          </View>
+          {/* PLAN-D-L2 15.08.2026 — blok „Raport dla rodzica" WYSZEDŁ STĄD poza
+              numerację etapów (stoi pod nawigacją etapów, razem z Planem lekcji
+              i Bezpieczeństwem). Powód policzalny, nie estetyczny: zawodnik
+              z wypełnionym profilem ląduje na etapie 5 z 5, więc rzecz w Etapie 0
+              kosztowała SZEŚĆ dotknięć (Ja → Profil → cztery razy „Wstecz").
+              Poza etapami kosztuje DWA. Zasada podania P0. */}
 
           {/* Kod drużyny — 05.08.2026, patrz komentarz na górze pliku. Ten sam
-              wzorzec formularza co Raport dla rodzica wyżej. */}
+              wzorzec formularza co Raport dla rodzica. */}
           <View style={styles.block}>
             <Text style={styles.blockLabel}>Kod drużyny</Text>
             <Text style={styles.hint}>
@@ -1158,6 +1294,63 @@ export default function ProfilScreen() {
           <Text style={styles.btnText}>
             {savingStage ? 'Zapisuję...' : step === STAGE_COUNT - 1 ? 'Zapisz' : 'Dalej'}
           </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/*
+        PLAN-D-L2 08.2026 (15.08.2026) — RAPORT DLA RODZICA.
+
+        ŚWIADOMIE POZA NUMERACJĄ ETAPÓW, tym samym wzorcem i z tego samego,
+        policzalnego powodu co Plan lekcji niżej: `loadProfile` ustawia etap
+        startowy na PIERWSZYM NIEWYPEŁNIONYM, więc zawodnik z gotowym profilem
+        ląduje na etapie 5 z 5. W Etapie 0 ten blok kosztował SZEŚĆ dotknięć od
+        otwarcia appki (Ja → Profil → cztery razy „Wstecz"). Tu kosztuje DWA.
+
+        ⚠️ CZTERY STANY, NIE DWA (reguła R5). Rozróżnienie robi
+        `czytajSubskrypcje` w `lib/raportRodzica.ts`, nie ten plik.
+        ⛔ „Nie udało się sprawdzić" NIGDY nie renderuje się jako „nikt nie
+           dostaje" — to jest jedyny powód, dla którego ten ekran istnieje.
+      */}
+      <View style={[styles.block, { marginTop: spacing.lg }]}>
+        <Text style={styles.blockLabel}>Raport dla rodzica</Text>
+
+        {/* Brzmienie z Pakietu 9 (03.08.2026) — NIETKNIĘTE. */}
+        <Text style={styles.hint}>
+          Podaj e-mail rodzica lub opiekuna, żeby cyklicznie dostawał krótkie
+          podsumowanie Twojego rozwoju — bez logowania, bez dostępu do Twojego
+          dziennika czy samopoczucia.
+        </Text>
+
+        {/* Zdanie o stanie — jedno z czterech, nigdy sklejone. */}
+        <Text style={styles.hint}>{opisStanuRaportu(stanRaportu).zdanie.tekst}</Text>
+
+        {stanRaportu?.rodzaj === 'jest' && stanRaportu.aktywne.map((s) => (
+          <View key={s.id} style={styles.historyCard}>
+            <Text style={styles.historyType}>{s.email}</Text>
+            <Text style={styles.historyDetail}>{opisOstatniejWysylki(s.ostatniaWysylka).tekst}</Text>
+            <TouchableOpacity
+              style={[styles.btnSecondary, wylaczanyId === s.id && styles.btnDisabled]}
+              disabled={wylaczanyId !== null}
+              onPress={() => wylaczRaport(s.id)}
+            >
+              <Text style={styles.btnSecondaryText}>
+                {wylaczanyId === s.id ? 'Wyłączam...' : ETYKIETA_WYLACZ}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+
+        <Text style={styles.label}>Email rodzica</Text>
+        <TextInput
+          style={styles.input} placeholderTextColor={colors.textSecondary} value={parentEmailInput} onChangeText={setParentEmailInput}
+          autoCapitalize="none" keyboardType="email-address" placeholder="np. rodzic@przyklad.pl"
+        />
+        <TouchableOpacity
+          style={[styles.btnSecondary, savingParentEmail && styles.btnDisabled]}
+          disabled={savingParentEmail}
+          onPress={addParentReportSubscription}
+        >
+          <Text style={styles.btnSecondaryText}>{savingParentEmail ? 'Zapisuję...' : 'Zapisz e-mail rodzica'}</Text>
         </TouchableOpacity>
       </View>
 
