@@ -58,9 +58,20 @@ function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
 }
-function pomin(label: string, powod: string) {
+/**
+ * ⭐ PAS I1 16.08.2026 — POMINIĘCIE MUSI NAZWAĆ ŚCIEŻKĘ, KTÓREJ SZUKAŁO.
+ *
+ * `tests/run-selftests.mjs` dzieli pominięcia na DOPUSZCZONE (warstwa mieszka
+ * w INNYM repozytorium, którego w tym drzewie nie ma — w CI stan trwały)
+ * i NIEDOPUSZCZONE (⛔ zapalają wyjście niezerowe). Etykieta `[poza-repo]`
+ * nie wystarcza: runner sam sprawdza, czy któraś z nazwanych ścieżek jest
+ * bezwzględna, leży POZA repozytorium i naprawdę nie istnieje.
+ */
+function pomin(label: string, powod: string, sciezki?: string[]) {
   pominiete++;
-  console.log(`POMINIETE - ${label}: ${powod}`);
+  const pozaRepo = !!sciezki && sciezki.length > 0;
+  const gdzie = pozaRepo ? ` (szukałem: ${sciezki!.join(' | ')})` : '';
+  console.log(`POMINIETE${pozaRepo ? ' [poza-repo]' : ''} - ${label}: ${powod}${gdzie}`);
 }
 
 const libDir = dirname(fileURLToPath(import.meta.url));
@@ -389,8 +400,9 @@ const PUSTE = czytajOgraniczenia(koperta());
   const sciezka = kandydaci.find((p) => existsSync(p));
   if (!sciezka) {
     pomin('(J3) zgodność kluczy z drabiną backendu',
-      `nie znalazłem gamechange-app/lib/arbiter-glosu.js (szukałem: ${kandydaci.join(' | ')}). `
-      + 'Ta warstwa NIE ZOSTAŁA SPRAWDZONA — drugą połowę reguły pilnuje strażnik w repozytorium backendu.');
+      'nie znalazłem gamechange-app/lib/arbiter-glosu.js. '
+      + 'Ta warstwa NIE ZOSTAŁA SPRAWDZONA — drugą połowę reguły pilnuje strażnik w repozytorium backendu.',
+      kandydaci);
   } else {
     const zrodlo = readFileSync(sciezka, 'utf8');
     const blok = /const KLUCZE_OGRANICZEN\s*=\s*\[([\s\S]*?)\]/.exec(zrodlo);

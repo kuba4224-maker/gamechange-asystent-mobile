@@ -18,8 +18,8 @@
 // w danym tygodniu, rozstrzyga `gamechange-app/lib/arbiter-glosu.js`.
 // Przebieg 52 tygodni przez PRAWDZIWY czytnik i PRAWDZIWĄ drabinę siedzi
 // w `gamechange-app/tests/test-sciezka-wyjscia-52-tygodnie.js`.
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   stanSciezki,
@@ -280,5 +280,114 @@ check('…i ta rzecz nie wymaga klubu, trenera ani niczyjej zgody',
   !/klub|trener|zgod/i.test(WYJSCIE_NA_JUTRO), WYJSCIE_NA_JUTRO);
 
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 9. PAS I1 16.08.2026 — LECZENIE CHOROBY K4 (ograniczenie O75)
+// ═══════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE. Runda H1 zmierzyła: ten strażnik NIE ZAPALIŁ SIĘ NA
+// ŻADNYM stanie repozytorium, w którym pilnowany defekt był obecny. Powód
+// nie jest tajemniczy — do 16.08.2026 czytał z dysku DOKŁADNIE JEDEN PLIK:
+// `lib/sciezkaWyjscia.ts`, czyli własny moduł. Wszystko inne sprawdzał na
+// wartościach zaimportowanych z tego samego modułu.
+//
+// ⛔ STRAŻNIK, KTÓRY CZYTA WYŁĄCZNIE WŁASNY MODUŁ, NIE WIDZI ANI JEDNEGO
+//    EKRANU. Zdanie policzone poprawnie i NIGDZIE NIENARYSOWANE idzie u niego
+//    na zielono. To jest maszynowa postać E2-4 („funkcja bez konsumenta").
+//
+// ⚠️ DLACZEGO to boli akurat tutaj. Ścieżka wyjścia jest tym momentem,
+//    w którym zawodnik REZYGNUJE Z PRODUKTU — z klubu wypadł, z drużyny
+//    go zdjęli. Jeżeli którekolwiek z tych zdań zniknie z ekranu, produkt
+//    milczy dokładnie wtedy, kiedy ma nie milczeć. Sam fakt, że stała
+//    istnieje w `lib/`, nie jest dowodem, że zawodnik ją zobaczy.
+//
+// JAK TO JEST ZROBIONE. Ekrany są ODKRYWANE Z KATALOGU (O69), nie wpisane
+// na sztywno: chodzimy po `app/` i `components/` i pytamy, które pliki
+// naprawdę sięgają po ten moduł. Lista ręczna stoi obok TYLKO jako zapadka
+// na RÓWNOŚĆ (O73) — brakujące i nadmiarowe muszą być puste, więc zapala się
+// i wtedy, gdy ekran zniknie, i wtedy, gdy dojdzie nowy.
+{
+  console.log('\n── 9. CZY TO W OGÓLE JEST NA EKRANIE (K4 / O75) ──');
+
+  const appRoot = dirname(libDir);
+  const POMIN = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+
+  const PLIKI_EKRANOW = ['app', 'components']
+    .flatMap((k) => chodz(join(appRoot, k)))
+    .map((p) => relative(appRoot, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const tresc = new Map(PLIKI_EKRANOW.map((p) => [p, readFileSync(join(appRoot, p), 'utf8')]));
+
+  // ── 9a. KTO SIĘGA PO TEN MODUŁ ────────────────────────────────────
+  const konsumenci = PLIKI_EKRANOW.filter(
+    (p) => /from\s+'[^']*\/sciezkaWyjscia'/.test(tresc.get(p) ?? ''));
+
+  // ⚠️ Lista ręczna, ale z asercją NA RÓWNOŚĆ — nie na „≥ 1" (O73).
+  // „Co najmniej jeden ekran" przeszłoby także wtedy, gdy zniknie ten,
+  // na którym stoi cała rozmowa o wyjściu, a zostanie sam wpis w menu.
+  const EKRANY_WYJSCIA = ['app/(tabs)/ja.tsx', 'components/SciezkaWyjscia.tsx'].sort();
+  const brakEkranu = EKRANY_WYJSCIA.filter((p) => !konsumenci.includes(p));
+  const nadmiarEkranu = konsumenci.filter((p) => !EKRANY_WYJSCIA.includes(p));
+  check('⭐ ścieżkę wyjścia rysują DOKŁADNIE te ekrany, co wczoraj — równość, nie „≥ 1"',
+    brakEkranu.length === 0 && nadmiarEkranu.length === 0,
+    `BRAKUJE: ${brakEkranu.join(', ') || '—'} · NADMIAROWI: ${nadmiarEkranu.join(', ') || '—'}`
+    + ' → jeżeli ekran zniknął, zawodnik stracił drogę wyjścia; jeżeli doszedł nowy,'
+    + ' przejrzyj brzmienia, bo zawodnik zobaczy je w nowym miejscu.');
+
+  check('⛔ plik ekranu ścieżki wyjścia daje się odczytać z dysku — '
+    + 'strażnik NIE ocenia sam siebie po własnym module',
+    konsumenci.length > 0 && konsumenci.every((p) => (tresc.get(p) ?? '').length > 0),
+    'żaden plik ekranu nie został odczytany — asercje niżej nie znaczyłyby nic');
+
+  const tekstEkranow = konsumenci.map((p) => tresc.get(p) ?? '').join('\n');
+
+  // ── 9b. ⭐ SEDNO: ZDANIE POLICZONE I NIGDZIE NIENARYSOWANE ─────────
+  // Reguła, nie lista: bierzemy WSZYSTKIE stałe `WYJSCIE_*` wyeksportowane
+  // przez moduł — więc nowa stała wpada tu sama, bez edycji tego pliku —
+  // i pytamy, czy którykolwiek ekran w ogóle się do niej odwołuje.
+  const STALE_DLA_ZAWODNIKA = Array.from(
+    (bezKomentarzy(readFileSync(join(libDir, 'sciezkaWyjscia.ts'), 'utf8')))
+      .matchAll(/^export const (WYJSCIE_[A-Z0-9_]+)/gm)).map((m) => m[1]);
+
+  check('umiem odczytać listę stałych dla zawodnika z modułu (inaczej asercja niżej byłaby pusta)',
+    STALE_DLA_ZAWODNIKA.length >= 10, `znalazłem ${STALE_DLA_ZAWODNIKA.length}`);
+
+  const nienarysowane = STALE_DLA_ZAWODNIKA.filter(
+    (n) => !new RegExp(`\\b${n}\\b`).test(tekstEkranow));
+  check(`⛔ KAŻDE z ${STALE_DLA_ZAWODNIKA.length} zdań ścieżki wyjścia jest RYSOWANE na ekranie `
+    + '(E2-4/O75: policzone i nienarysowane = nie istnieje dla zawodnika)',
+    nienarysowane.length === 0,
+    `zdania zbudowane w lib/ i NIEOBECNE na żadnym ekranie: ${nienarysowane.join(', ')}`);
+
+  // ── 9c. TRZY FUNKCJE, NA KTÓRYCH STOI STAN ────────────────────────
+  // Każda z nich policzona poprawnie i niewołana z ekranu znaczy dokładnie
+  // tyle, co jej brak — a wyżej wszystkie trzy mają komplet zielonych asercji.
+  for (const fn of ['stanSciezki', 'wierszWlaczenia', 'patchWylaczenia']) {
+    check(`⛔ ekran naprawdę woła \`${fn}()\` — bez tego zielone asercje wyżej `
+      + 'pilnują funkcji, której nikt nie uruchamia',
+      new RegExp(`\\b${fn}\\s*\\(`).test(tekstEkranow), `brak wywołania ${fn}() na ekranach`);
+  }
+
+  // ── 9d. EKRAN NIE ROZSTRZYGA STANU SAM ────────────────────────────
+  // Defekt, którego pilnuje: ktoś na ekranie pisze `row.state === 'active'`
+  // zamiast wołać `stanSciezki()`. Wtedy „nie odczytałem" sklei się
+  // z „wyłączona" — dokładnie ta pomyłka, przed którą stoi cały ten plik.
+  check("⛔ ekran nie porównuje `state` z napisem na własną rękę — od tego jest `stanSciezki()`",
+    !/\bstate\s*===\s*'(active|closed)'/.test(tekstEkranow),
+    "znalazłem na ekranie `state === 'active'` albo `state === 'closed'` — "
+    + 'ekran, który rozstrzyga stan sam, przestaje odróżniać „nie odczytałem" od „wyłączona"');
+}
+
 console.log(`\n${passed} przeszło, ${failed} nie przeszło.`);
 if (failed > 0) process.exit(1);

@@ -35,8 +35,8 @@
 // ⚠️ NIE UŻYWAĆ `new URL(...)` (ograniczenie O53): `tsconfig.json` ciągnie DOM,
 // więc `tsc` pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -88,7 +88,24 @@ const PLIK_EKRAN = 'components/ListaZadan.tsx';
 const PLIK_KARTA = 'components/PozycjaKolejkiCard.tsx';
 const PLIK_JA = 'app/(tabs)/ja.tsx';
 
-const surowe = (wzgledna: string): string => readFileSync(join(root, wzgledna), 'utf8');
+/**
+ * ⭐ PAS I1 16.08.2026 — CHOROBA K1 (ograniczenie O69).
+ *
+ * CO BYŁO ZEPSUTE: `surowe()` wołało `readFileSync` prosto z listy wpisanej
+ * ręcznie wyżej. Gdy pliku nie było — zmiana nazwy, przeniesienie komponentu —
+ * strażnik PADAŁ WYJĄTKIEM `ENOENT`, ZANIM policzył cokolwiek. W CI wygląda
+ * to jak awaria narzędzia, a nie jak to, czym jest: EKRAN, KTÓREGO PILNUJEMY,
+ * ZNIKNĄŁ Z REPOZYTORIUM. Runda H1 zaliczyła ten plik do klasy K1 za to.
+ *
+ * CO JEST TERAZ: brak pliku zostaje ZAPAMIĘTANY, a nie rzucony — sekcja 0
+ * niżej zgłasza FAIL Z NAZWĄ PLIKU.
+ */
+const BRAK_PLIKOW: string[] = [];
+const surowe = (wzgledna: string): string => {
+  const p = join(root, wzgledna);
+  if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+  return readFileSync(p, 'utf8');
+};
 const zrodlo = (wzgledna: string): string => bezKomentarzy(surowe(wzgledna));
 
 const ekranSurowy = surowe(PLIK_EKRAN);
@@ -109,6 +126,55 @@ let failed = 0;
 function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}\n       ${detail}`); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I1 16.08.2026 — PLIKI, KTÓRE TEN STRAŻNIK CZYTA (K1 / O69)
+// ═══════════════════════════════════════════════════════════════════
+// Lista ręczna JEST tu potrzebna: asercje niżej mówią o KONKRETNYCH plikach.
+// Wolno jej stać, ale nie wolno jej stać SAMEJ — obok idzie asercja na
+// RÓWNOŚĆ z tym, co widać w katalogu (O73), bo „co najmniej jeden ekran
+// rysuje listę zadań" przeszłoby także wtedy, gdy zawodnik straci wejście
+// do niej z zakładki „Ja".
+{
+  console.log('0. PLIKI, KTÓRE TEN STRAŻNIK CZYTA');
+
+  // ⛔ Brak pliku to FAIL Z NAZWĄ, nigdy wyjątek `ENOENT`.
+  check('⛔ każdy plik z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  // Kto sięga po moduł listy zadań — ODKRYTE Z KATALOGU, nie wpisane.
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` po pushu G1.
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/listaZadan'/.test(readFileSync(join(root, p), 'utf8')));
+  const KONSUMENCI_LISTY = ['app/(tabs)/ja.tsx', 'components/ListaZadan.tsx'].sort();
+  const brakujacy = KONSUMENCI_LISTY.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI_LISTY.includes(p));
+  check('⭐ listę zadań rysują DOKŁADNIE te pliki, co wczoraj — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył: zawodnik stracił miejsce, w którym widzi swoje zadania; '
+    + 'doszedł: sprawdź, czy nowe miejsce nie liczy kubełków po swojemu.');
 }
 
 // ═══════════════════════════════════════════════════════════════════

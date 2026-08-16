@@ -30,8 +30,8 @@
 // ⚠️ NIE UŻYWAĆ `new URL(...)` (ograniczenie O53): `tsconfig.json` ciągnie DOM,
 // więc `tsc` pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -67,7 +67,25 @@ const bezKomentarzy = (s: string): string => s
 const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
 const PLIK_KOMPONENT = 'components/PozycjaKolejkiCard.tsx';
 
-const surowe = (wzgledna: string): string => readFileSync(join(root, wzgledna), 'utf8');
+/**
+ * ⭐ PAS I1 16.08.2026 — CHOROBA K1 (ograniczenie O69).
+ *
+ * CO BYŁO ZEPSUTE: `surowe()` wołało `readFileSync` prosto z listy wpisanej
+ * ręcznie wyżej. Gdy pliku nie było — zmiana nazwy ekranu, przeniesienie
+ * komponentu — strażnik PADAŁ WYJĄTKIEM `ENOENT`, ZANIM policzył cokolwiek.
+ * W CI wygląda to jak awaria narzędzia („nie umie odczytać pliku"), a nie
+ * jak to, czym jest: EKRAN, KTÓREGO PILNUJEMY, ZNIKNĄŁ Z REPOZYTORIUM.
+ * Runda H1 zaliczyła ten plik do klasy K1 właśnie za to.
+ *
+ * CO JEST TERAZ: brak pliku zostaje ZAPAMIĘTANY, a nie rzucony. Strażnik
+ * dochodzi do sekcji 0 niżej i zgłasza FAIL Z NAZWĄ PLIKU.
+ */
+const BRAK_PLIKOW: string[] = [];
+const surowe = (wzgledna: string): string => {
+  const p = join(root, wzgledna);
+  if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+  return readFileSync(p, 'utf8');
+};
 const zrodlo = (wzgledna: string): string => bezKomentarzy(surowe(wzgledna));
 
 const dzisSurowe = surowe(PLIK_DZIS);
@@ -91,6 +109,68 @@ let failed = 0;
 function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}\n       ${detail}`); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I1 16.08.2026 — PLIKI, KTÓRE TEN STRAŻNIK CZYTA (K1 / O69)
+// ═══════════════════════════════════════════════════════════════════
+// Lista ręczna JEST tu potrzebna: asercje niżej mówią o KONKRETNYCH plikach
+// („`dzis.tsx` nie sortuje niczego"). Wolno jej stać, ale nie wolno jej stać
+// SAMEJ — obok idzie asercja na RÓWNOŚĆ z tym, co widać w katalogu (O73).
+// „Co najmniej jeden konsument kolejki" przeszłoby także wtedy, gdy ekran
+// przestanie ją rysować, a zostanie sam komponent karty.
+{
+  console.log('0. PLIKI, KTÓRE TEN STRAŻNIK CZYTA');
+
+  // ⛔ Brak pliku to FAIL Z NAZWĄ, nigdy wyjątek `ENOENT`.
+  check('⛔ każdy plik z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  // Kto w ogóle sięga po ranker — ODKRYTE Z KATALOGU, nie wpisane.
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/kolejkaPodania'/.test(readFileSync(join(root, p), 'utf8')));
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` po pushu G1, nie przepisane z pamięci.
+  // `app/(tabs)/ja.tsx` NIE JEST tu wymieniony celowo: wspomina ranker tylko
+  // w komentarzu, a komentarz nie rysuje kolejności.
+  const KONSUMENCI_KOLEJKI = [
+    'app/(tabs)/dzis.tsx',
+    'components/ListaZadan.tsx',
+    'components/PozycjaKolejkiCard.tsx',
+  ].sort();
+  const brakujacy = KONSUMENCI_KOLEJKI.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI_KOLEJKI.includes(p));
+  check('⭐ kolejkę rysują DOKŁADNIE te pliki, co wczoraj — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył: sprawdź, czy zawodnik nadal widzi tam kolejność z rankera; '
+    + 'doszedł: sprawdź, czy nowe miejsce nie układa własnej kolejności.');
+
+  // Ekran, który liczy kolejkę, ma być JEDEN — dwa znaczą dwa źródła kolejności.
+  const zUlozKolejke = EKRANY.filter(
+    (p) => p.startsWith('app/') && /\bulozKolejke\s*\(/.test(readFileSync(join(root, p), 'utf8')));
+  check('⛔ ranker jest wołany z DOKŁADNIE JEDNEGO ekranu — dwa miejsca to dwie kolejności',
+    zUlozKolejke.length === 1 && zUlozKolejke[0] === PLIK_DZIS,
+    `ekrany wołające ulozKolejke(): ${zUlozKolejke.join(', ') || 'ŻADEN'} (oczekiwany: ${PLIK_DZIS})`);
 }
 
 // ═══════════════════════════════════════════════════════════════════

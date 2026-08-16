@@ -474,6 +474,117 @@ check('⛔ ⭐ F2: każde id z filarów jest NAZYWALNE — inaczej Picker na ekr
   SEGMENTS_BY_PILLAR_IDS.flatMap(([, ids]) => ids).every((id) => czyZnanySegment(id)),
   SEGMENTS_BY_PILLAR_IDS.flatMap(([, ids]) => ids).filter((id) => !czyZnanySegment(id)).join(', '));
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PAS I1 16.08.2026 — LECZENIE CHOROBY K4 (ograniczenie O75)
+// ═══════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE. H1 zmierzył, że ten strażnik nie zapalił się na żadnym
+// stanie repozytorium z pilnowanym defektem, a kalibracja §2 pokazała rzecz
+// najgorszą z możliwych: na commicie `fc0352a`, z ZEPSUTĄ `segmentLabel()`,
+// dawał **44/0 zielono**. Powód: poza jedną asercją dołożoną przez G1 czytał
+// z dysku wyłącznie `lib/labels.ts` — czyli własny moduł.
+//
+// ⛔ `lib/labels.ts` JEST JEDYNYM ŹRÓDŁEM NAZW OBSZARÓW dla całej appki.
+//    Zepsucie tu widzi zawodnik w Pickerze, na karcie Celu, w wyniku
+//    diagnozy i na karcie meczu naraz. Strażnik, który nie czyta ANI JEDNEGO
+//    z tych ekranów, pilnuje słownika, a nie tego, co z nim robi produkt.
+//
+// TRZY DEFEKTY, KTÓRYCH TA SEKCJA PILNUJE — wszystkie widoczne dla zawodnika,
+// żaden widoczny w przeglądzie kodu:
+//   D1. Picker karmiony SUROWYMI IDENTYFIKATORAMI (`SEGMENTS_BY_PILLAR_IDS`)
+//       zamiast parami (id, nazwa). Zawodnik zakłada Cel, wybierając z listy
+//       `strength_power`, `endurance` — i to wygląda jak awaria produktu.
+//   D2. `label` i `value` na tej samej pozycji Pickera dostają TO SAMO —
+//       czyli nazwa znika, a zostaje identyfikator. Jedna litera różnicy
+//       w kodzie, cały ekran po polsku zamieniony na angielskie klucze.
+//   D3. DRUGA KOPIA nazw wpisana ręcznie na ekranie. Dokładnie ten kształt
+//       zabił 12.08 Mapę drogi: jedno miejsce zmienione, reszta nie.
+//
+// Ekrany są ODKRYWANE Z KATALOGU (O69). Listy ręczne stoją obok wyłącznie
+// jako zapadki na RÓWNOŚĆ (O73) — zapalają się i przy ubytku, i przy nadmiarze.
+{
+  console.log('\n── CZY NAZWA OBSZARU TRAFIA NA EKRAN (K4 / O75) ──');
+
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodzEkrany(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodzEkrany(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodzEkrany(join(appRoot, k)))
+    .map((p) => relative(appRoot, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+  const tresc = new Map(EKRANY.map((p) => [p, readFileSync(join(appRoot, p), 'utf8')]));
+
+  check('umiem odczytać pliki ekranów z katalogu (inaczej asercje niżej byłyby puste)',
+    EKRANY.length > 10, `odkrytych plików: ${EKRANY.length}`);
+
+  // ── D1. SUROWA LISTA IDENTYFIKATORÓW NIE WYCHODZI POZA `lib/labels.ts` ──
+  // ⚠️ RÓWNOŚĆ NA ZERZE, nie „mało" (O73): jeden ekran, który sięgnie po
+  // `SEGMENTS_BY_PILLAR_IDS`, dostaje listę BEZ NAZW — i o tym ma być głośno.
+  const zSurowymiId = EKRANY.filter((p) => /\bSEGMENTS_BY_PILLAR_IDS\b/.test(tresc.get(p) ?? ''));
+  check('⛔ ŻADEN ekran nie sięga po `SEGMENTS_BY_PILLAR_IDS` — surowe identyfikatory '
+    + 'zostają wewnątrz `lib/labels.ts`, na ekran idą wyłącznie pary (id, nazwa)',
+    zSurowymiId.length === 0,
+    `ekrany z surową listą: ${zSurowymiId.join(', ')} → zawodnik zobaczy w Pickerze `
+    + '`strength_power` zamiast nazwy obszaru');
+
+  // ── D2. PICKER KARMIONY PARAMI, A NAZWA ≠ IDENTYFIKATOR ────────────
+  const zPickerem = EKRANY.filter((p) => /\bSEGMENTS_BY_PILLAR\b(?!_IDS)/.test(tresc.get(p) ?? ''));
+  const EKRANY_PICKERA = ['app/(tabs)/cele.tsx'].sort();
+  const brakP = EKRANY_PICKERA.filter((p) => !zPickerem.includes(p));
+  const nadmiarP = zPickerem.filter((p) => !EKRANY_PICKERA.includes(p));
+  check('⭐ listę obszarów rysują DOKŁADNIE te ekrany, co wczoraj — równość, nie „≥ 1"',
+    brakP.length === 0 && nadmiarP.length === 0,
+    `BRAKUJE: ${brakP.join(', ') || '—'} · NADMIAROWI: ${nadmiarP.join(', ') || '—'} `
+    + '→ doszedł ekran: sprawdź, czy karmi Picker parami; zniknął: zawodnik stracił '
+    + 'miejsce, w którym zakłada Cel');
+
+  // ⛔ `label` i `value` w tej samej pozycji NIE MOGĄ dostać tego samego —
+  // to jest cała różnica między „Siła i moc" a `strength_power` na ekranie.
+  const zlePozycje: string[] = [];
+  for (const p of zPickerem) {
+    for (const m of (tresc.get(p) ?? '').matchAll(
+      /<Picker\.Item\b[^>]*?label=\{([^}]*)\}[^>]*?value=\{([^}]*)\}/g)) {
+      if (m[1].trim() === m[2].trim()) zlePozycje.push(`${p}: label={${m[1].trim()}} value={${m[2].trim()}}`);
+    }
+  }
+  check('⛔ pozycja Pickera nie pokazuje identyfikatora jako nazwy '
+    + '(`label` i `value` nie mogą być tym samym wyrażeniem)',
+    zlePozycje.length === 0, zlePozycje.join(' · '));
+
+  // ── D3. DRUGA KOPIA NAZW NA EKRANIE ────────────────────────────────
+  // Reguła, nie lista: bierzemy WSZYSTKIE nazwy ze słownika i pytamy, czy
+  // któraś stoi na ekranie jako napis. Nowy obszar wpada tu sam.
+  const kopie: string[] = [];
+  for (const p of EKRANY) {
+    const s = tresc.get(p) ?? '';
+    for (const nazwa of Object.values(SEGMENT_LABELS)) {
+      if (s.includes(`'${nazwa}'`) || s.includes(`"${nazwa}"`)) kopie.push(`${p} → „${nazwa}"`);
+    }
+  }
+  check('⛔ nazwa obszaru NIE JEST wpisana ręcznie na żadnym ekranie — '
+    + 'druga kopia rozjeżdża się cicho przy pierwszej zmianie słownika (E2-4, Mapa drogi 12.08)',
+    kopie.length === 0, kopie.join(' · '));
+
+  // ── EKRAN NAPRAWDĘ WOŁA SŁOWNIK ────────────────────────────────────
+  // Bez tego wszystkie zielone asercje wyżej pilnują funkcji, której żaden
+  // ekran nie uruchamia — czyli dokładnie choroby K4.
+  const wolajaSlownik = EKRANY.filter(
+    (p) => /\b(segmentLabel|opiszSegment)\s*\(/.test(tresc.get(p) ?? ''));
+  check('⛔ co najmniej jeden EKRAN naprawdę woła `segmentLabel()` albo `opiszSegment()` — '
+    + 'strażnik nie ocenia słownika po samym słowniku',
+    wolajaSlownik.length > 0,
+    'żaden plik w app/ ani components/ nie woła funkcji nazywającej obszar');
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 // Celowo `throw`, a nie `process.exit(1)`: `process` wymaga `@types/node`,
 // których tsconfig appki nie zaciąga — a te pliki są objęte `npx tsc --noEmit`

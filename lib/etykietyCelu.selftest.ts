@@ -49,17 +49,33 @@ function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
 }
-function pomin(label: string, powod: string) {
+/**
+ * ⭐ PAS I1 16.08.2026 — POMINIĘCIE MUSI NAZWAĆ ŚCIEŻKĘ, KTÓREJ SZUKAŁO.
+ *
+ * `tests/run-selftests.mjs` dzieli pominięcia na dwa rodzaje: DOPUSZCZONE
+ * (warstwa mieszka w INNYM repozytorium, którego w tym drzewie nie ma —
+ * w CI stan trwały) i NIEDOPUSZCZONE (⛔ zapalają wyjście niezerowe).
+ * Etykieta `[poza-repo]` nie wystarcza: runner sam sprawdza, czy któraś
+ * z nazwanych ścieżek jest bezwzględna, leży POZA repozytorium i naprawdę
+ * nie istnieje. Pominięcie bez `sciezki` jest NIEDOPUSZCZONE — i słusznie,
+ * bo brak pliku WŁASNEGO repozytorium to błąd, nie brak sąsiada.
+ */
+function pomin(label: string, powod: string, sciezki?: string[]) {
   pominiete++;
-  console.log(`POMINIETE - ${label}: ${powod}`);
+  const pozaRepo = sciezki && sciezki.length > 0;
+  const gdzie = pozaRepo ? ` (szukałem: ${sciezki!.join(' | ')})` : '';
+  console.log(`POMINIETE${pozaRepo ? ' [poza-repo]' : ''} - ${label}: ${powod}${gdzie}`);
 }
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const obokAppki = dirname(appRoot);
 
+/** Ścieżki, pod którymi szukamy sąsiedniego repozytorium — do pominięcia (I1). */
+function kandydaci(...czesci: string[]): string[] {
+  return [join(obokAppki, ...czesci), join(appRoot, '..', ...czesci)];
+}
 function znajdz(...czesci: string[]): string | null {
-  const kandydaci = [join(obokAppki, ...czesci), join(appRoot, '..', ...czesci)];
-  return kandydaci.find((p) => existsSync(p)) ?? null;
+  return kandydaci(...czesci).find((p) => existsSync(p)) ?? null;
 }
 function czytajWRepoAppki(...czesci: string[]): string | null {
   const p = join(appRoot, ...czesci);
@@ -170,8 +186,9 @@ console.log('\n--- warstwa 2: panel webowy (gamechange-app) ---');
   const sciezka = znajdz('gamechange-app', 'asystent_app.html');
   if (!sciezka) {
     pomin('(Q3) asystent_app.html — cała warstwa 2',
-      `nie znalazłem gamechange-app/asystent_app.html obok ${appRoot}. ` +
-      'Ta warstwa NIE ZOSTAŁA SPRAWDZONA — zielone wyżej jej nie obejmuje.');
+      'nie znalazłem gamechange-app/asystent_app.html obok tego repozytorium. ' +
+      'Ta warstwa NIE ZOSTAŁA SPRAWDZONA — zielone wyżej jej nie obejmuje.',
+      kandydaci('gamechange-app', 'asystent_app.html'));
   } else {
     const src = readFileSync(sciezka, 'utf8');
     const lista = zObiektu(src);
@@ -207,8 +224,9 @@ console.log('\n--- warstwa 3: lejek (gamechange-diagnoza) ---');
   const sciezka = znajdz('gamechange-diagnoza', 'index.html');
   if (!sciezka) {
     pomin('(Q3) gamechange-diagnoza/index.html — cała warstwa 3',
-      `nie znalazłem gamechange-diagnoza/index.html obok ${appRoot}. ` +
-      'Ta warstwa NIE ZOSTAŁA SPRAWDZONA — zielone wyżej jej nie obejmuje.');
+      'nie znalazłem gamechange-diagnoza/index.html obok tego repozytorium. ' +
+      'Ta warstwa NIE ZOSTAŁA SPRAWDZONA — zielone wyżej jej nie obejmuje.',
+      kandydaci('gamechange-diagnoza', 'index.html'));
   } else {
     const src = readFileSync(sciezka, 'utf8');
     const lejek = zLejka(src);
@@ -255,9 +273,19 @@ console.log('\n--- warstwa 4: cztery kopie między sobą ---');
 {
   const nazwy = [...zebrane.keys()];
   if (nazwy.length < 4) {
+    // ⭐ I1 16.08.2026: to pominięcie jest NASTĘPSTWEM braku sąsiadów, więc
+    // wolno mu być dopuszczone TYLKO wtedy, gdy sąsiada faktycznie nie ma.
+    // Dlatego nazywa te same ścieżki, co warstwy 2 i 3 — a gdy brakującą
+    // kopią jest plik WŁASNEGO repozytorium, żadna ścieżka spoza repo się
+    // nie znajdzie i runner zapali czerwień. I słusznie.
+    const brakujaceSasiady = [
+      ...kandydaci('gamechange-app', 'asystent_app.html'),
+      ...kandydaci('gamechange-diagnoza', 'index.html'),
+    ].filter((p) => !existsSync(p));
     pomin('(Q3-M1) porównanie wszystkich czterech kopii',
       `odczytałem tylko ${nazwy.length} z 4 (${nazwy.join(', ') || 'żadnej'}) — ` +
-      'porównanie krzyżowe jest NIEPEŁNE');
+      'porównanie krzyżowe jest NIEPEŁNE',
+      brakujaceSasiady);
   }
   if (nazwy.length >= 2) {
     const [pierwsza, ...reszta] = nazwy;

@@ -84,6 +84,7 @@ const bezKomentarzyTS = (s: string) =>
 const zrodloZadan = readFileSync(join(libDir, 'zadania.ts'), 'utf8');
 const zywyTS = bezKomentarzyTS(zrodloZadan);
 
+const PLIK_MIGRACJI = 'docs/MIGRACJA_A4_ZADANIA_14_08_2026.sql';
 const KANDYDACI_MIGRACJI = [
   join(appRoot, 'docs', 'MIGRACJA_A4_ZADANIA_14_08_2026.sql'),
   join(appRoot, 'MIGRACJA_A4_ZADANIA_14_08_2026.sql'),
@@ -94,12 +95,75 @@ const sciezkaMigracji = KANDYDACI_MIGRACJI.find((p) => existsSync(p)) ?? null;
 const migracjaSurowa = sciezkaMigracji ? readFileSync(sciezkaMigracji, 'utf8') : null;
 const migracja = migracjaSurowa ? bezKomentarzySQL(migracjaSurowa) : null;
 const BRAK_MIGRACJI =
-  `nie znalazłem pliku migracji (szukałem: ${KANDYDACI_MIGRACJI.join(' | ')}).`;
+  `⛔ NIE MA PLIKU MIGRACJI ${PLIK_MIGRACJI}. Szukałem: ${KANDYDACI_MIGRACJI.join(' | ')}. `
+  + 'To NIE JEST powód, żeby przejść na zielono — warstwa, która pilnuje, żeby zawodnik '
+  + 'nie czytał cudzych zadań, po prostu się nie wykonała. Odtwórz plik z pomiaru '
+  + 'produkcji (patrz RLS_ZMIERZONE_NA_PRODUKCJI niżej) albo powiedz wprost, że tej '
+  + 'warstwy nie pilnujemy.';
+
+/**
+ * ⭐ PAS I1 16.08.2026 — OCZEKIWANY KSZTAŁT RLS, ZMIERZONY NA PRODUKCJI.
+ *
+ * ── PO CO TO TU STOI ────────────────────────────────────────────────
+ * Do 16.08.2026 dziewięć asercji o RLS nie wykonywało się w ogóle: plik
+ * migracji nie istniał, strażnik mówił `POMINIETE`, a podsumowanie suity
+ * liczyło to jako przejście („44/44 przeszło", wyjście 0). Runda H1 nazwała
+ * to klasą K5, a ograniczenie O76 brzmi: `POMINIETE` NIE JEST PRZEJŚCIEM.
+ *
+ * ── DLACZEGO STAŁA, A NIE SAM PLIK `.sql` ───────────────────────────
+ * Migracja opisuje PRZESZŁOŚĆ — to, co kiedyś wykonano. Strażnik ma pilnować
+ * TERAŹNIEJSZOŚCI. Plik odtworzony z pomiaru zestarzeje się cicho przy
+ * pierwszej zmianie polityki (O67), więc źródłem oczekiwania jest TA STAŁA,
+ * a plik `.sql` jest tym, co strażnik z nią PORÓWNUJE.
+ *
+ * ── CZEGO TO NIE ZAŁATWIA — POWIEDZIANE WPROST ──────────────────────
+ * ⛔ Strażnik NIE ŁĄCZY SIĘ Z BAZĄ (CI nie ma i nie będzie miał hasła
+ *    produkcji). Rozjazd PRODUKCJI z tą stałą jest niewidoczny dla suity.
+ *    Kontrola migracji dzieje się na produkcji, nie w CI (O65).
+ * ⭐ ZMIERZONE 16.08.2026, projekt `kqrbztsvepjtggjmmcdx`, zapytania do
+ *    `pg_policy`, `pg_class`, `pg_constraint`, `pg_indexes`, `pg_trigger`,
+ *    `information_schema.role_table_grants`. Zero zapisu do bazy.
+ *    Wynik: rls=t · polityki=3 · polityka_delete=0 · checki=8 · indeksy=3
+ *    · wyzwalacz=1 · granty_authenticated=3 · granty_anon=0 · wierszy=0.
+ * ⭐ WNIOSEK Z POMIARU (O74 działa w obie strony): H1 postawił tę pozycję
+ *    najwyżej, bo „cudze zadania mogą być czytelne". POMIAR TEGO NIE
+ *    POTWIERDZIŁ. Nie ma dziury — był brak dowodu.
+ */
+const RLS_ZMIERZONE_NA_PRODUKCJI = {
+  data: '16.08.2026',
+  rlsWlaczone: true,
+  liczbaPolityk: 3,
+  liczbaPolitykDelete: 0,
+  grantyAnon: 0,
+  grantyAuthenticated: 3,
+  /** Nazwa polityki → komenda SQL, do której jest przypięta. */
+  polityki: {
+    player_tasks_select_own: 'select',
+    player_tasks_insert_own: 'insert',
+    player_tasks_update_own: 'update',
+  } as Record<string, string>,
+  /** Rola, do której przypięta jest KAŻDA polityka. Nigdy `public`, nigdy `anon`. */
+  rola: 'authenticated',
+  /** Warunek izolacji: własny wiersz i nic poza nim. */
+  izolacja: 'user_id = (select auth.uid())',
+  /**
+   * `with check` polityki INSERT — pięć warunków. Zawodnik nie wstawi wiersza
+   * udającego zadanie systemowe: ani cudzego, ani z kluczem systemowym,
+   * ani ze źródłem, którego nie ma.
+   */
+  insertWithCheck: [
+    "user_id = (select auth.uid())",
+    "origin = 'player'",
+    'system_key is null',
+    'source_table is null',
+    'source_row_id is null',
+  ],
+} as const;
 
 console.log('zadania.selftest.ts — strażnik tabeli zadań (pas A4)\n');
 console.log(sciezkaMigracji
   ? `migracja czytana z: ${sciezkaMigracji}\n`
-  : '⚠️ migracji nie znalazłem — sześć asercji o bazie będzie POMINIETE\n');
+  : `⛔ ${BRAK_MIGRACJI}\n`);
 
 // ═════════════════════════════════════════════════════════════════════
 console.log('R1. KUBEŁEK NIE JEST KOLUMNĄ');
@@ -123,7 +187,10 @@ console.log('R1. KUBEŁEK NIE JEST KOLUMNĄ');
     check('⛔ migracja nie tworzy kolumny kubełka ani kolejności',
       wSQL.length === 0, `znalazłem: ${wSQL.join(', ')}`);
   } else {
-    pomin('⛔ migracja nie tworzy kolumny kubełka ani kolejności', BRAK_MIGRACJI);
+    // ⭐ I1 16.08.2026: było `pomin(...)` — czyli cisza, którą podsumowanie
+    // czytało jako zieleń. Brak pliku to FAIL Z NAZWĄ PLIKU (O76).
+    check('⛔ migracja nie tworzy kolumny kubełka ani kolejności',
+      false, BRAK_MIGRACJI);
   }
 
   // Druga strona tej samej reguły: kubełki mają być POLICZONE, więc nie wolno
@@ -197,7 +264,9 @@ console.log('\nR2. POWODU SYSTEMOWEGO NIE DA SIĘ SKASOWAĆ ANI NADPISAĆ');
     check('⛔ podniesienie nie jest polem typu boolean',
       !/raised(_at)?\s+bool/i.test(migracja), 'podniesienie jako boolean gubi moment');
   } else {
-    pomin('⛔ wyzwalacz chroni powód systemowy przed skasowaniem i nadpisaniem', BRAK_MIGRACJI);
+    // ⭐ I1 16.08.2026: było `pomin(...)`. Patrz komentarz w R1.
+    check('⛔ wyzwalacz chroni powód systemowy przed skasowaniem i nadpisaniem',
+      false, BRAK_MIGRACJI);
   }
 
   // Warstwa `lib/` nie może obejść tej reguły od drugiej strony: nie da się
@@ -301,7 +370,8 @@ console.log('\nR4. WG-18 — SYSTEM NIE DOKŁADA TEGO SAMEGO CO PRZEBIEG');
       /create\s+unique\s+index[\s\S]{0,120}?player_tasks\s*\(\s*user_id\s*,\s*system_key\s*\)/i.test(migracja),
       'brak unikalnego indeksu — producent zdubluje zadanie przy każdym przebiegu');
   } else {
-    pomin('istnieje UNIKALNY indeks po (user_id, system_key)', BRAK_MIGRACJI);
+    // ⭐ I1 16.08.2026: było `pomin(...)`. Patrz komentarz w R1.
+    check('istnieje UNIKALNY indeks po (user_id, system_key)', false, BRAK_MIGRACJI);
   }
 
   check('kontrakt powtórki mówi `do nothing`',
@@ -422,51 +492,114 @@ console.log('\nR5. WG-17 — REKORD NIE WYCHODZI BEZ ŹRÓDŁA, POWÓD BEZ REJES
 // ═════════════════════════════════════════════════════════════════════
 console.log('\nR6. RLS WCHODZI W TEJ SAMEJ MIGRACJI, CO `create table`');
 // ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I1 16.08.2026 — TA SEKCJA NIE MA JUŻ GAŁĘZI `POMINIETE`.
+// Do 16.08 cały blok stał pod `if (migracja)`, a `else` mówiło `POMINIETE`
+// i suita szła na zielono. Teraz jest odwrotnie: BRAK PLIKU TO FAIL, jeden
+// na każdą asercję, którą brak pliku unieważnia — żeby liczba czerwonych
+// mówiła, ILE warstw nie zostało sprawdzonych, a nie tylko ŻE któraś.
 {
-  if (migracja) {
-    const tworzyTabele = /create\s+table\s+if\s+not\s+exists\s+public\.player_tasks/i.test(migracja);
-    check('migracja tworzy tabelę idempotentnie (`if not exists`)', tworzyTabele, '');
+  const M = migracja ?? '';
+  const jest = !!migracja;
+  /** Asercja o migracji: bez pliku FAIL z jego nazwą, nigdy POMINIETE (O76). */
+  const oMigracji = (label: string, cond: boolean, detail: string) =>
+    check(label, jest && cond, jest ? detail : BRAK_MIGRACJI);
 
-    check('⛔ RLS włączone W TYM SAMYM PLIKU — nie ma wersji „włączymy jutro"',
-      /alter\s+table\s+public\.player_tasks\s+enable\s+row\s+level\s+security/i.test(migracja),
-      'tabela bez RLS to tabela, z której da się czytać cudze zadania');
+  oMigracji('migracja tworzy tabelę idempotentnie (`if not exists`)',
+    /create\s+table\s+if\s+not\s+exists\s+public\.player_tasks/i.test(M), '');
 
-    const polityki = (migracja.match(/create\s+policy/gi) ?? []).length;
-    check('są trzy polityki: select, insert, update', polityki === 3, `znalazłem ${polityki}`);
+  oMigracji('⛔ RLS włączone W TYM SAMYM PLIKU — nie ma wersji „włączymy jutro"',
+    /alter\s+table\s+public\.player_tasks\s+enable\s+row\s+level\s+security/i.test(M)
+      === RLS_ZMIERZONE_NA_PRODUKCJI.rlsWlaczone,
+    'tabela bez RLS to tabela, z której da się czytać cudze zadania');
 
-    check('⛔ nie ma polityki DELETE — zadanie się porzuca, nie kasuje',
-      !/create\s+policy[\s\S]{0,200}?for\s+delete/i.test(migracja), 'znalazłem politykę DELETE');
+  // ⭐ RÓWNOŚĆ, NIE „≥" (O73). „Co najmniej trzy polityki" przeszłoby także
+  // wtedy, gdy ktoś dołoży czwartą, szerszą — czyli dokładnie przy defekcie.
+  const polityki = (M.match(/create\s+policy/gi) ?? []).length;
+  oMigracji(`są DOKŁADNIE ${RLS_ZMIERZONE_NA_PRODUKCJI.liczbaPolityk} polityki — tyle, ile zmierzono `
+    + `na produkcji ${RLS_ZMIERZONE_NA_PRODUKCJI.data}`,
+    polityki === RLS_ZMIERZONE_NA_PRODUKCJI.liczbaPolityk,
+    `znalazłem ${polityki}, oczekiwane ${RLS_ZMIERZONE_NA_PRODUKCJI.liczbaPolityk}`);
 
-    check('każda polityka jest przypięta do `authenticated`, nie do `public`',
-      (migracja.match(/to\s+authenticated/gi) ?? []).length >= 3,
-      'polityka bez `to authenticated` dotyczy też roli `anon`');
+  // Nazwy polityk i komendy — z pomiaru, co do znaku.
+  const brakPolityk = Object.entries(RLS_ZMIERZONE_NA_PRODUKCJI.polityki).filter(
+    ([nazwa, komenda]) => !new RegExp(
+      `create\\s+policy\\s+${nazwa}[\\s\\S]{0,80}?for\\s+${komenda}\\b`, 'i').test(M));
+  oMigracji('każda polityka zmierzona na produkcji stoi w migracji pod SWOJĄ nazwą i komendą',
+    brakPolityk.length === 0,
+    `brakuje: ${brakPolityk.map(([n, k]) => `${n} (for ${k})`).join(', ')}`);
 
-    check('polityki porównują `user_id` z `auth.uid()` — nie z parametrem z aplikacji',
-      (migracja.match(/user_id\s*=\s*\(\s*select\s+auth\.uid\(\)\s*\)/gi) ?? []).length >= 3,
-      'polityka bez `auth.uid()` nie ogranicza niczego');
+  const politykiDelete = (M.match(/create\s+policy[\s\S]{0,200}?for\s+delete/gi) ?? []).length;
+  oMigracji('⛔ nie ma polityki DELETE — zadanie się porzuca, nie kasuje',
+    politykiDelete === RLS_ZMIERZONE_NA_PRODUKCJI.liczbaPolitykDelete,
+    `znalazłem ${politykiDelete} polityk DELETE`);
 
-    check('⛔ zawodnik nie wstawi wiersza udającego zadanie systemowe',
-      /with\s+check\s*\([\s\S]{0,300}?origin\s*=\s*'player'/i.test(migracja),
-      'polityka INSERT nie wymusza `origin = player`');
+  // ⚠️ Liczymy `for <komenda> to authenticated`, a NIE samo `to authenticated`:
+  // to drugie łapie także wiersz `grant … to authenticated`, więc równość
+  // rozjeżdżałaby się o jeden bez żadnego defektu.
+  const politykiDoRoli = (M.match(
+    new RegExp(`for\\s+\\w+\\s+to\\s+${RLS_ZMIERZONE_NA_PRODUKCJI.rola}\\b`, 'gi')) ?? []).length;
+  oMigracji('każda z polityk jest przypięta do `authenticated`, nie do `public`',
+    politykiDoRoli === RLS_ZMIERZONE_NA_PRODUKCJI.liczbaPolityk,
+    `polityk przypiętych do \`${RLS_ZMIERZONE_NA_PRODUKCJI.rola}\`: ${politykiDoRoli}, `
+    + `polityk w pliku: ${polityki} — polityka bez \`to authenticated\` dotyczy też roli \`anon\``);
 
-    // ⚠️ REGUŁA: liczby, których Kuba ma się spodziewać, mają MIEĆ SKĄD wyjść.
-    // Zapytanie kontrolne bez którejkolwiek z nich zostawia go z „wygląda OK".
-    const KONTROLNE = ['tabela', 'rls', 'polityki', 'polityka_delete', 'checki',
-      'indeksy', 'wyzwalacz', 'wierszy', 'granty_authenticated', 'granty_anon'];
-    const brakujace = KONTROLNE.filter((k) => !new RegExp(`as\\s+${k}\\b`, 'i').test(migracja));
-    check('migracja kończy się zapytaniem kontrolnym ze WSZYSTKIMI liczbami do porównania',
-      brakujace.length === 0, `brakuje w zapytaniu kontrolnym: ${brakujace.join(', ')}`);
+  // ⛔ Granty dla `anon` to druga połowa tej samej reguły. Polityka nic nie
+  // znaczy, jeżeli rola anonimowa ma grant na tabelę.
+  oMigracji(`⛔ migracja odbiera rola \`anon\` wszystko (na produkcji zmierzone: `
+    + `${RLS_ZMIERZONE_NA_PRODUKCJI.grantyAnon} grantów)`,
+    /revoke\s+all\s+on\s+public\.player_tasks\s+from\s+anon/i.test(M),
+    'brak `revoke all … from anon` — polityka RLS nie chroni przed grantem dla anonimowego');
 
-    check('kolumny z `zadania.ts` naprawdę istnieją w migracji',
-      KOLUMNY_ZADANIA.every((k) => new RegExp(`\\b${k}\\b`).test(migracja)),
-      KOLUMNY_ZADANIA.filter((k) => !new RegExp(`\\b${k}\\b`).test(migracja)).join(', '));
+  oMigracji('polityki porównują `user_id` z `auth.uid()` — nie z parametrem z aplikacji',
+    (M.match(/user_id\s*=\s*\(\s*select\s+auth\.uid\(\)\s*\)/gi) ?? []).length
+      >= RLS_ZMIERZONE_NA_PRODUKCJI.liczbaPolityk,
+    'polityka bez `auth.uid()` nie ogranicza niczego');
 
-    check('nazwa tabeli w kodzie i w migracji to ta sama nazwa',
-      new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+public\\.${TABELA_ZADAN}\\b`, 'i').test(migracja),
-      `${TABELA_ZADAN} vs migracja`);
-  } else {
-    pomin('⛔ RLS włączone w tej samej migracji, co `create table` (9 asercji)', BRAK_MIGRACJI);
-  }
+  // ⭐ PIĘĆ WARUNKÓW `with check` — z pomiaru, nie z pamięci. Do 16.08 asercja
+  // sprawdzała TYLKO `origin = 'player'`, więc polityka, z której ktoś zdjąłby
+  // `system_key is null`, przeszłaby na zielono: zawodnik wstawiłby wiersz
+  // z kluczem systemowym, czyli zadanie udające zadanie produktu.
+  const withCheck = M.match(/with\s+check\s*\(([\s\S]{0,600}?)\)\s*;/i);
+  const trescWithCheck = withCheck?.[1] ?? '';
+  const brakWarunkow = RLS_ZMIERZONE_NA_PRODUKCJI.insertWithCheck.filter(
+    (w) => !trescWithCheck.replace(/\s+/g, ' ').toLowerCase()
+      .includes(w.replace(/\s+/g, ' ').toLowerCase()));
+  oMigracji('⛔ zawodnik nie wstawi wiersza udającego zadanie systemowe — '
+    + `wszystkie ${RLS_ZMIERZONE_NA_PRODUKCJI.insertWithCheck.length} warunków \`with check\``,
+    brakWarunkow.length === 0,
+    `brakuje w \`with check\` polityki INSERT: ${brakWarunkow.join(' · ')}`);
+
+  // ⚠️ REGUŁA: liczby, których Kuba ma się spodziewać, mają MIEĆ SKĄD wyjść.
+  // Zapytanie kontrolne bez którejkolwiek z nich zostawia go z „wygląda OK".
+  const KONTROLNE = ['tabela', 'rls', 'polityki', 'polityka_delete', 'checki',
+    'indeksy', 'wyzwalacz', 'wierszy', 'granty_authenticated', 'granty_anon'];
+  const brakujace = KONTROLNE.filter((k) => !new RegExp(`as\\s+${k}\\b`, 'i').test(M));
+  oMigracji('migracja kończy się zapytaniem kontrolnym ze WSZYSTKIMI liczbami do porównania',
+    brakujace.length === 0, `brakuje w zapytaniu kontrolnym: ${brakujace.join(', ')}`);
+
+  oMigracji('kolumny z `zadania.ts` naprawdę istnieją w migracji',
+    KOLUMNY_ZADANIA.every((k) => new RegExp(`\\b${k}\\b`).test(M)),
+    KOLUMNY_ZADANIA.filter((k) => !new RegExp(`\\b${k}\\b`).test(M)).join(', '));
+
+  oMigracji('nazwa tabeli w kodzie i w migracji to ta sama nazwa',
+    new RegExp(`create\\s+table\\s+if\\s+not\\s+exists\\s+public\\.${TABELA_ZADAN}\\b`, 'i').test(M),
+    `${TABELA_ZADAN} vs migracja`);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ DWIE ASERCJE, KTÓRYCH BRAK PLIKU NIE UNIEWAŻNIA.
+  // Powyższe pilnują ARTEFAKTU. Te pilnują ZGODNOŚCI KODU Z POLITYKĄ
+  // zmierzoną na produkcji — czyli tej połowy reguły, którą można złamać
+  // w `lib/zadania.ts`, nie ruszając bazy. Wykonują się ZAWSZE.
+  // ═══════════════════════════════════════════════════════════════════
+  const wstawianePrzezZawodnika = bezKomentarzyTS(zrodloZadan);
+  check('⛔ kod nie próbuje wstawiać zadania z pochodzeniem innym niż `player` — '
+    + 'polityka INSERT i tak by je odrzuciła, a appka pokazałaby zawodnikowi błąd bazy',
+    !/\borigin\s*:\s*'(?!player')/.test(wstawianePrzezZawodnika),
+    'znalazłem w kodzie appki wstawianie z `origin` innym niż `player`');
+
+  check('⛔ lista kolumn odczytu nie zawiera `user_id` — polityka SELECT '
+    + `(${RLS_ZMIERZONE_NA_PRODUKCJI.izolacja}) i tak zwraca tylko własne wiersze`,
+    !KOLUMNY_ZADANIA.includes('user_id' as never), KOLUMNY_ZADANIA.join(', '));
 }
 
 // ═════════════════════════════════════════════════════════════════════

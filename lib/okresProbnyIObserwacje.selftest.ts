@@ -44,9 +44,20 @@ function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
 }
-function pomin(label: string, powod: string) {
+/**
+ * ⭐ PAS I1 16.08.2026 — POMINIĘCIE MUSI NAZWAĆ ŚCIEŻKĘ, KTÓREJ SZUKAŁO.
+ *
+ * `tests/run-selftests.mjs` dzieli pominięcia na DOPUSZCZONE (warstwa mieszka
+ * w INNYM repozytorium, którego w tym drzewie nie ma — w CI stan trwały)
+ * i NIEDOPUSZCZONE (⛔ zapalają wyjście niezerowe). Etykieta `[poza-repo]`
+ * nie wystarcza: runner sam sprawdza, czy któraś z nazwanych ścieżek jest
+ * bezwzględna, leży POZA repozytorium i naprawdę nie istnieje.
+ */
+function pomin(label: string, powod: string, sciezki?: string[]) {
   pominiete++;
-  console.log(`POMINIETE - ${label}: ${powod}`);
+  const pozaRepo = !!sciezki && sciezki.length > 0;
+  const gdzie = pozaRepo ? ` (szukałem: ${sciezki!.join(' | ')})` : '';
+  console.log(`POMINIETE${pozaRepo ? ' [poza-repo]' : ''} - ${label}: ${powod}${gdzie}`);
 }
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -201,8 +212,9 @@ console.log('\n--- M1: obserwacje w prompcie diagnozy ---');
   const sciezka = kandydaci.find((p) => existsSync(p));
   if (!sciezka) {
     pomin('(M1) lejek diagnozy — obserwacje wchodzą do promptu tylko po weryfikacji',
-      `nie znalazłem gamechange-diagnoza/index.html (szukałem: ${kandydaci.join(' | ')}). `
-      + 'TA WARSTWA NIE ZOSTAŁA SPRAWDZONA.');
+      'nie znalazłem gamechange-diagnoza/index.html. '
+      + 'TA WARSTWA NIE ZOSTAŁA SPRAWDZONA.',
+      kandydaci);
   } else {
     const src = readFileSync(sciezka, 'utf8');
 
@@ -263,8 +275,9 @@ console.log('\n--- M1: obserwacje w prompcie diagnozy ---');
   const sciezka = kandydaci.find((p) => existsSync(p));
   if (!sciezka) {
     pomin('(M1) silnik rekomendacji — obserwacje wiązane kontem, nie adresem',
-      `nie znalazłem gamechange-app/api/generate-recommendation.js (szukałem: ${kandydaci.join(' | ')}). `
-      + 'TA WARSTWA NIE ZOSTAŁA SPRAWDZONA.');
+      'nie znalazłem gamechange-app/api/generate-recommendation.js. '
+      + 'TA WARSTWA NIE ZOSTAŁA SPRAWDZONA.',
+      kandydaci);
   } else {
     const src = readFileSync(sciezka, 'utf8');
     const fn = /async function fetchPlayerInsights\(([\s\S]*?)\n\}/.exec(src);
