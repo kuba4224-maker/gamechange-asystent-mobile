@@ -417,7 +417,40 @@ import {
   type LicznikPracy,
   type WejscieWerdyktow,
   type WystapienieDoLicznika,
+  type WartoscWerdyktu,
 } from '../../lib/wykonanieSesji';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-D2 08.2026 (15.08.2026) — „ZROBIŁEŚ?". PRODUKT WRESZCIE PYTA.
+//
+// ⛔ POMIAR, KTÓRY TO UZASADNIA (15.08.2026, produkcja): `session_verdicts`
+// 0 wierszy · `status='completed'` 0 z 24 · `daily_logs.calendar_event_id`
+// 0 z 10 · odpowiedzianych `focus_block_checkins` 0 z 1. Zawodnik nie miał
+// jak powiedzieć, że coś ZROBIŁ — `app/(tabs)/kalendarz.tsx` zapisuje
+// WYŁĄCZNIE `nie_odbylo_sie`, choć `CHECK` w bazie dopuszcza obie wartości.
+//
+// ⚠️ Przycisk „Nie odbyłem" w Kalendarzu istnieje od 14.08 i ma ZERO użyć.
+// Dlatego ta droga jest DRUGA, a nie zamienna: Kalendarz zostaje dla kogoś,
+// kto porządkuje tydzień wstecz (i pas D2 nie zmienia w nim ani znaku),
+// a karta „Dziś" PYTA SAMA — bez szukania i bez wchodzenia gdziekolwiek.
+//
+// ⛔ REGUŁA STOI W `lib/pytanieOWystapienie.ts`, TEN PLIK JĄ RYSUJE. Ekran,
+// który sam liczy, o co zapytać, jest drugą kopią reguły pod inną nazwą —
+// i pierwszą rzeczą, która rozjedzie się z oknem „wczoraj i dziś".
+// ═══════════════════════════════════════════════════════════════════
+import {
+  zbudujPytaniaOWystapienia,
+  opisPytanDoLogu,
+  // ⛔ `ilePytamy` ŚWIADOMIE NIE JEST TU IMPORTOWANE. Liczba pytań bez
+  // odpowiedzi jest wielkością dla logu i dla strażnika — postawiona na
+  // ekranie byłaby listą zaległości, czyli dokładnie tym, co decyzja Kuby
+  // o oknie „wczoraj i dziś" wyklucza. Dopóki nie ma jej w imporcie, nie ma
+  // jej jak narysować przez przeoczenie.
+  PYTANIE_NAGLOWEK,
+  type WynikPytan,
+  type Pytanie,
+  type WystapienieDoPytania,
+} from '../../lib/pytanieOWystapienie';
+import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-C4 08.2026 (15.08.2026), zadanie C4.3 — NAGRODA ZA WYKONANĄ PRACĘ.
 //
@@ -1029,6 +1062,18 @@ export default function DzisScreen() {
    * odpowiedzi na listę.
    */
   const [zakresKarty, setZakresKarty] = useState<'dzis' | 'tydzien'>('dzis');
+  /**
+   * ⭐ PLAN-D-D2 — KTÓRE WYSTĄPIENIE JEST WŁAŚNIE ZAPISYWANE. Klucz
+   * `(id, dzien)`, `null` = nic nie leci. ⚠️ Nie `boolean`: przy dwóch
+   * pytaniach naraz jedna flaga zablokowałaby OBA na czas zapisu jednego.
+   */
+  const [zapisWerdyktu, setZapisWerdyktu] = useState<string | null>(null);
+  /**
+   * ⭐ PLAN-D-D2 — błąd ZAPISU werdyktu. ⛔ Osobny od `error` ekranu: awaria
+   * zapisu odpowiedzi ma się pokazać PRZY PYTANIU, a nie na górze karty,
+   * gdzie zawodnik nie połączy jej z przyciskiem, który przed chwilą dotknął.
+   */
+  const [bladWerdyktu, setBladWerdyktu] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
@@ -2044,6 +2089,121 @@ export default function DzisScreen() {
   if (licznik !== null) console.log(`dzis: ${opisLicznikaDoLogu(licznik)}`);
 
   /**
+   * ⭐ PLAN-D-D2 15.08.2026 — O CO PRODUKT MA DZIŚ ZAPYTAĆ.
+   *
+   * ⛔ WYLICZANE W `useMemo` Z WEJŚĆ, nie trzymane w stanie — z tego samego
+   * powodu, co dorobek pasa C4: lista pytań schowana w stanie rozjeżdża się
+   * z bazą przy pierwszym odświeżeniu, którego nikt nie zauważy.
+   *
+   * ⭐ WYSTĄPIENIA BIERZEMY Z TYCH SAMYCH TRZECH TYGODNI, CO LICZNIK — czyli
+   * z `zbudujTydzien`. Reguła rozwijania cyklicznej w konkretne wtorki stoi
+   * w `lib/widokTygodnia.ts` (pas C1) i ma zostać JEDNĄ kopią; napisanie jej
+   * tutaj drugi raz znaczyłoby, że przy pierwszej poprawce jedno z dwóch
+   * miejsc zostanie w tyle, a oba będą wyglądały poprawnie.
+   *
+   * ⚠️ TRZY TYGODNIE WYSTARCZAJĄ NA OKNO „WCZORAJ I DZIŚ" ZAWSZE, także
+   * w poniedziałek, kiedy „wczoraj" (niedziela) należy do tygodnia
+   * POPRZEDNIEGO. ⛔ Okno odcina `lib/pytanieOWystapienie.ts`, nie ten plik —
+   * drugie odcinanie tutaj byłoby drugą kopią granicy okna.
+   *
+   * ⛔ `nazwaRodzaju` PODAJE EKRAN, bo tylko on ma `EVENT_TYPE_LABELS`.
+   * Przy rodzaju spoza piątki podajemy `null`, a NIE surową wartość i NIE
+   * komunikat diagnostyczny — zdanie bierze wtedy TYTUŁ wpisany przez
+   * zawodnika. „Nie znam tego rodzaju wydarzenia wczoraj o 17:00 — zrobiłeś?"
+   * byłoby zdaniem o awarii słownika, przebranym za pytanie do zawodnika (R5).
+   */
+  const pytania: WynikPytan | null = useMemo(() => {
+    if (dane === null || dzisNapis === null) return null;
+    const surowe = dane.wydarzeniaTygodnia;
+    const statusy = new Map<number, string>();
+    if (surowe !== null) for (const w of surowe) statusy.set(w.id, w.status);
+
+    const wystapienia: WystapienieDoPytania[] | null = surowe === null
+      ? null
+      : tygodnie.flatMap((t) => t.dni.flatMap((d) => d.pozycje.map((p) => ({
+        idWydarzenia: p.id,
+        dzien: p.dzien,
+        tytul: p.tytul,
+        nazwaRodzaju: p.rodzaj.znany ? EVENT_TYPE_LABELS[p.rodzaj.id] : null,
+        godzina: p.godzina,
+        // ⚠️ Ten sam wartownik, co w liczniku: `''` NIE jest żadnym statusem
+        // bazy, więc reguła potraktuje wiersz najostrożniej, jak umie.
+        status: statusy.get(p.id) ?? '',
+        zRegulyCyklicznej: p.zRegulyCyklicznej,
+      }))));
+
+    return zbudujPytaniaOWystapienia({
+      dzis: dzisNapis,
+      wystapienia,
+      wpisyDziennika: dane.wpisyDziennika,
+      werdykty: dane.werdykty,
+    });
+  }, [dane, dzisNapis, tygodnie]);
+
+  if (pytania !== null) console.log(`dzis: [PLAN-D-D2] ${opisPytanDoLogu(pytania)}`);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-D2 — ZAPIS ODPOWIEDZI. JEDNO DOTKNIĘCIE, ODWRACALNE.
+  //
+  // ⚠️ WZORZEC WZIĘTY CO DO ZNAKU Z `app/(tabs)/kalendarz.tsx` (`oznaczNieodbyte`,
+  // pas D1 + poprawka ryzyka 6): `upsert` z `onConflict` na parze
+  // `(calendar_event_id, occurred_on)` i `withdrawn_at: null`.
+  //
+  // ⛔ DLACZEGO `upsert`, A NIE `insert`: unikat `session_verdicts_jeden_na_wystapienie`
+  // obejmuje TAKŻE wiersze wycofane (i słusznie — inaczej po „Cofnij" powstałby
+  // drugi wiersz na ten sam dzień i „ostatni wygrywa" stałoby się niepisaną
+  // regułą). Bez `upsert` ścieżka „Zrobione" → „Nie odbyło się" zwracałaby
+  // `23505`, a zawodnik widziałby „Nie udało się zapisać" przy poprawnym ruchu.
+  //
+  // ⛔ `withdrawn_at: null` JEST OBOWIĄZKOWE, nie kosmetyczne: bez niego
+  // odpowiedź trafiłaby w wiersz wycofany i nadal by nie obowiązywała.
+  // Ślad zmiany zdania (`previous_verdict`, `changed_at`) stawia WYZWALACZ
+  // `session_verdicts_pilnuj`, nie ten kod — ⛔ drugiego mechanizmu śladu
+  // ten pas nie buduje.
+  //
+  // ⭐ TA SAMA FUNKCJA ZAPISUJE OBIE WARTOŚCI. To jest cała różnica między
+  // tym pasem a stanem sprzed niego: `kalendarz.tsx` ma na sztywno
+  // `verdict: 'nie_odbylo_sie'` i dlatego `odbylo_sie` nie miało w całym
+  // produkcie ani jednej drogi zapisu.
+  // ═══════════════════════════════════════════════════════════════════
+  async function odpowiedzNaWystapienie(p: Pytanie, werdykt: WartoscWerdyktu) {
+    if (!currentUser) return;
+    setBladWerdyktu(null);
+    setZapisWerdyktu(p.klucz);
+    const { data: zapisane, error: err } = await supabase
+      .from('session_verdicts')
+      .upsert({
+        user_id: currentUser.id,
+        calendar_event_id: p.idWydarzenia,
+        occurred_on: p.dzien,
+        verdict: werdykt,
+        origin: 'player',
+        withdrawn_at: null,
+      }, { onConflict: 'calendar_event_id,occurred_on' })
+      .select('id');
+    setZapisWerdyktu(null);
+    if (err) {
+      setBladWerdyktu(toJestBrakDostepu(err)
+        ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+        : 'Nie udało się zapisać: ' + err.message);
+      return;
+    }
+    // ⚠️ O61 — OPERACJA, KTÓRA NIE RZUCIŁA WYJĄTKU, NIE JEST DOWODEM, ŻE COŚ
+    // SIĘ STAŁO. Zapis odrzucony przez RLS wraca jako sukces z PUSTĄ LISTĄ.
+    // ⛔ DOWODEM JEST LICZBA ZWRÓCONYCH WIERSZY, nie brak błędu — dlatego
+    // `.select('id')` jest tu obowiązkowe, a zero wierszy to PORAŻKA.
+    if (!zapisane || zapisane.length === 0) {
+      setBladWerdyktu('Nie udało się zapisać: baza nie przyjęła tego wpisu.');
+      console.warn('[PLAN-D-D2] upsert session_verdicts dotknął ZERO wierszy '
+        + `(wydarzenie ${p.idWydarzenia}, dzień ${p.dzien}) — najpewniej RLS.`);
+      return;
+    }
+    // ⛔ ZERO ZDANIA PO ZAPISIE i zero pochwały za samo odpowiedzenie (N1).
+    // Zmienia się to, co pytanie pokazuje — i to jest cała odpowiedź produktu.
+    await load();
+  }
+
+  /**
    * ⭐ PLAN-D-C4 — DOROBEK. **WYLICZANY PRZY KAŻDYM RENDERZE, NIGDY CZYTANY
    * Z KOLUMNY STANU.**
    *
@@ -2442,6 +2602,109 @@ export default function DzisScreen() {
           : null}
         {tydzienBiezacy.dni.map(renderWierszDnia)}
       </>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-D2, D2.3 — PYTANIE NA EKRANIE. **ZERO DOTKNIĘĆ, ŻEBY ZOBACZYĆ.
+  // JEDNO, ŻEBY ODPOWIEDZIEĆ.**
+  //
+  // ⭐ STOI NAD LICZNIKIEM PRACY, BO TO JEST PYTANIE, A LICZNIK JEST
+  // ODPOWIEDZIĄ. Odwrotna kolejność kazałaby zawodnikowi czytać „nie wiemy,
+  // ile z 12 sesji się odbyło", zanim dostanie jedyną rzecz, która to zmienia.
+  //
+  // SZEŚĆ ZAKAZÓW, KAŻDY Z POWODEM I KAŻDY Z ASERCJĄ:
+  //
+  //  1. ⛔ ZERO NOWYCH BRZMIEŃ POZA ZDANIEM PYTAJĄCYM. Przyciski niosą
+  //     `PLAKIETKI_STANU_PRZESZLEGO` — te same dwa napisy („Zrobione",
+  //     „Nie odbyło się"), które zawodnik widzi w Kalendarzu i w widoku
+  //     tygodnia. Trzecie słowo na to samo byłoby rozjazdem słownika.
+  //  2. ⛔ ZERO SŁOWA O TYM, ILE PYTAŃ ZOSTAŁO BEZ ODPOWIEDZI. To byłaby
+  //     lista zaległości — czyli dokładnie to, co decyzja o oknie wyklucza.
+  //     Kształt `WynikPytan` takiej liczby nie niesie poza oknem.
+  //  3. ⛔ ZERO POCHWAŁY ZA SAMO ODPOWIEDZENIE (N1). Po zapisie nie pojawia
+  //     się ani jedno zdanie — zmienia się to, co pokazuje pytanie.
+  //  4. ⛔ ZERO SŁÓW „passa", „seria", „z rzędu", „codziennie", „nie przerwij"
+  //     (N1) i zero porównania z kimkolwiek (N3).
+  //  5. ⛔ ZERO POWIADOMIEŃ PUSH. Pytanie jest DO ZOBACZENIA, gdy zawodnik
+  //     wejdzie — nie do zawołania go z powrotem.
+  //  6. ⛔ `brak_pytan` NIE RYSUJE SIĘ WCALE, `nie_wiem` RYSUJE SIĘ ZAWSZE (R5).
+  //     Pierwsze to prawdziwa pustka („sprawdziłem, nie ma o co pytać")
+  //     i blok o niej byłby szumem na karcie, która ma już trzy liczby.
+  //     Drugie to AWARIA ODCZYTU i milczenie o niej powiedziałoby zawodnikowi
+  //     „wczoraj nic nie miałeś" o dniu, którego nie sprawdziliśmy (Z0).
+  //     ⚠️ Brzmienie awarii NIE JEST NOWE: idzie przez `rozpoznajPustke`
+  //     i wychodzi jako „Nie udało się sprawdzić." + „Pociągnij w dół…" —
+  //     te same dwa zdania, co przy pustkach pasa C3.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderPytaniaOWystapienia() {
+    if (pytania === null) return null;
+
+    // ⛔ ZAKAZ 6, GAŁĄŹ AWARII — STOI PRZED KAŻDYM `return null`, żeby nie
+    // dało się jej wyciszyć wcześniejszym wyjściem z funkcji. To jest ta
+    // sama pułapka, którą asercja `(F1-3)` pilnuje przy stanie `nie_policzony`.
+    if (pytania.rodzaj === 'nie_wiem') {
+      const pustka = rozpoznajPustke({
+        maWpisy: false,
+        planLekcjiZnany: null,
+        moznaZapisywac,
+        zakres: 'dzis',
+        odczytUdanySie: false,
+      });
+      console.warn(`dzis: [PLAN-D-D2] nie wiem, o co pytać — ${pytania.powod}`);
+      if (pustka === null) return null;
+      return (
+        <View style={styles.licznikCzesc}>
+          <Text style={styles.odpowiedzNaglowek}>{PYTANIE_NAGLOWEK}</Text>
+          <Text style={styles.licznikBrakPodstawy}>{pustka.tekst}</Text>
+          <Text style={styles.licznikPodpis}>{pustka.cta}</Text>
+        </View>
+      );
+    }
+
+    // ⛔ PRAWDZIWA PUSTKA — nic nie rysujemy. Zdanie „nie mam o co zapytać"
+    // jest prawdziwe i bezwartościowe: zawodnik nie ma z nim co zrobić.
+    if (pytania.rodzaj !== 'pytania') return null;
+
+    return (
+      <View style={styles.licznikCzesc}>
+        <Text style={styles.odpowiedzNaglowek}>{PYTANIE_NAGLOWEK}</Text>
+        {pytania.pytania.map((p) => {
+          const wybrane = p.stan.rodzaj === 'odpowiedziane' ? p.stan.werdykt : null;
+          const leci = zapisWerdyktu === p.klucz;
+          return (
+            <View key={p.klucz} style={styles.pytanieWiersz}>
+              {/* ⭐ ZDANIE PYTAJĄCE — jedyne nowe brzmienie tego pasa.
+                  Rozstrzyga je `lib/pytanieOWystapienie.ts`, nie ten plik. */}
+              <Text style={styles.licznikLiczba}>{p.zdanie}</Text>
+              <View style={styles.pytanieOdpowiedzi}>
+                {(['odbylo_sie', 'nie_odbylo_sie'] as const).map((w) => (
+                  <TouchableOpacity
+                    key={w}
+                    // ⛔ `disabled` WYŁĄCZNIE na czas zapisu TEGO wystąpienia.
+                    // Przycisk wyszarzony na stałe uczy, że klikanie nic nie daje.
+                    disabled={leci}
+                    style={[styles.pytanieBtn, wybrane === w && styles.pytanieBtnWybrany]}
+                    onPress={() => odpowiedzNaWystapienie(p, w)}
+                  >
+                    {/* ⛔ BRZMIENIE ISTNIEJĄCE, NIE NOWE — `PLAKIETKI_STANU_PRZESZLEGO`
+                        z pasa C1/D1, użyte co do znaku. */}
+                    <Text style={[styles.pytanieBtnTxt, wybrane === w && styles.pytanieBtnTxtWybrany]}>
+                      {PLAKIETKI_STANU_PRZESZLEGO[w]}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          );
+        })}
+        {/* ⚠️ Błąd zapisu stoi PRZY pytaniu, nie na górze karty. Bez tego
+            zawodnik nie połączyłby go z przyciskiem, który przed chwilą
+            dotknął — a zapis odrzucony przez RLS wygląda jak sukces (O61). */}
+        {bladWerdyktu !== null
+          ? <Text style={styles.pytanieBlad}>{bladWerdyktu}</Text>
+          : null}
+      </View>
     );
   }
 
@@ -3134,6 +3397,14 @@ export default function DzisScreen() {
               renderTydzienNaKarcie()
             )}
 
+            {/* ── ⭐ D2.3: „ZROBIŁEŚ?" — PRODUKT PYTA SAM ──────────────
+                ⭐ STOI NAD LICZNIKIEM, BO TO JEST PYTANIE, A LICZNIK JEST
+                ODPOWIEDZIĄ. ⛔ Zero dotknięć, żeby zobaczyć (P0); jedno,
+                żeby odpowiedzieć. Do 15.08 zawodnik nie miał w całym
+                produkcie ANI JEDNEJ drogi, żeby powiedzieć „zrobiłem" —
+                `kalendarz.tsx` zapisuje wyłącznie „nie odbyło się". */}
+            {renderPytaniaOWystapienia()}
+
             {/* ── ⭐ B5.3: LICZNIK PRACY (WG-28, WG-37, WT-15) ─────────
                 Pierwszy konsument `policzWykonanaPrace` w całej appce.
                 Stoi POD zakresem i NIEZALEŻNIE od niego: „ile pracy odbyłem
@@ -3331,6 +3602,26 @@ const styles = StyleSheet.create({
   // przypisem do liczby, której nie ma.
   licznikBrakPodstawy: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary },
   licznikPodpis: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 4 },
+  // ⭐ PLAN-D-D2 — PYTANIE „ZROBIŁEŚ?". Cztery style, wszystkie w istniejącej
+  // skali karty; zdanie pytające używa `licznikLiczba`, czyli tego samego
+  // rozmiaru co liczby obok — pytanie nie jest przypisem do licznika.
+  pytanieWiersz: { marginTop: 10 },
+  pytanieOdpowiedzi: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  // ⚠️ `minHeight: minTouchHeight` NIE JEST OZDOBĄ i nie jest kopiowane
+  // z nawyku: cel dotykowy mniejszy od progu to akcja, której zawodnik nie
+  // trafia, a nietrafiona akcja wygląda dokładnie jak akcja niechciana.
+  // ⛔ Tu kosztuje to więcej niż gdzie indziej: obok siebie stoją DWA
+  // przyciski o przeciwnym znaczeniu.
+  pytanieBtn: {
+    minHeight: minTouchHeight, justifyContent: 'center', paddingHorizontal: 12,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, backgroundColor: colors.surface,
+  },
+  // ⭐ WYBRANA ODPOWIEDŹ MA BYĆ WIDOCZNA, a nie domyślna: bez tego zawodnik
+  // nie wie, czy jego dotknięcie doszło, i dotyka drugi raz.
+  pytanieBtnWybrany: { borderColor: colors.brand, backgroundColor: colors.okSoft },
+  pytanieBtnTxt: { ...typography.bodyMedium, fontSize: 13, color: colors.textSecondary },
+  pytanieBtnTxtWybrany: { color: colors.textPrimary },
+  pytanieBlad: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.error, marginTop: 8 },
   // ⭐ PLAN-D-C4 — DOROBEK. Trzy style, wszystkie w istniejącej skali karty.
   nagrodaPodnaglowek: { ...typography.bodySemiBold, fontSize: 12, lineHeight: 18, letterSpacing: 0.4, color: colors.textSecondary, marginTop: 10, textTransform: 'uppercase' },
   // ⛔ CELOWO PEŁNY ROZMIAR TEKSTU, A NIE PRZYPIS. Zdanie „za jaką pracę"

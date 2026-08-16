@@ -440,11 +440,89 @@ function check(label: string, cond: boolean, detail: string) {
     && !/for\s*\(\s*let\s+h\s*=\s*0\s*;\s*h\s*<\s*24/.test(dzis),
     'na karcie pojawiła się siatka godzin — WT-34 była spełniona i ten pas nie ma prawa jej zgasić');
 
-  // ⛔ §10 pkt 3 polecenia — „Dziś" CZYTA werdykty, nie zapisuje ich.
-  check('(B5-5) ⛔ ekran „Dziś" NIE ZAPISUJE werdyktów — zapis mieszka w Kalendarzu',
-    !/from\(\s*'session_verdicts'\s*\)\s*\.\s*(insert|upsert|update|delete)/.test(dzis)
-    && !/session_verdicts[\s\S]{0,120}?\.(insert|upsert|update|delete)\(/.test(dzis),
-    'ekran zapisuje werdykt — dwa miejsca zapisu to dwa źródła prawdy o tym samym wystąpieniu');
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-D2 15.08.2026 — TA ASERCJA ZOSTAŁA ODWRÓCONA DECYZJĄ KUBY.
+  // ═════════════════════════════════════════════════════════════════
+  //
+  // DO 15.08.2026 STAŁO TU:
+  //
+  //   check('(B5-5) ⛔ ekran „Dziś" NIE ZAPISUJE werdyktów — zapis mieszka
+  //          w Kalendarzu',
+  //     !/from\(\s*'session_verdicts'\s*\)\s*\.\s*(insert|upsert|update|delete)/…)
+  //
+  // ⚠️ TO NIE JEST WYCISZENIE STRAŻNIKA I NIE JEST ODKRYCIEM DEFEKTU W PASIE
+  // B5. Tamta asercja była poprawnym zapisem decyzji, która obowiązywała
+  // 15.08 rano: jedno miejsce zapisu, w Kalendarzu. Decyzja zmieniła się na
+  // podstawie POMIARU — przycisk „Nie odbyłem" stoi w Kalendarzu od 14.08
+  // i ma ZERO użyć, a `session_verdicts` ma ZERO wierszy. Produkt, który
+  // czeka, aż zawodnik sam wejdzie do Kalendarza, czekał dobę i się nie
+  // doczekał. Kuba rozstrzygnął: karta „Dziś" PYTA SAMA.
+  //
+  // ⭐ I DLATEGO ASERCJA NIE ZNIKA, TYLKO SIĘ ZAOSTRZA. Powód pierwotnego
+  // zakazu — „dwa miejsca zapisu to dwa źródła prawdy" — NIE PRZESTAŁ
+  // obowiązywać; przestało obowiązywać wyłącznie to, że miejsc ma być jedno.
+  // Zamiast liczby miejsc pilnujemy dziś tego, co naprawdę było stawką:
+  //
+  //   1. ⭐ OBA miejsca piszą TYM SAMYM kształtem (`upsert` + `onConflict`
+  //      na parze `(calendar_event_id, occurred_on)` + `withdrawn_at: null`).
+  //      Dwa RÓŻNE kształty zapisu to dopiero są dwa źródła prawdy: jedno
+  //      z nich wywróciłoby się na `23505` po „Cofnij", drugie nie.
+  //   2. ⭐ OBA sprawdzają LICZBĘ ZWRÓCONYCH WIERSZY (O61), a nie brak błędu.
+  //   3. ⛔ ŻADNE nie zapisuje `odbylo_sie` na sztywno, bez dotknięcia
+  //      zawodnika — wartość werdyktu jest wszędzie ZMIENNĄ.
+  //
+  // ⚠️ To jest dokładnie ten wzorzec, który pas F1 zmierzył w `pustkaWCalymRepo`
+  // (nota F1 §6.1) i który stoi w `STAN_DELEGACJI` jako **O73**: asercja
+  // pilnująca LICZBY zapala się na sukcesie następnego pasa. Lekarstwo jest
+  // to samo — pilnować REGUŁY, nie licznika.
+  const zapisWDzis = (() => {
+    const od = dzis.indexOf('async function odpowiedzNaWystapienie');
+    if (od < 0) return '';
+    const doKad = dzis.indexOf('\n  }', od);
+    return doKad < 0 ? dzis.slice(od) : dzis.slice(od, doKad + 4);
+  })();
+  const kalendarzZrodlo = readFileSync(join(root, 'app', '(tabs)', 'kalendarz.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const zapisWKalendarzu = (() => {
+    const od = kalendarzZrodlo.indexOf('async function oznaczNieodbyte');
+    if (od < 0) return '';
+    const doKad = kalendarzZrodlo.indexOf('\n  }', od);
+    return doKad < 0 ? kalendarzZrodlo.slice(od) : kalendarzZrodlo.slice(od, doKad + 4);
+  })();
+
+  check('(B5-5 → D2) ⭐ OBA miejsca zapisu werdyktu istnieją: karta „Dziś" pyta sama, '
+    + 'Kalendarz zostaje dla porządkowania tygodnia wstecz',
+    zapisWDzis !== '' && zapisWKalendarzu !== '',
+    `dzis=${zapisWDzis.length}B, kalendarz=${zapisWKalendarzu.length}B`);
+
+  check('(B5-5 → D2) ⭐ OBA piszą TYM SAMYM kształtem — `upsert` po parze '
+    + '`(calendar_event_id, occurred_on)` z `withdrawn_at: null`',
+    [zapisWDzis, zapisWKalendarzu].every((k) => /\.upsert\(/.test(k)
+      && /onConflict: 'calendar_event_id,occurred_on'/.test(k)
+      && /withdrawn_at: null/.test(k)),
+    'dwa RÓŻNE kształty zapisu tego samego wystąpienia — jedno z nich wywróci się na `23505`');
+
+  check('(B5-5 → D2) ⭐ OBA traktują ZERO ZWRÓCONYCH WIERSZY jako porażkę (O61)',
+    [zapisWDzis, zapisWKalendarzu].every((k) => /\.select\('id'\)/.test(k)
+      && /length === 0/.test(k)),
+    'zapis odrzucony przez RLS zostanie pokazany zawodnikowi jako sukces');
+
+  check('(B5-5 → D2) ⛔ ŻADNE z dwóch miejsc nie zapisuje `odbylo_sie` bez dotknięcia '
+    + 'zawodnika — wartość werdyktu jest zmienną, nie literałem',
+    !/verdict: 'odbylo_sie'/.test(dzis) && !/verdict: 'odbylo_sie'/.test(kalendarzZrodlo),
+    'produkt może uznać sesję za odbytą sam z siebie');
+
+  // ⛔ …i pilnujemy, że TRZECIEGO miejsca nie ma. Zapadka na RÓWNOŚĆ (O73),
+  // z katalogiem ODKRYWANYM (O69) — lista na sztywno kłamałaby na zielono.
+  const ekranyZapisujace = readdirSync(join(root, 'app', '(tabs)'))
+    .filter((f) => f.endsWith('.tsx'))
+    .filter((f) => /\.from\('session_verdicts'\)[\s\S]{0,400}?(upsert|insert|update)\(/
+      .test(readFileSync(join(root, 'app', '(tabs)', f), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')))
+    .sort();
+  check('(B5-5 → D2) ⛔ DOKŁADNIE DWA ekrany zapisują werdykt — ani jednego więcej',
+    ekranyZapisujace.join(',') === 'dzis.tsx,kalendarz.tsx',
+    `znalezione: ${ekranyZapisujace.join(', ') || 'brak'}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1023,6 +1101,77 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
   check(`⭐ po ${MUTACJE.length} mutacjach prawdziwe zasady są nadal nietknięte`,
     bateriaF1(ZASADY_F1).filter((w) => !w.ok).length === 0,
     'mutacja wyciekła poza swój obiekt ZasadyF1');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-D2 15.08.2026 — TRZY ASERCJE O KARCIE, KTÓRYCH NIE MA NIGDZIE INDZIEJ
+// ═══════════════════════════════════════════════════════════════════
+//
+// ⚠️ Reguły pytania pilnuje `lib/pytanieOWystapienie.selftest.ts` (63 asercje).
+// Tutaj stoi wyłącznie to, co jest własnością KARTY „DZIŚ" jako całości
+// i czego tamten strażnik nie widzi: kolejność bloków i głębokość dotknięć.
+{
+  // ── (D2-1) REGUŁA MA KONSUMENTA — i wynik dochodzi do <Text> ─────
+  //
+  // ⚠️ DLACZEGO TO STOI TU, A NIE W ASERCJI ODWROTNEJ (F1-2). Tamta zna
+  // wzorzec nazw `^(policz|compute)`, a ta funkcja nazywa się `zbuduj…` —
+  // czyli wpada dokładnie w lukę, którą pas F1 zgłosił sam o sobie
+  // (nota F1 §15.3 poz. 5: „funkcja nazwana `zbuduj*` nie zostanie znaleziona").
+  // ⛔ ROZSZERZENIA WZORCA O `zbuduj*` ŚWIADOMIE NIE ROBIĘ i powód jest
+  // ZMIERZONY, nie ostrożnościowy: w `lib/` jest dziś 10 eksportów `zbuduj*`,
+  // z czego CZTERY nie mają konsumenta pierwszego rzędu (`zbudujCoToZmieni`,
+  // `zbudujOdcinek`, `zbudujWglad`, `zbudujZadanieSystemowe`
+  // + `zbudujKluczSystemowy`). Rozszerzenie wzorca zapaliłoby strażnika na
+  // CUDZYCH plikach w pasie, który ich nie dotyka (O68) — zgłaszam to jako
+  // znalezisko do osobnego pasa, a nie jako czerwień do posprzątania dziś.
+  check('⭐ (D2-1) karta „Dziś" WOŁA `zbudujPytaniaOWystapienia` — reguła ma konsumenta',
+    /zbudujPytaniaOWystapienia\(\{/.test(dzis),
+    'reguła pytania policzona i nigdzie nie użyta — 34. pozycja tej samej choroby');
+
+  check('⭐ (D2-1) ZDANIE PYTAJĄCE dochodzi do <Text>, a nie kończy się w `useMemo`',
+    /<Text style=\{styles\.licznikLiczba\}>\{p\.zdanie\}<\/Text>/.test(dzis),
+    'pytanie jest policzone i niewidoczne');
+
+  // ── (D2-2) ⭐ KOLEJNOŚĆ BLOKÓW KARTY — PYTANIE NAD ODPOWIEDZIAMI ──
+  //
+  // ⛔ TO NIE JEST ESTETYKA. Karta niesie dziś cztery bloki i trzy z nich są
+  // ODPOWIEDZIAMI o wykonanej pracy („N z M w 14 dni", dorobek, praca
+  // w Blokach). Wszystkie trzy mówią dziś „nie wiemy" — bo nie ma dowodów.
+  // Pytanie jest jedyną rzeczą na tym ekranie, która to zmienia, więc stoi
+  // PIERWSZE. Przesunięte pod liczniki kazałoby zawodnikowi przeczytać trzy
+  // razy „nie wiem", zanim dostanie sposób, żeby na to odpowiedzieć.
+  const kolejnosc = ['renderPytaniaOWystapienia', 'renderLicznikPracy', 'renderNagrodaZaPrace', 'renderPracaWBlokach']
+    .map((n) => ({ n, i: dzis.indexOf(`{${n}()}`) }));
+  check('⭐ (D2-2) cztery bloki karty stoją w kolejności: PYTANIE → licznik okna → '
+    + 'dorobek → praca w Blokach',
+    kolejnosc.every((x) => x.i > 0)
+    && kolejnosc.every((x, i) => i === 0 || x.i > kolejnosc[i - 1].i),
+    kolejnosc.map((x) => `${x.n}@${x.i}`).join(' · '));
+
+  // ── (D2-3) ⭐ GŁĘBOKOŚĆ ZERO (P0) ────────────────────────────────
+  //
+  // Karta ma przełącznik `Dziś / Tydzień` (pas B5). Blok pytania stoi POZA
+  // jego gałęziami — czyli widać go bez względu na to, który zakres zawodnik
+  // wybrał, i bez ani jednego dotknięcia. ⚠️ Wycinamy gałąź przełącznika
+  // i pytamy JEJ, a nie plikowi (O71): fraza „renderPytaniaOWystapienia"
+  // jest w tym pliku także w definicji i w komentarzach.
+  const galazZakresu = (() => {
+    const od = dzis.indexOf("zakresKarty === 'dzis'");
+    if (od < 0) return null;
+    const doKad = dzis.indexOf('{renderPytaniaOWystapienia()}', od);
+    return doKad < 0 ? null : dzis.slice(od, doKad);
+  })();
+  check('⭐ (D2-3) PYTANIE STOI POZA PRZEŁĄCZNIKIEM `Dziś / Tydzień` — zero dotknięć (P0)',
+    galazZakresu !== null && !galazZakresu.includes('{renderPytaniaOWystapienia()}'),
+    'pytanie wpadło do jednej z gałęzi zakresu — połowa zawodników go nie zobaczy');
+
+  // ⛔ Pytanie nie ma prawa być schowane za `zakresKarty`, ale nie ma też
+  // prawa wypaść POZA kartę: zero dotknięć znaczy „na tym samym ekranie,
+  // bez przewijania do innej karty".
+  check('⭐ (D2-3) pytanie stoi WEWNĄTRZ karty kalendarza, nad licznikiem',
+    dzis.indexOf('{renderPytaniaOWystapienia()}') > dzis.indexOf("zakresKarty === 'dzis'")
+    && dzis.indexOf('{renderPytaniaOWystapienia()}') < dzis.indexOf('{renderLicznikPracy()}'),
+    'pytanie wyjechało poza kartę albo pod licznik');
 }
 
 // ═══════════════════════════════════════════════════════════════════
