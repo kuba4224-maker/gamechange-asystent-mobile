@@ -24,6 +24,39 @@
 //
 // Na końcu drukuje WYPIS „co zawodnik realnie zobaczy" — sekcja 11 raportu
 // zwrotnego jest wyjściem tego kodu, nie tekstem pisanym ręcznie.
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CHOROBA K4 (ograniczenie O75)
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — nazwane liczbą. Ten plik miał **109 ASERCJI, drugie
+// miejsce w całej suicie**, i ANI JEDNEJ, która czytałaby EKRAN. Audyt H1
+// (15.08) zmierzył: nie istnieje stan repozytorium z pilnowanym defektem,
+// na którym ten strażnik by się zapalił.
+//
+// DLACZEGO TO JEST GROŹNE AKURAT TUTAJ. Nagłówek `lib/rediagnosis.ts` mówi,
+// że najdroższym błędem tej stacji jest **ogłoszenie spadku komuś, komu nie
+// spadło** („zdanie o spadku napisane źle potrafi zniechęcić na miesiąc").
+// Cała ta ostrożność — martwa strefa, błąd zaokrąglenia `calcScores()`,
+// trzy segmenty z odwróconym kierunkiem, Osłona przy szybkim wzroście —
+// siedzi w module. **Ekran mógł ją całą ominąć i napisać własne zdanie,
+// a 109 asercji nadal świeciło 109/109.**
+//
+// ⭐ DRUGA RZECZ, KTÓREJ NIKT NIE PILNOWAŁ: stacja pokazuje DWA paski,
+// „byłeś tu — jesteś tu". Skasowanie paska „przed" zostawia zawodnika
+// z samym nowym wynikiem — czyli z oceną zamiast z ruchem. To jest
+// dokładnie to, czego ten komponent obiecuje w nagłówku nie robić,
+// i przed 16.08 żadna asercja tego nie sprawdzała.
+//
+// ⚠️ CZEGO TA SEKCJA NIE UDAJE. Czyta źródło ekranu JAKO TEKST. Nie
+// uruchamia Reacta i nie wie, czy stacja się rysuje. Podmiana wywołania
+// na inne, równie zepsute, przejdzie tu niezauważona.
+//
+// ⚠️ NIE UŻYWAĆ `new URL(...)` (O53): `tsconfig.json` ciągnie DOM, więc `tsc`
+// pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import {
   REDIAGNOSIS_DEAD_ZONE,
   REDIAGNOSIS_SCALE_STEPS,
@@ -62,6 +95,144 @@ function eq(label: string, actual: unknown, expected: unknown) {
     JSON.stringify(actual) === JSON.stringify(expected));
 }
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I2 16.08.2026 — EKRAN, KTÓRY RYSUJE STACJĘ (K4 / O75)
+// ═══════════════════════════════════════════════════════════════════
+// ⚠️ `check()` w tym pliku przyjmuje SAMĄ etykietę (bez osobnego `detail`),
+// więc cały opis defektu idzie w etykietę — inaczej porażka pokazałaby się
+// na dole jako gołe zdanie bez tego, co dokładnie było zepsute.
+{
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+
+  /**
+   * Źródło BEZ komentarzy. Ten komponent CYTUJE w nagłówku dokładnie te rzeczy,
+   * których pilnujemy („zawodnik widzi RÓŻNICĘ… nigdy sam nowy wynik"), więc
+   * strażnik czytający surowy tekst przechodziłby na własnej dokumentacji,
+   * a jedynym sposobem, żeby go zapalić, byłoby skasowanie wyjaśnienia.
+   */
+  const bezKomentarzy = (s: string): string => s
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+    .join('\n');
+
+  // ⛔ Brak pliku to FAIL Z NAZWĄ, nigdy wyjątek `ENOENT` (O76).
+  const BRAK_PLIKOW: string[] = [];
+  const surowe = (wzgledna: string): string => {
+    const p = join(root, wzgledna);
+    if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+    return readFileSync(p, 'utf8');
+  };
+
+  const PLIK_STACJA = 'components/BlockClosingRediagnosis.tsx';
+  const stacja = bezKomentarzy(surowe(PLIK_STACJA));
+
+  check(`⛔ (I2-0) plik stacji istnieje i daje się odczytać — brak: ${BRAK_PLIKOW.join(', ') || '—'} `
+    + '(zmieniła się nazwa albo miejsce komponentu; do czasu poprawki asercje niżej czytają PUSTY tekst)',
+    BRAK_PLIKOW.length === 0);
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  const chodz = (katalog: string, out: string[] = []): string[] => {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else out.push(p);
+    }
+    return out;
+  };
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .filter((p) => p.endsWith('.ts') || p.endsWith('.tsx'))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/rediagnosis'/.test(bezKomentarzy(readFileSync(join(root, p), 'utf8'))));
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c` (po D2 i I1), nie przepisane
+  // z pamięci. RÓWNOŚĆ, nie „≥ 1" (O73): „co najmniej jeden konsument"
+  // przeszłoby także wtedy, gdy stacja zniknie z zamykania Bloku.
+  const OCZEKIWANI = [PLIK_STACJA];
+  check(`⭐ (I2-0) stację rysuje DOKŁADNIE jeden plik, ten sam co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73). `
+    + `Zastane: [${konsumenci.join(', ') || 'ŻADEN'}], oczekiwane: [${OCZEKIWANI.join(', ')}]. `
+    + 'Ubyło → zawodnik przestał być pytany o zmianę obrazu po Bloku, a 109 asercji niżej nadal jest zielonych. '
+    + 'Doszło → drugie miejsce rysuje zmianę i może ją rozstrzygać po swojemu.',
+    JSON.stringify(konsumenci) === JSON.stringify(OCZEKIWANI));
+
+  // ── ⛔ EKRAN NIE ROZSTRZYGA KIERUNKU ZMIANY ──
+  // Defekt, którego pilnuje: stacja porównuje sobie odpowiedź z punktem
+  // odniesienia i sama nazywa kierunek. Wtedy cała ostrożność modułu —
+  // martwa strefa, błąd zaokrąglenia `calcScores()`, trzy segmenty z `dir:-1`,
+  // Osłona przy szybkim wzroście — przestaje obowiązywać, a zawodnik czyta
+  // „w dół" przy wyniku, który nie spadł.
+  const DECYDUJACE = ['compareRediagnosis', 'segmentDirection', 'answerPosition',
+    'baselinePosition', 'REDIAGNOSIS_DEAD_ZONE', 'CALC_SCORES_ROUNDING_ERROR'];
+  const przecieki = DECYDUJACE.filter((f) => new RegExp(`\\b${f}\\b`).test(stacja));
+  check('⛔ (I2-0) stacja NIE rozstrzyga kierunku zmiany sama — o „w górę / w dół / bez zmiany" '
+    + `decyduje wyłącznie \`buildRediagnosisView\`. Znalezione na ekranie: [${przecieki.join(', ') || '—'}] `
+    + '→ druga reguła kierunku obok tej, którą pilnuje 109 asercji niżej; najdroższy błąd tej stacji '
+    + 'to ogłoszenie spadku komuś, komu nie spadło',
+    przecieki.length === 0);
+
+  check('⛔ (I2-0) stacja woła `buildRediagnosisView(` — bez tego nie ma czego rysować',
+    /buildRediagnosisView\(/.test(stacja));
+
+  // ── ⭐ DWA PASKI, NIGDY JEDEN ──
+  // Nagłówek komponentu obiecuje: „zawodnik widzi RÓŻNICĘ — dwa paski,
+  // «byłeś tu, jesteś tu», nigdy sam nowy wynik". Skasowanie paska „przed"
+  // zamienia ruch w ocenę, a ocena bez punktu odniesienia jest tym, czego
+  // ekran Diagnoza świadomie nie pokazuje od rundy 1.
+  check('⭐ (I2-0) stacja rysuje OBA paski — `beforeBarPercent` I `afterBarPercent`; sam nowy wynik '
+    + 'zamienia RUCH w OCENĘ, a stacja powstała po to, żeby pokazywać ruch',
+    /view\.beforeBarPercent/.test(stacja) && /view\.afterBarPercent/.test(stacja));
+
+  check('⛔ (I2-0) stacja nie przelicza pasków po swojemu — ani `barPercent(`, ani własnego `* 100`',
+    !/\bbarPercent\s*\(/.test(stacja) && !/\*\s*100\b/.test(stacja));
+
+  // ── ⭐ ZDANIA POCHODZĄ Z MODUŁU, NIE Z EKRANU ──
+  // Komponent obiecuje „nie dokłada ani jednego zdania". Sprawdzamy to
+  // dwustronnie: pola widoku MUSZĄ być narysowane, a KOPII stałych modułu
+  // na ekranie ma nie być.
+  for (const pole of ['headline', 'body', 'lead', 'question', 'eyebrow', 'segmentName',
+    'beforeCaption', 'afterCaption', 'skipLabel', 'skipNote', 'notSavedText']) {
+    check(`⭐ (I2-0) stacja rysuje \`view.${pole}\` — zdanie widoczne dla zawodnika przychodzi `
+      + 'z modułu, a nie powstaje na ekranie',
+      new RegExp(`view\\.${pole}\\b`).test(stacja));
+  }
+
+  check('⛔ (I2-0) na ekranie NIE stoi kopia zdania „nie zapisało się" ze stałej modułu — '
+    + 'kopia rozjedzie się po cichu z oryginałem i zawodnik przeczyta dwie różne prawdy o tym samym',
+    !stacja.includes(REDIAGNOSIS_NOT_SAVED_TEXT));
+
+  // ── ⛔ NAPRAWA A4c: STACJA NIGDY NIE ZAMYKA ZAWODNIKA W BLOKU ──
+  // Defekt historyczny (naprawiony 12.08, commit `e3cce2b`): przy
+  // `kind:'absent'` render kończył się `return null`, ale `resolve()` nie
+  // leciało — `rediagnosisResolved` zostawało `false`, więc trzy przyciski
+  // „Co dalej?" NIE POJAWIAŁY SIĘ NIGDY, a ekran przeglądu nie ma innego
+  // wyjścia. Zawodnik zostawał uwięziony na podsumowaniu WŁASNEGO Bloku.
+  // Wystarczał jeden segment spoza banku pytań.
+  check('⛔ (I2-0) przy `kind === \'absent\'` stacja WOŁA `resolve()` (naprawa A4c, `e3cce2b`) — '
+    + 'bez tego zawodnik zostaje uwięziony na podsumowaniu własnego Bloku bez ani jednego wyjścia',
+    /view\.kind\s*===\s*'absent'\s*\)\s*resolve\(\)/.test(stacja));
+
+  check('⛔ (I2-0) …i dopiero potem nie rysuje niczego (`return null`)',
+    /if\s*\(\s*view\.kind\s*===\s*'absent'\s*\)\s*return null/.test(stacja));
+
+  // ── ⛔ POMINIĘCIE NIC NIE ZAPISUJE ──
+  // „Pominięcie nie jest danymi o zawodniku i nie może się liczyć jako spadek."
+  const onSkip = (stacja.match(/const onSkip\s*=[\s\S]{0,400}?\n\s*\};/) ?? [''])[0];
+  check(`⛔ (I2-0) „Nie chcę teraz odpowiadać" NIC NIE ZAPISUJE — w \`onSkip\` nie ma \`saveRediagnosisAnswer\`. `
+    + `Zastane ciało: ${onSkip.replace(/\s+/g, ' ').slice(0, 200) || '(nie znalazłem onSkip)'} `
+    + '→ pominięcie zapisane jako odpowiedź staje się punktem na osi zawodnika, którego on nigdy nie podał',
+    onSkip !== '' && !/saveRediagnosisAnswer/.test(onSkip));
+
+  console.log(`[pomiar] I2 16.08.2026: stację „Zmiana obrazu" rysuje ${konsumenci.length} plik(ów) `
+    + `(${konsumenci.join(', ') || 'ŻADEN'}); pól widoku sprawdzanych na ekranie: 11.`);
+}
 
 // ─────────────────────────────────────────────────────────────
 // 1. SKALA

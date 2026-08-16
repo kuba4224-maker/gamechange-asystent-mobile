@@ -14,8 +14,40 @@
 //     i wygląda jak prawda (zakaz 5);
 //   • mediana snu zwracająca 0 zamiast „nie wiem" przy braku wpisów —
 //     zero godzin snu to zdanie o zawodniku, którego nikt nie wypowiedział.
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CHOROBA K4 (ograniczenie O75), ZNALEZISKO
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — nazwane liczbą. Ten plik miał 66 ASERCJI i ANI JEDNEJ,
+// która patrzyłaby POZA własny moduł. Audyt H1 (15.08) zaliczył go do klasy K4:
+// nie istnieje stan repozytorium z pilnowanym defektem, na którym by się zapalił.
+//
+// ⚠️ KOREKTA WOBEC H1 (O74). H1 podał dla tego strażnika commit z defektem
+// `d3eecad` (2026-08-07 18:28). Moduł `lib/sladZachowania.ts` I ten strażnik
+// powstały RAZEM w `e3cce2b` (2026-08-12 19:46) — pięć dni PÓŹNIEJ. Na
+// `d3eecad` nie istniał ani moduł, ani strażnik, więc podany „stan z defektem"
+// nie mógł niczego pokazać. To jest błąd H1, nie własność tego pliku.
+//
+// ⚠️ TEN STRAŻNIK JEST TEŻ K3. Moduł i strażnik mają JEDEN commit narodzin
+// (`e3cce2b`), więc testu historycznego „stan sprzed naprawy" nie da się
+// zrobić w ogóle — dowód idzie mutacją (O77).
+//
+// ⭐ ZNALEZISKO, NIE PORAŻKA: PRODUCENT BEZ KONSUMENTA. Zmierzone 16.08.2026
+// na `main` = `123e09c` odkrywaniem katalogu, nie z pamięci:
+//   konsumenci w `app/` + `components/`  →  0
+//   konsumenci w `lib/` (pośrednicy)     →  0
+//   zapisy do tabeli `behavioural_trace` →  0
+// Nie ma więc EKRANU, o którego treści dałoby się cokolwiek orzec. Zamiast
+// asercji „ekran woła moduł" sekcja 0 niżej zapadkuje POMIAR: równość liczby
+// konsumentów z zerem (O73), w obie strony. Konsument, który się pojawi,
+// ZAPALA strażnika z poleceniem przeniesienia asercji na ten ekran; ubytek
+// wpisu z rejestru długu zapala go z poleceniem odwrotnym.
+//
+// ⛔ CZERWONY „Z ZAŁOŻENIA" JEST ZAKAZANY: czerwień, która stoi drugi dzień,
+// przestaje być sygnałem. Dlatego stan zmierzony dziś jest ZIELONY, a czerwony
+// robi się dopiero ZMIANA tego stanu.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   policzSlad, wierszSladu, opiszSlad, mediana, oknoWstecz, przesunDzien, dniOkna,
@@ -33,6 +65,159 @@ function check(label: string, cond: boolean, detail: string) {
 const libDir = dirname(fileURLToPath(import.meta.url));
 const TERAZ = new Date('2026-08-12T18:00:00.000Z');
 const DZIS = '2026-08-12';
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I2 16.08.2026 — KTO TO RYSUJE (K4 / O75). ODPOWIEDŹ: NIKT
+// ═══════════════════════════════════════════════════════════════════
+// Wszystkie asercje niżej czytają PLIKI SPOZA tego modułu. Bez nich 66 asercji
+// tego pliku opisuje cztery liczniki, których nikt nie musi wołać — a opis
+// funkcji nieużywanej jest zielony zawsze, cokolwiek by się z produktem stało.
+{
+  const root = dirname(libDir);
+
+  /**
+   * Źródło BEZ komentarzy — pliki tego projektu CYTUJĄ w komentarzach nazwy
+   * modułów i zepsute wywołania (nagłówek `lib/kolejkaPodania.ts` wymienia
+   * `lib/sladZachowania.ts` z nazwy). Strażnik czytający surowy tekst
+   * naliczyłby taki cytat jako konsumenta i przechodziłby na cudzej
+   * dokumentacji — a to jest dokładnie odwrotność pomiaru.
+   */
+  const bezKomentarzy = (s: string): string => s
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+    .join('\n');
+
+  /**
+   * ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76).
+   * Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
+   * narzędzia, a jest plikiem, KTÓRY ZNIKNĄŁ Z REPOZYTORIUM.
+   */
+  const BRAK_PLIKOW: string[] = [];
+  const surowe = (wzgledna: string): string => {
+    const p = join(root, wzgledna);
+    if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+    return readFileSync(p, 'utf8');
+  };
+
+  const PLIK_MODUL = 'lib/sladZachowania.ts';
+  /** Rejestr długu „silnik bez ekranu" — pas F1, pozycja 33. */
+  const PLIK_REJESTR_DLUGU = 'lib/kartaDzisILicznik.selftest.ts';
+  const modulSurowy = surowe(PLIK_MODUL);
+  const modul = bezKomentarzy(modulSurowy);
+  const rejestrDlugu = bezKomentarzy(surowe(PLIK_REJESTR_DLUGU));
+
+  console.log('0. KTO TO RYSUJE (K4 / O75)');
+
+  check('⛔ (I2-0) każdy plik z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce. `
+    + 'Popraw listę w tym pliku ALBO przywróć plik; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  // Lista wpisana ręcznie KŁAMIE NA ZIELONO: nowy ekran, który sięgnie po ten
+  // moduł, po prostu nie znalazłby się na niej i pomiar dalej pokazywałby zero.
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const wszystkie = (katalogi: string[]): string[] => katalogi
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const EKRANY = wszystkie(['app', 'components']);
+  const MODULY_LIB = wszystkie(['lib']).filter((p) => p !== PLIK_MODUL);
+  const siega = (p: string): boolean =>
+    /from\s+'[^']*\/?sladZachowania'/.test(bezKomentarzy(readFileSync(join(root, p), 'utf8')));
+
+  const konsumenciEkranow = EKRANY.filter(siega);
+  const posrednicyWLib = MODULY_LIB.filter(siega);
+  // ⚠️ `wierszSladu` buduje wiersz do `upsert` po `(user_id, window_start,
+  // window_end)`. Jeżeli tego upsertu nikt nie wykonuje, materializacja nie
+  // materializuje niczego — tabela zostaje pusta, tak jak była 12.08.2026.
+  const piszacyDoTabeli = [...EKRANY, ...MODULY_LIB].filter(
+    (p) => bezKomentarzy(readFileSync(join(root, p), 'utf8')).includes('behavioural_trace'));
+
+  // ⭐ POMIAR WYPISANY GŁOŚNO. Ma stać w logu CI także wtedy, gdy wszystko jest
+  // zielone — inaczej „zero konsumentów" jest wiedzą jednej osoby z jednego dnia.
+  console.log(`[pomiar] 16.08.2026, main=123e09c — lib/sladZachowania.ts: `
+    + `konsumenci w app/+components/ = ${konsumenciEkranow.length} `
+    + `[${konsumenciEkranow.join(', ') || '—'}] · `
+    + `pośrednicy w lib/ = ${posrednicyWLib.length} [${posrednicyWLib.join(', ') || '—'}] · `
+    + `piszący do behavioural_trace = ${piszacyDoTabeli.length} [${piszacyDoTabeli.join(', ') || '—'}] · `
+    + `przeszukane pliki: ${EKRANY.length} ekranów + ${MODULY_LIB.length} modułów lib/`);
+
+  // ── ⭐ RÓWNOŚĆ Z WARTOŚCIĄ ZMIERZONĄ DZIŚ, nie „≥ 1" ani „≥ 0" (O73) ──
+  check('⭐ (I2-0) ZERO EKRANÓW — dokładnie tylu konsumentów, ilu 16.08 (0), RÓWNOŚĆ nie „≥"',
+    konsumenciEkranow.length === 0,
+    `konsumenci w app/+components/: ${konsumenciEkranow.join(', ')} → ktoś WPIĄŁ ślad zachowania na ekran. `
+    + 'To jest DOBRA wiadomość i mimo to strażnik ma prawo być czerwony: od tej chwili '
+    + '66 asercji niżej opisuje funkcję, którą KTOŚ WIDZI, więc trzeba (a) przenieść asercje '
+    + 'na treść tego ekranu — czy woła `policzSlad`, czy nie liczy median u siebie, czy rysuje '
+    + '„nie masz ani jednego wpisu o śnie" zamiast „0 h" — i (b) skreślić pozycję '
+    + '`lib/sladZachowania.ts :: policzSlad` z rejestru SILNIKI_BEZ_EKRANU w '
+    + `${PLIK_REJESTR_DLUGU}. Dopóki tego nie ma, wpięcie jest niepilnowane.`);
+
+  check('⭐ (I2-0) ZERO POŚREDNIKÓW w `lib/` — nikt nie ciągnie śladu okrężną drogą',
+    posrednicyWLib.length === 0,
+    `moduły lib/ sięgające po ślad: ${posrednicyWLib.join(', ')} → pomiar „zero ekranów" wyżej `
+    + 'przestał znaczyć „nikt tego nie widzi": moduł-pośrednik MOŻE mieć własny ekran. '
+    + 'Sprawdź, czy ten pośrednik jest gdzieś rysowany, i jeżeli tak — asercje o treści '
+    + 'mają iść na TAMTEN ekran, a nie zostać tutaj.');
+
+  check('⭐ (I2-0) ZERO ZAPISÓW do `behavioural_trace` — materializacja nadal nie materializuje',
+    piszacyDoTabeli.length === 0,
+    `piszący do tabeli: ${piszacyDoTabeli.join(', ')} → pojawił się upsert. `
+    + '`wierszSladu` oddaje `computed_at` z appki, więc od tej chwili BŁĄD ZOSTAJE W BAZIE '
+    + 'NA ZAWSZE i po miesiącu nikt nie odróżni „policzyliśmy źle" od „zawodnik nic nie zrobił". '
+    + 'Ten strażnik musi wtedy dostać asercję na kształt zapisu, nie tylko na kształt liczenia.');
+
+  // ── ⭐ ZAPADKA W DRUGĄ STRONĘ: dług nie znika po cichu z rejestru ──
+  // Bez niej „zero konsumentów" da się przenocować dowolnie długo: wystarczy
+  // usunąć pozycję z rejestru F1 i nikt już nie policzy, ile silników stoi bez
+  // ekranu. Trzy asercje wyżej byłyby wtedy nadal zielone.
+  check('⭐ (I2-0) dług „silnik bez ekranu" JEST wpisany w rejestrze F1, z kluczem i powodem',
+    rejestrDlugu.includes('lib/sladZachowania.ts :: policzSlad')
+    && rejestrDlugu.includes('SILNIKI_BEZ_EKRANU'),
+    `pozycja zniknęła z ${PLIK_REJESTR_DLUGU} → cztery liczniki dalej nie mają ekranu, `
+    + 'ale przestały być policzalne jako dług. „Zgłoszone i nienaprawione" bez rejestru '
+    + 'jest nieodróżnialne od „naprawione" (O68).');
+
+  // ── Brak konsumenta ma być DECYZJĄ Z DATĄ, a nie przeoczeniem ──
+  // ⚠️ Ta jedna asercja czyta ŹRÓDŁO SUROWE, z komentarzami, i to jest celowe:
+  // pilnuje właśnie komentarza. Decyzja o zachowaniu policzonego, nieużywanego
+  // kodu jest ważna WYŁĄCZNIE wtedy, gdy da się przeczytać, kto i kiedy ją podjął.
+  check('(I2-0) brak konsumenta jest UDOKUMENTOWANĄ decyzją z datą, nie przeoczeniem',
+    modulSurowy.includes('NIE MA DZIŚ ANI JEDNEGO KONSUMENTA')
+    && modulSurowy.includes('13.08.2026'),
+    'z nagłówka `lib/sladZachowania.ts` zniknęło wyjaśnienie, dlaczego ten plik stoi bez ekranu '
+    + '(usunięcie Kalibracji 13.08.2026, zasada N1). Bez daty i powodu „producent bez konsumenta" '
+    + 'wygląda jak zapomniany kod i pierwsza osoba sprzątająca repo skasuje przetestowaną pracę.');
+
+  // ── ⭐ ZAPADKA NA SKASOWANIE ──
+  // Trzy zera wyżej spełnia też PUSTY REPOZYTORIUM: skasowanie
+  // `lib/sladZachowania.ts` daje 0 konsumentów, 0 pośredników i 0 zapisów.
+  // Bez tej asercji strażnik NAGRADZAŁBY usunięcie policzonej pracy, którą
+  // decyzja z 13.08.2026 kazała zachować do rundy systematyczności.
+  check('⭐ (I2-0) moduł nadal LICZY cztery liczniki — zera wyżej spełnia też jego skasowanie',
+    modul.includes('planned_sessions') && modul.includes('done_sessions')
+    && modul.includes('own_sessions') && modul.includes('days_with_entry')
+    && modul.includes('sleep_median_h') && /export function policzSlad/.test(modul),
+    'z modułu zniknął któryś z czterech liczników albo sama `policzSlad` — a wtedy trzy asercje '
+    + '„zero konsumentów / zero pośredników / zero zapisów" są spełnione przez USUNIĘCIE funkcji. '
+    + 'Zawodnik straci wtedy nie ekran, którego nie ma, tylko jedyną policzoną odpowiedź '
+    + 'na pytanie „czy ruszyłem z miejsca".');
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // 1. OKNO I DATY

@@ -34,7 +34,7 @@
 // (tytuł/data/notatka, jak każde inne wydarzenie), coś innego niż zakładka
 // Mecz (tam zawodnik loguje WYNIK już rozegranego meczu, osobna tabela
 // match_contexts) — nie miesza się z tamtą logiką.
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -278,6 +278,24 @@ export default function KalendarzScreen() {
 
   // PLAN-D-C1 — zakładki WT-03. Domyślnie „Tydzień", jak w makiecie.
   const [zakladka, setZakladka] = useState<'tydzien' | 'listy'>('tydzien');
+  /**
+   * ⭐ PAS I2 16.08.2026 — WT-33, decyzja Kuby na pytanie B3: „NIE MA".
+   *
+   * CO BYŁO ZEPSUTE: pustka sekcji „Nadchodzące" (zakładka Listy) rysowała CTA
+   * jako GOŁY `<Text>` ze strzałką „→" — napis wyglądający jak przycisk, po
+   * którego dotknięciu nie działo się nic. Weszło commitem `0705760` (pas T),
+   * a pas C1 przemianował tam zmienną i ogłosił naprawę WT-33, nie zauważając,
+   * że to jedno z trzech miejsc wyjścia NIE MA. Obietnica WT-33 brzmi: „każda
+   * pustka kończy się dokładnie jedną akcją".
+   *
+   * ⚠️ DLACZEGO NIE `setZakladka('listy')` JAK W ZAKŁADCE TYDZIEŃ: tam ten ruch
+   * znaczy „przejdź tam, gdzie stoi formularz". Tu JESTEŚMY już w Listach —
+   * formularz „Dodaj do kalendarza" stoi na tym samym ekranie, wyżej. Ruch,
+   * który tę pustkę naprawdę zamyka, to przewinięcie do niego. Wyjście
+   * prowadzące w miejsce, w którym już się stoi, jest drugim rodzajem napisu
+   * o wyjściu.
+   */
+  const listyRef = useRef<ScrollView>(null);
   // PLAN-D-C1 — który tydzień oglądamy (WT-04). Stan, nie zegar: strzałki
   // muszą go zmieniać, a `useFocusEffect` nie może go resetować pod palcem.
   const [poniedzialek, setPoniedzialek] = useState<string>(() => poniedzialekTygodnia(new Date()));
@@ -983,7 +1001,33 @@ export default function KalendarzScreen() {
           {upcoming.length === 0 && pustkaTygodnia ? (
             <View>
               <Text style={styles.empty}>{pustkaTygodnia.tekst}</Text>
-              <Text style={styles.pustkaCta}>{pustkaTygodnia.cta} →</Text>
+              {/* WT-33 — pustka kończy się DOKŁADNIE JEDNĄ akcją, i to taką,
+                  która TĘ pustkę zamyka. „Dodaj trening" przewija do formularza
+                  stojącego wyżej na tym samym ekranie; „Wpisz swój plan lekcji"
+                  i „Przedłuż dostęp" prowadzą do Profilu, bo tam mieszka jedno
+                  i drugie. Do 16.08.2026 stał tu goły `<Text>` ze strzałką —
+                  napis o wyjściu zamiast wyjścia.
+
+                  ⚠️ `blad_odczytu` ZOSTAJE NAPISEM, i to jest decyzja (Kuba,
+                  16.08.2026). Jego CTA brzmi „Pociągnij w dół, żeby sprawdzić
+                  jeszcze raz." — wyjściem jest `RefreshControl` tego ekranu, nie
+                  dotknięcie. Owinięcie instrukcji w `TouchableOpacity` zrobiłoby
+                  z niej drugi rodzaj fałszywego przycisku, a strzałka jest
+                  obietnicą akcji, więc też odpada.
+
+                  `krokWTekscie` znaczy „krok stoi już w zdaniu wyżej" — wtedy
+                  `cta` jest puste i nie rysujemy nic. */}
+              {pustkaTygodnia.krokWTekscie ? null
+                : pustkaTygodnia.rodzaj === 'blad_odczytu' ? (
+                  <Text style={styles.empty}>{pustkaTygodnia.cta}</Text>
+                ) : (
+                  <TouchableOpacity onPress={() => {
+                    if (pustkaTygodnia.rodzaj === 'brak_danych') listyRef.current?.scrollTo({ y: 0, animated: true });
+                    else router.push('/profil');
+                  }}>
+                    <Text style={styles.pustkaCta}>{pustkaTygodnia.cta} →</Text>
+                  </TouchableOpacity>
+                )}
             </View>
           ) : null}
           {upcoming.map(renderEventCard)}
@@ -1015,6 +1059,7 @@ export default function KalendarzScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
     <ScrollView
+      ref={listyRef}
       contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
     >

@@ -18,6 +18,38 @@
 //     odróżnienia od losowania, dopóki tekst nie podmieni się pod palcem.
 //
 // Uruchom ponownie po każdej zmianie w lib/componentHints.ts.
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CHOROBA K4 (ograniczenie O75)
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — nazwane liczbą, nie odczuciem. Ten plik miał
+// 111 ASERCJI, NAJWIĘCEJ W CAŁEJ SUICIE, i ANI JEDNEJ, która czytałaby
+// jakikolwiek EKRAN. Audyt H1 (15.08) zmierzył: nie istnieje stan
+// repozytorium z pilnowanym defektem, na którym ten strażnik by się zapalił.
+// Sprawdzał wyłącznie własny moduł przez `import`.
+//
+// DLACZEGO TO JEST GROŹNE AKURAT TUTAJ. `lib/componentHints.ts` trzyma
+// BRAMKĘ WIEKOWĄ (decyzja A9): podpowiedź z `min_age` nie ma prawa dojść do
+// czternastolatka, a warstwa `odbiorca='rodzic'` — do nikogo poniżej pewnej
+// pełnoletności. Bramka policzona bezbłędnie w module i OMINIĘTA NA EKRANIE
+// przechodziła tu na zielono ze 111 na 111. Zawodnik dostawał treść nie dla
+// siebie, a suita mówiła „przeszło".
+//
+// CO JEST TERAZ — sekcja 0 niżej. Ekrany są ODKRYWANE Z KATALOGU (O69),
+// nie wpisane; zbiór rysujących podpowiedzi porównywany na RÓWNOŚĆ (O73),
+// nie na „≥ 1"; brak pliku to FAIL Z NAZWĄ, nigdy wyjątek `ENOENT` (O76).
+//
+// ⚠️ CZEGO TA SEKCJA NIE UDAJE. Czyta źródło ekranu JAKO TEKST. Nie uruchamia
+// Reacta i nie wie, czy ekran się rysuje. Podmiana wywołania na inne, równie
+// zepsute, przejdzie tu niezauważona. Dlatego każda asercja mówi wprost,
+// co dokładnie było zepsute i co zawodnik zobaczyłby źle.
+//
+// ⚠️ NIE UŻYWAĆ `new URL(...)` (O53): `tsconfig.json` ciągnie DOM, więc `tsc`
+// pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import {
   COMPONENT_HINT_COLUMNS,
   COMPONENT_HINT_COLUMNS_WITH_ALWAYS,
@@ -52,6 +84,161 @@ let failed = 0;
 function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I2 16.08.2026 — EKRAN, KTÓRY RYSUJE PODPOWIEDZI (K4 / O75)
+// ═══════════════════════════════════════════════════════════════════
+// Wszystkie asercje niżej czytają ŹRÓDŁO EKRANU, nie moduł. Bez nich
+// 111 asercji tego pliku opisuje funkcję, której nikt nie musi wołać.
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * Źródło BEZ komentarzy — pliki tego projektu CYTUJĄ w komentarzach nazwy
+ * funkcji i zepsute wywołania („patrz `hintEyebrow` w lib/componentHints.ts"),
+ * więc strażnik czytający surowy tekst przechodziłby na własnej dokumentacji.
+ * Wtedy jedynym sposobem, żeby go zapalić, byłoby skasowanie wyjaśnienia.
+ */
+const bezKomentarzy = (s: string): string => s
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n')
+  .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+  .join('\n');
+
+/**
+ * ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76).
+ * Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
+ * narzędzia — a jest EKRANEM, KTÓRY ZNIKNĄŁ Z REPOZYTORIUM.
+ */
+const BRAK_PLIKOW: string[] = [];
+const surowe = (wzgledna: string): string => {
+  const p = join(root, wzgledna);
+  if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+  return readFileSync(p, 'utf8');
+};
+
+const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
+const PLIK_PLANNER = 'components/FocusBlockPlanner.tsx';
+const dzis = bezKomentarzy(surowe(PLIK_DZIS));
+const planner = bezKomentarzy(surowe(PLIK_PLANNER));
+
+{
+  console.log('0. EKRAN, KTÓRY RYSUJE PODPOWIEDZI (K4 / O75)');
+
+  check('⛔ (I2-0) każdy plik ekranu z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/componentHints'/.test(bezKomentarzy(readFileSync(join(root, p), 'utf8'))));
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c` (po D2 i I1), nie przepisane
+  // z pamięci. RÓWNOŚĆ, nie „≥ 1" (O73): „co najmniej jeden konsument"
+  // przeszłoby także wtedy, gdy ekran „Dziś" przestanie rysować podpowiedzi,
+  // a zostanie sam planer Bloku.
+  const KONSUMENCI = [PLIK_DZIS, PLIK_PLANNER].sort();
+  const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
+  check('⭐ (I2-0) podpowiedzi rysują DOKŁADNIE te pliki, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył: zawodnik przestał gdzieś widzieć podpowiedź, a 111 asercji niżej nadal jest zielonych; '
+    + 'doszedł: sprawdź, czy nowe miejsce przepuszcza wiersze przez bramkę wiekową A9.');
+
+  // ── ⛔ BRAMKA WIEKOWA A9 — najdroższa rzecz w tym pliku ──
+  // Defekt, którego pilnuje: ekran liczy wiek sam („new Date().getFullYear() -
+  // birthYear"). Wtedy w produkcie są DWA rachunki wieku, oba przekonane, że są
+  // jedyne, a ten na ekranie nie zna zasady „wiek NAJNIŻSZY MOŻLIWY" (rocznik
+  // bez daty dziennej). Skutek dla zawodnika: czternastolatek dostaje wiersz
+  // z `min_age`, czyli treść nie dla siebie — a ten plik świeci 111/111.
+  check('⛔ (I2-0) `dzis.tsx` NIE liczy wieku sam — ani jednego `getFullYear()` przy roczniku',
+    !/getFullYear\(\)\s*[-−]/.test(dzis) && !/birthYear\s*[-−]/.test(dzis),
+    'na ekranie pojawił się drugi rachunek wieku; bramka A9 ma JEDEN rachunek '
+    + 'i jest nim `minimumPossibleAge()` w lib/componentHints.ts');
+
+  check('⛔ (I2-0) `dzis.tsx` liczy wiek przez `minimumPossibleAge(` …',
+    /minimumPossibleAge\(/.test(dzis),
+    'ekran przestał wołać `minimumPossibleAge` — bramka wiekowa nie ma czym się zamknąć');
+
+  check('⛔ (I2-0) …i PODAJE go do `buildHintState` — policzony i nieoddany to bramka otwarta',
+    /buildHintState\(\{[\s\S]{0,600}?\bage\b\s*[,:]/.test(dzis),
+    'wiek jest liczony, ale nie dociera do decyzji o wierszach: `buildHintState` dostaje wywołanie bez pola `age`');
+
+  // ── Ekran nie wybiera podpowiedzi za moduł ──
+  check('⛔ (I2-0) o tym, co zawodnik zobaczy, rozstrzyga `buildHintState` — ekran nie ma własnej gałęzi',
+    /setHintState\(\s*buildHintState\(/.test(dzis),
+    'ekran przestał oddawać rozstrzygnięcie modułowi — decyzja „co pokazać" ma DOKŁADNIE jedno miejsce');
+
+  // ⚠️ Asercja czyta SAM ARGUMENT `rows:` w wywołaniu, nie cały plik (O71):
+  // „nigdzie w pliku nie ma `.filter(`" byłoby nieprawdą już dziś i nie mówiłoby
+  // nic o tym, CO dostaje moduł. Wycinamy pole `rows:` do końca linii.
+  // ⚠️ WSZYSTKIE wywołania, nie pierwsze: ekran woła `buildHintState` dwa razy
+  // (ścieżka „bez Celu" i ścieżka z wierszami). Asercja na pierwszym trafieniu
+  // sprawdzałaby `rows: null` i przepuszczała zawężenie w tym drugim.
+  const argiRows = Array.from(dzis.matchAll(/buildHintState\(\{[\s\S]{0,800}?\brows:\s*([^\n]*)/g))
+    .map((m) => m[1]);
+  const zawezajace = argiRows.filter((a) => /\.\s*(filter|sort|slice|reverse|find)\s*\(/.test(a));
+  check('⛔ (I2-0) ekran oddaje modułowi CAŁY zbiór wierszy — nie wybiera za niego',
+    argiRows.length > 0 && zawezajace.length === 0,
+    `pola \`rows:\` w wywołaniach \`buildHintState\` (${argiRows.length}): ${argiRows.map((a) => a.trim()).join(' ⏐ ') || '(nie znalazłem ani jednego)'} — `
+    + 'ekran zawęża wiersze przed oddaniem ich do modułu, więc wybór jednej podpowiedzi ma DWA miejsca: '
+    + 'bramka wiekowa A9 i determinizm dnia (`pickHintOfDay`) liczą się wtedy na innym zbiorze, niż widzi zawodnik');
+
+  check('⛔ (I2-0) ekran pyta bazę LISTĄ KOLUMN Z MODUŁU, nie wpisaną ręcznie',
+    /\.select\(\s*COMPONENT_HINT_COLUMNS_WITH_ALWAYS\s*\)/.test(dzis)
+    && /\.select\(\s*COMPONENT_HINT_COLUMNS\s*\)/.test(dzis)
+    && !/\.select\(\s*'[^']*\bhint\b[^']*'\s*\)/.test(dzis),
+    'lista kolumn wpisana na ekranie rozjedzie się ze stałą po cichu — a brakująca kolumna '
+    + 'nie da błędu, tylko `undefined` w polu, którego zawodnik nie zobaczy');
+
+  check('⛔ (I2-0) ekran ma ścieżkę odzysku `shouldRetryWithoutAlwaysVisible` — brak migracji ≠ brak treści',
+    /shouldRetryWithoutAlwaysVisible\(/.test(dzis),
+    'bez powtórki krótszą listą kolumn niewklejona migracja `zawsze_widoczna` gasi WSZYSTKIE '
+    + 'podpowiedzi naraz, a wygląda to jak „nic dla Ciebie nie mamy"');
+
+  // ── Brzmienia pochodzą z modułu, nie z ekranu ──
+  check('⛔ (I2-0) nadtytuł i rodzaj rysowane funkcjami modułu (`hintEyebrow`, `hintKindLabel`)',
+    /hintEyebrow\(/.test(dzis) && /hintKindLabel\(/.test(dzis),
+    'ekran zaczął pisać własny nadtytuł — a nadtytuł MÓWI O POCHODZENIU zdania '
+    + '(„Z materiałów Gamechange" tylko wtedy, gdy da się pokazać źródło)');
+
+  check('⛔ (I2-0) trzy stany R5 rozróżniane stałymi modułu, nie zdaniem wpisanym na ekranie',
+    /HINT_TABLE_MISSING_TEXT/.test(dzis) && /HINT_ERROR_TEXT/.test(dzis) && /HINT_EMPTY_TEXT/.test(dzis)
+    && !dzis.includes(HINT_TABLE_MISSING_TEXT) && !dzis.includes(HINT_ERROR_TEXT) && !dzis.includes(HINT_EMPTY_TEXT),
+    'na ekranie stoi KOPIA zdania z modułu albo zniknęło rozróżnienie „nie ma tabeli" od „pusto" — '
+    + 'oba wyglądają dla zawodnika identycznie, a znaczą co innego dla nas');
+
+  // ── ⭐ ZAPADKA NA SKASOWANIE (wzorzec B2-5) ──
+  // Bez tej asercji wszystkie powyższe spełnia się przez USUNIĘCIE rysowania
+  // podpowiedzi. Strażnik nagradzałby wtedy skasowanie funkcji.
+  check('⭐ (I2-0) ekran NAPRAWDĘ rysuje treść zawsze widoczną — `hintState.alwaysVisible` idzie do widoku',
+    /hintState\.alwaysVisible\s*\.\s*map\(/.test(dzis),
+    'zniknęło renderowanie podpowiedzi zawsze widocznych; wszystkie asercje wyżej spełnia '
+    + 'też ekran, który nie pokazuje ich wcale');
+
+  check('⭐ (I2-0) planer Bloku podaje ŹRÓDŁO podpowiedzi funkcją modułu (`formatHintSource`)',
+    /formatHintSource\(/.test(planner),
+    'w planerze zniknął wiersz źródła — zawodnik czyta zdanie o swoim treningu i nie wie, skąd ono jest');
 }
 
 // ─────────────────────────────────────────────────────────────

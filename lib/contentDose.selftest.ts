@@ -16,6 +16,48 @@
 //
 // Na końcu drukuje WYPIS „co zawodnik realnie zobaczy" — sekcja raportu
 // zwrotnego jest wyjściem tego kodu, nie tekstem pisanym ręcznie.
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CHOROBA K4 (ograniczenie O75)
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — liczbą, nie odczuciem. Ten plik miał 60 ASERCJI i ANI
+// JEDNEJ, która czytałaby jakikolwiek EKRAN. Wszystkie szły przez `import`
+// własnego modułu. Audyt H1 (15.08) zmierzył: nie istnieje stan repozytorium
+// z pilnowanym defektem, na którym ten strażnik by się zapalił.
+//
+// DLACZEGO TO JEST GROŹNE AKURAT TUTAJ. Cała wartość `lib/contentDose.ts`
+// to ROZRÓŻNIENIE STANÓW, KTÓRE NA EKRANIE WYGLĄDAJĄ IDENTYCZNIE:
+// `isMissingContentDoseColumnError` („migracja nie weszła — zawodnik nie
+// zobaczy ANI JEDNEJ dawki, mimo że backend je generuje i płacimy za nie")
+// kontra `null_column`/`empty_list` („Blok jest świeży, nie ma jeszcze czego
+// czytać"). Oba renderują TO SAMO: nic. Jedyne, co je odróżnia, to `warn`
+// w logu — a ten powstaje wyłącznie wtedy, gdy EKRAN poda `error` do
+// `buildContentDoseView` NIETKNIĘTY. Ekran, który robi `raw: data ?? null`
+// i gubi `error`, przechodził tu 60 na 60 przy niewklejonej migracji.
+//
+// Drugie takie miejsce to `isMissingSeenColumnError`. Brak kolumny „seen"
+// jest ŁAGODNY (znika plakietka „Nowa"), brak kolumny `content_doses` jest
+// CIĘŻKI (znika cała dawka). Oba dają z PostgREST ten sam goły kod `42703`
+// / `PGRST204`, więc rozróżnia je dopiero WARUNEK NA EKRANIE
+// (`isMissingSeenColumnError(err) && !isMissingContentDoseColumnError(err)`).
+// Bez tego warunku ciężka awaria wchodzi w łagodną ścieżkę odzysku i zawodnik
+// po cichu traci cały ekran dawki — a suita mówi „przeszło".
+//
+// CO JEST TERAZ — sekcja 0 niżej. Ekrany ODKRYWANE Z KATALOGU (O69), zbiór
+// konsumentów porównywany na RÓWNOŚĆ (O73), brak pliku to FAIL Z NAZWĄ,
+// nigdy wyjątek `ENOENT` (O76).
+//
+// ⚠️ CZEGO TA SEKCJA NIE UDAJE. Czyta źródło ekranu JAKO TEKST. Nie uruchamia
+// Reacta i nie wie, czy ekran się rysuje. Podmiana wywołania na inne, równie
+// zepsute, przejdzie tu niezauważona. Dlatego każda asercja mówi wprost,
+// co było zepsute i co zawodnik zobaczy źle.
+//
+// ⚠️ NIE UŻYWAĆ `new URL(...)` (O53): `tsconfig.json` ciągnie DOM, `tsc` pada
+// wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import {
   CONTENT_DOSE_ENVELOPE_VERSION,
   CONTENT_DOSE_COLUMN,
@@ -48,6 +90,176 @@ let failed = 0;
 function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I2 16.08.2026 — EKRANY, KTÓRE RYSUJĄ DAWKĘ (K4 / O75)
+// ═══════════════════════════════════════════════════════════════════
+// Wszystkie asercje w tej sekcji czytają ŹRÓDŁO EKRANU, nie moduł. Bez nich
+// 60 asercji tego pliku opisuje funkcję, której nikt nie musi wołać.
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * Źródło BEZ komentarzy — pliki tego projektu CYTUJĄ w komentarzach nazwy
+ * funkcji i zepsute wywołania („gdyby ten kod zrobił `rows = data ?? []`"),
+ * więc strażnik czytający surowy tekst przechodziłby na własnej dokumentacji.
+ * Wtedy jedynym sposobem, żeby go zapalić, byłoby skasowanie wyjaśnienia —
+ * czyli tej wiedzy, dla której powstał.
+ */
+const bezKomentarzy = (s: string): string => s
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n')
+  .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+  .join('\n');
+
+/**
+ * ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76).
+ * Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
+ * narzędzia — a jest EKRANEM, KTÓRY ZNIKNĄŁ Z REPOZYTORIUM.
+ */
+const BRAK_PLIKOW: string[] = [];
+const surowe = (wzgledna: string): string => {
+  const p = join(root, wzgledna);
+  if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+  return readFileSync(p, 'utf8');
+};
+
+const PLIK_BLOK = 'components/FocusBlockActiveView.tsx';
+const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
+const blok = bezKomentarzy(surowe(PLIK_BLOK));
+const dzisEkran = bezKomentarzy(surowe(PLIK_DZIS));
+
+{
+  console.log('0. EKRANY, KTÓRE RYSUJĄ DAWKĘ (K4 / O75)');
+
+  check('⛔ (I2-0) każdy plik ekranu z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  // Lista ręczna wyżej JEST potrzebna (asercje mówią o KONKRETNYCH plikach),
+  // ale nie wolno jej stać samej: gdyby dawkę zaczął rysować trzeci ekran,
+  // żadna asercja by tego nie zauważyła.
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/contentDose'/.test(bezKomentarzy(readFileSync(join(root, p), 'utf8'))));
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c`, nie przepisane z pamięci.
+  // RÓWNOŚĆ, nie „≥ 1" (O73): „co najmniej jeden konsument" przeszłoby także
+  // wtedy, gdy „Dziś" przestanie zapowiadać nową porcję, a zostanie sam Blok.
+  const KONSUMENCI = [PLIK_BLOK, PLIK_DZIS].sort();
+  const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
+  check('⭐ (I2-0) dawkę czytają DOKŁADNIE te pliki, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył: zawodnik przestał gdzieś widzieć dawkę, a 60 asercji niżej nadal jest zielonych; '
+    + 'doszedł: sprawdź, czy nowe miejsce odróżnia „nie ma kolumny" od „pusto" i czy nie pisze '
+    + 'do `content_doses` (zasada 5 kontraktu pasa A: tę kolumnę pisze WYŁĄCZNIE backend).');
+
+  // ── ⛔ RDZEŃ: „NIE MA KOLUMNY" ≠ „PUSTO" ──
+  // Defekt, którego pilnuje: ekran robi `raw: data ?? null` i gubi `error`.
+  // Wtedy niewklejona migracja wygląda dokładnie jak świeży Blok: cisza.
+  // Nikt nigdy nie wraca, backend dalej generuje dawki, my dalej za nie
+  // płacimy, a zawodnik nie widzi ani jednej. To jest „cichy brak" wprost.
+  check('⛔ (I2-0) `error` z bazy idzie do `buildContentDoseView` NIETKNIĘTY — nie `null`, nie `?? []`',
+    /buildContentDoseView\(\{[\s\S]{0,200}?\berror:\s*doseError\b/.test(blok),
+    'ekran przestał oddawać błąd odczytu modułowi — brak migracji `content_doses` staje się '
+    + 'nieodróżnialny od „Blok jest świeży", log `CONTENT_DOSE_COLUMN_MISSING_WARN` nigdy nie padnie '
+    + 'i nikt się nie dowie, że zawodnik nie dostaje treści, za którą płacimy');
+
+  check('⛔ (I2-0) ekran Bloku ROZPOZNAJE brak kolumny i mówi to w logu, zamiast milczeć',
+    /isMissingContentDoseColumnError\(/.test(blok) && /CONTENT_DOSE_COLUMN_MISSING_WARN/.test(blok),
+    'zniknęło rozpoznanie braku migracji albo log o nim; ekran wygląda tak samo w obu stanach, '
+    + 'a to log jest JEDYNYM miejscem, w którym „migracja nie weszła" różni się od „nie ma czego czytać"');
+
+  check('⛔ (I2-0) ścieżka odzysku „seen" nie połyka CIĘŻKIEJ awarii — warunek ma zaprzeczenie',
+    /isMissingSeenColumnError\([^)]*\)\s*&&\s*!\s*isMissingContentDoseColumnError\(/.test(blok)
+    && /isMissingSeenColumnError\([^)]*\)\s*&&\s*!\s*isMissingContentDoseColumnError\(/.test(dzisEkran),
+    'na którymś ekranie zniknęło `&& !isMissingContentDoseColumnError(...)`: oba braki kolumn dają '
+    + 'z PostgREST ten sam goły kod 42703/PGRST204, więc bez zaprzeczenia brak `content_doses` '
+    + '(zawodnik traci CAŁĄ dawkę) wchodzi w łagodną ścieżkę „nie ma plakietki Nowa" i ginie bez śladu');
+
+  check('⛔ (I2-0) nazwy kolumn brane ze stałych modułu, nie wpisane w zapytanie ręcznie',
+    /\.select\(`\$\{CONTENT_DOSE_COLUMN\}/.test(blok)
+    && !/['"`]content_doses['"`,]/.test(blok) && !/['"`]content_dose_seen['"`,]/.test(blok)
+    && !/['"`]content_doses['"`,]/.test(dzisEkran) && !/['"`]content_dose_seen['"`,]/.test(dzisEkran),
+    'na ekranie stoi KOPIA nazwy kolumny; rozjedzie się ze stałą po cichu, a PostgREST przy nieznanej '
+    + 'kolumnie odrzuca CAŁE zapytanie — czyli literówka zabiera zawodnikowi cały ekran dawki');
+
+  // ── ⛔ ZASADA 5 KONTRAKTU PASA A: appka NIE PISZE do `content_doses` ──
+  // Baza dziś na to pozwoli (`focus_blocks_owner` jest `FOR ALL`, znalezisko
+  // A27), więc jedyną zaporą jest kod ekranu.
+  check('⛔ (I2-0) appka zapisuje WYŁĄCZNIE do kolumny „przeczytane", nigdy do `content_doses`',
+    /\.update\(\{\s*\[CONTENT_DOSE_SEEN_COLUMN\]/.test(blok)
+    && !/\.update\(\{[^}]*\[CONTENT_DOSE_COLUMN\]/.test(blok)
+    && !/\.update\(\{[^}]*\[CONTENT_DOSE_COLUMN\]/.test(dzisEkran),
+    'ekran zaczął pisać do kolumny, którą wypełnia backend (zasada 5 kontraktu pasa A) — '
+    + 'polityka RLS na to pozwoli, więc nadpisana treść zniknie bez błędu i bez śladu');
+
+  // ── Ekran nie decyduje za moduł ──
+  check('⛔ (I2-0) o tym, co zawodnik zobaczy, rozstrzyga `buildContentDoseView` — ekran nie ma własnej gałęzi',
+    /const\s+doseView\s*=\s*buildContentDoseView\(/.test(blok)
+    && !/\bdoseRaw\s*\?\?\s*\[\]/.test(blok),
+    'decyzja „co pokazać" wróciła na ekran; sześć jawnych stanów braku (brak kolumny, NULL, pusta '
+    + 'lista, zła wersja koperty, nieczytelna treść, błąd sieci) sklei się w jedno „nic nie ma"');
+
+  check('⛔ (I2-0) ekran nie sortuje, nie filtruje i nie tnie wyniku modułu',
+    !/doseView\s*\.\s*(earlier|current)\s*\.\s*(sort|filter|slice|reverse)\s*\(/.test(blok),
+    'ekran wybiera, KTÓRE dawki pokazać — a zasada 4 kontraktu mówi, że `dawki[0]` to bieżąca, '
+    + 'a reszta to „wcześniej w tym Bloku" W TEJ KOLEJNOŚCI; drugi rachunek rozjedzie się po cichu');
+
+  // ── Brzmienia pochodzą z modułu, nie z ekranu ──
+  check('⛔ (I2-0) etykiety dawki rysowane STAŁYMI modułu, a na ekranie nie stoi ich kopia',
+    /CONTENT_DOSE_SECTION_LABEL/.test(blok) && /CONTENT_DOSE_STEP_LABEL/.test(blok)
+    && /CONTENT_DOSE_SOURCE_LABEL/.test(blok)
+    && !blok.includes(CONTENT_DOSE_SECTION_LABEL) && !blok.includes(CONTENT_DOSE_STEP_LABEL)
+    && !blok.includes(CONTENT_DOSE_SOURCE_LABEL),
+    'na ekranie stoi wpisany ręcznie napis zamiast stałej — a te napisy są celowo TE SAME co '
+    + 'w ulotnym pudełku dawki („Praktyczny krok"/„Dla chętnych"); rozjazd zrobi z jednej rzeczy dwie, '
+    + 'a „Dla chętnych" ma się nie zlać z płatnym „Pogłęb temat" za 97 zł');
+
+  check('⛔ (I2-0) przełącznik pogłębienia i nagłówek starszych dawek liczą FUNKCJE modułu',
+    /curiousToggleLabel\(/.test(blok) && /earlierDosesLabel\(/.test(blok),
+    'ekran zaczął sam składać te napisy — `earlierDosesLabel` odmienia liczebnik („1 dawka", '
+    + '„3 dawki", „5 dawek"), a druga kopia tej odmiany rozjedzie się przy pierwszej piątce');
+
+  check('⛔ (I2-0) `dla_chetnych: null` znaczy BRAK PRZYCISKU, nie pusty przycisk (zasada 2)',
+    /\{card\.forCurious\s*&&/.test(blok),
+    'zniknął warunek na `card.forCurious`: zawodnik dostaje przycisk „Dla chętnych ▾", który '
+    + 'po dotknięciu nie pokazuje nic — a to jest dokładnie „cichy brak" z audytu po bloku 3');
+
+  // ── ⭐ ZAPADKA NA SKASOWANIE (wzorzec B2-5) ──
+  // Bez tych dwóch asercji wszystkie powyższe spełnia się przez USUNIĘCIE
+  // rysowania dawki. Strażnik nagradzałby wtedy skasowanie funkcji.
+  check('⭐ (I2-0) ekran Bloku NAPRAWDĘ rysuje bieżącą dawkę — `doseView.current` idzie do widoku',
+    /renderDoseBody\(\s*doseView\.current/.test(blok) && /\{renderContentDose\(\)\}/.test(blok),
+    'zniknęło renderowanie dawki; wszystkie asercje wyżej spełnia też ekran, który nie pokazuje '
+    + 'jej wcale — a wtedy strażnik NAGRADZA skasowanie funkcji');
+
+  check('⭐ (I2-0) „Dziś" NAPRAWDĘ zapowiada nową porcję — `isDoseSeen` idzie do jednej odpowiedzi',
+    /setNewDoseWaiting\(\s*!\s*isDoseSeen\(/.test(dzisEkran)
+    && /nowaPorcjaCzeka:\s*newDoseWaiting/.test(dzisEkran),
+    'na „Dziś" policzone „czeka nowa porcja" nie dochodzi do `zbudujJednaOdpowiedz` albo zniknęło '
+    + 'całkiem: zawodnik nie dowie się, że w Bloku czeka na niego treść, i po prostu tam nie wejdzie');
 }
 
 // ═════════════════════════════════════════════════════════════

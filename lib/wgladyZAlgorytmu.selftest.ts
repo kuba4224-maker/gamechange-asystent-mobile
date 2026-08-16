@@ -25,8 +25,37 @@
 //
 // ⚠️ ZAKAZ `new URL(...)` (O53) — `tsconfig` ciągnie bibliotekę DOM i kontrola
 // typów pada z TS2769. Ścieżka idzie przez `readFileSync(join(dirname(...)))`.
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CHOROBA K4 (ograniczenie O75)
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — nazwane liczbą. Ten plik miał 81 ASERCJI i ANI JEDNEJ,
+// która czytałaby EKRAN: `readFileSync` sięgał po `wgladyZAlgorytmu.ts`, czyli
+// po WŁASNY moduł. Sześć wglądów mogło być policzonych bezbłędnie i nigdzie
+// nienarysowanych — 81 na 81 świeciło na zielono. Tak właśnie wyglądał ten plik
+// przez pierwszą dobę życia: nagłówek `app/(tabs)/dzis.tsx` cytuje pomiar
+// z 15.08 — „grep -rn wgladyZAlgorytmu app components → ZERO".
+//
+// ⚠️ KOREKTA WOBEC H1 (O74). H1 podał dla tego strażnika commit z defektem
+// `276a717` (2026-08-14 20:40). Moduł `lib/wgladyZAlgorytmu.ts` I ten strażnik
+// powstały RAZEM dopiero w `42a3f87` (2026-08-14 21:30) — pięćdziesiąt minut
+// PÓŹNIEJ. Na `276a717` nie istniał ani moduł, ani strażnik, więc podany
+// „stan z defektem" nie mógł niczego pokazać. To jest błąd H1.
+//
+// ⚠️ TEN STRAŻNIK JEST TEŻ K3: jeden commit narodzin dla modułu i dla strażnika,
+// więc testu historycznego „stan sprzed naprawy" nie da się zrobić — dowód idzie
+// mutacją ekranu (O77).
+//
+// ⚠️ CZEGO TA SEKCJA ŚWIADOMIE NIE POWTARZA. Wpięcia wglądów w ekran „Dziś"
+// pilnuje już `lib/wgladyNaDzis.selftest.ts` (pas B4): że ekran woła
+// `policzWglady` i `wgladDlaPozycji`, wsuwa kandydatów do `dodatkowi` rankera,
+// buduje sześć wejść bez `?? []` i naprawdę rysuje trzecią część wglądu.
+// Sekcja 0-EK niżej dokłada to, czego tamten strażnik NIE MA: odkrywanie
+// konsumentów z katalogu i równość ich zbioru (O69/O73), FAIL z nazwą zamiast
+// `ENOENT` (O76), oraz cztery reguły o tym, czego ekranowi NIE WOLNO wiedzieć
+// i co z wglądu MUSI dojść do zawodnika.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { czyPrawdziwySlad, ulozKolejke, WAGA_BAZOWA, slad } from './kolejkaPodania';
@@ -41,7 +70,9 @@ import {
   MIN_NOCY_NA_SERIE,
   MIN_POMIAROW_RPE,
   MIN_ZGLOSZEN_BOLU,
+  OKNO_BOLU_DNI,
   OKNO_SESJI_DNI,
+  OKNO_ZBLIZAJACEGO_MECZU_DNI,
   ZASADY_WGLADOW,
   dataPoPolsku,
   idWgladu,
@@ -88,6 +119,183 @@ function check(label: string, cond: boolean, detail: string): void {
 }
 
 console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pas B3)\n');
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ 0-EK. PAS I2 16.08.2026 — EKRAN, KTÓRY RYSUJE WGLĄDY (K4 / O75)
+// ═════════════════════════════════════════════════════════════════════
+// Wszystkie asercje niżej czytają ŹRÓDŁA EKRANÓW, nie moduł. Bez nich 81
+// asercji tego pliku opisuje sześć wglądów, których nikt nie musi pokazać.
+{
+  const root = dirname(katalog);
+
+  /**
+   * ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76).
+   * Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
+   * narzędzia — a jest EKRANEM, KTÓRY ZNIKNĄŁ Z REPOZYTORIUM.
+   */
+  const BRAK_PLIKOW: string[] = [];
+  const surowe = (wzgledna: string): string => {
+    const p = join(root, wzgledna);
+    if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+    return readFileSync(p, 'utf8');
+  };
+
+  const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
+  /** Wgląd wychodzi do zawodnika jako POZYCJA KOLEJKI — rysuje ją ta karta. */
+  const PLIK_KARTA = 'components/PozycjaKolejkiCard.tsx';
+  const dzis = bezKomentarzy(surowe(PLIK_DZIS));
+  const karta = bezKomentarzy(surowe(PLIK_KARTA));
+
+  console.log('0-EK. EKRAN, KTÓRY RYSUJE WGLĄDY (K4 / O75)');
+
+  check('⛔ (I2-0) każdy ekran z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(kat: string, out: string[] = []): string[] {
+    if (!existsSync(kat)) return out;
+    for (const wpis of readdirSync(kat)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(kat, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/wgladyZAlgorytmu'/.test(bezKomentarzy(readFileSync(join(root, p), 'utf8'))));
+
+  // ── Powierzchnia importu: ekran bierze z modułu DOKŁADNIE cztery funkcje ──
+  // ⚠️ To jest ta sama rzecz co „ekran nie liczy tego drugi raz", tylko zmierzona
+  // po stronie wejścia. Progi (`MIN_NOCY_NA_SERIE`, `OKNO_BOLU_DNI`, …) należą
+  // do producenta; ekran, który je zaimportuje, prędzej czy później zacznie coś
+  // na nich rozstrzygać — i wtedy ta sama reguła istnieje w dwóch miejscach.
+  // ⚠️ `[^}]*`, NIE `[\s\S]*?`: zmierzone 16.08.2026 — leniwa wersja tego wyrażenia
+  // złapała blok od PIERWSZEGO `import {` w pliku (a `dzis.tsx` ma ich kilkadziesiąt)
+  // aż do klamry przy `wgladyZAlgorytmu` i naliczyła 76 „funkcji modułu" zamiast
+  // czterech. Strażnik, który liczy nie to, co myśli, jest gorszy niż jego brak.
+  const importyRuntime = Array.from(
+    dzis.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*\/wgladyZAlgorytmu'/g))
+    .flatMap((m) => m[1].split(','))
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith('type '))
+    .sort();
+  const IMPORTY_ZMIERZONE = ['dataPoPolsku', 'liczbaPoPolsku', 'policzWglady', 'wgladDlaPozycji'];
+
+  console.log('[pomiar] 16.08.2026, main=123e09c — lib/wgladyZAlgorytmu.ts: '
+    + `konsumenci w app/+components/ = ${konsumenci.length} [${konsumenci.join(', ') || '—'}] · `
+    + `funkcje modułu wołane z ekranu = ${importyRuntime.length} [${importyRuntime.join(', ') || '—'}] · `
+    + `przeszukane pliki: ${EKRANY.length}`);
+
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c`, nie przepisane z pamięci.
+  // RÓWNOŚĆ, nie „≥ 1" (O73): „co najmniej jeden konsument" przeszłoby także
+  // wtedy, gdyby „Dziś" przestało rysować wglądy, a zaczął je rysować ktoś inny.
+  const KONSUMENCI = [PLIK_DZIS];
+  const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
+  check('⭐ (I2-0) wglądy rysuje DOKŁADNIE ten jeden ekran, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył: producent wrócił do stanu z 15.08, w którym liczył sześć wglądów dla nikogo '
+    + '(49 261 B kodu i 81 zielonych asercji bez ani jednego widza); doszedł: sprawdź, czy nowe '
+    + 'miejsce podaje wglądy przez `dodatkowi` rankera, a nie obok niego — wgląd o objętości '
+    + 'pokazany zawodnikowi po urazie jest dokładnie tym, czemu ranker zapobiega.');
+
+  check('⛔ (I2-0) ekran bierze z modułu DOKŁADNIE te cztery funkcje, co 16.08 — ani jednego progu',
+    JSON.stringify(importyRuntime) === JSON.stringify(IMPORTY_ZMIERZONE),
+    `zaimportowane z modułu: ${JSON.stringify(importyRuntime)} (zmierzone 16.08: `
+    + `${JSON.stringify(IMPORTY_ZMIERZONE)}) — doszło: ekran sięgnął po próg albo po producenta `
+    + 'i zacznie rozstrzygać u siebie; ubyło: któraś funkcja przestała być wołana, '
+    + 'a wtedy albo ekran liczy to samo drugi raz, albo przestał to pokazywać.');
+
+  // ── ⛔ (I2-0a) PROGI NALEŻĄ DO PRODUCENTA, NIE DO EKRANU ──
+  // Defekt, którego pilnuje: `if (noce.length >= 3)` na ekranie. Wtedy próg
+  // istnieje dwa razy i pierwsza jego zmiana ominie jedną z kopii: producent
+  // przestanie budować wgląd, a ekran nadal będzie miał gałąź, która go rysuje
+  // (albo odwrotnie — zawodnik zobaczy zdanie oparte na dwóch nocach zamiast trzech).
+  const NAZWY_PROGOW: [string, number][] = [
+    ['MIN_NOCY_NA_SERIE', MIN_NOCY_NA_SERIE],
+    ['MIN_POMIAROW_RPE', MIN_POMIAROW_RPE],
+    ['MIN_MECZOW_NA_OS', MIN_MECZOW_NA_OS],
+    ['MIN_ZGLOSZEN_BOLU', MIN_ZGLOSZEN_BOLU],
+    ['OKNO_SESJI_DNI', OKNO_SESJI_DNI],
+    ['OKNO_ZBLIZAJACEGO_MECZU_DNI', OKNO_ZBLIZAJACEGO_MECZU_DNI],
+    ['OKNO_BOLU_DNI', OKNO_BOLU_DNI],
+    ['DLUGOSC_OSI', DLUGOSC_OSI],
+  ];
+  const progiNaEkranie = NAZWY_PROGOW.filter(([n]) => dzis.includes(n) || karta.includes(n));
+  check('⛔ (I2-0) ŻADEN z ośmiu progów producenta nie stoi na ekranie — jeden próg, jedno miejsce',
+    progiNaEkranie.length === 0,
+    `progi, które wyciekły na ekran: ${progiNaEkranie.map(([n, w]) => `${n}=${w}`).join(', ')} — `
+    + 'reguła „ile pomiarów wystarczy, żeby coś powiedzieć zawodnikowi" ma DOKŁADNIE jedno miejsce '
+    + '(lib/wgladyZAlgorytmu.ts). Druga kopia znaczy, że po zmianie progu zawodnik czyta zdanie '
+    + 'oparte na mniejszej liczbie pomiarów, niż producent uznaje za wystarczającą — czyli opinię '
+    + 'sprzedaną jako wiedza (Z0).');
+
+  // ── ⛔ (I2-0b) EKRAN NIE ZNA SZEŚCIU KLUCZY ──
+  // Defekt, którego pilnuje: `if (wglad.klucz === 'powtarzajacy_sie_bol') return null`.
+  // Producent oddaje ZAWSZE sześć wyników w stałej kolejności, a o tym, który
+  // zawodnik zobaczy, rozstrzyga RANKER (waga, kubełek, wyciszenia). Ekran,
+  // który zna klucze, jest DRUGIM arbitrem — i to takim, który nie zna ani
+  // hamulca bólu, ani osłony wzrostowej, ani ścieżki wyjścia.
+  const kluczeNaEkranie = KLUCZE_WGLADOW.filter((k) => dzis.includes(k) || karta.includes(k));
+  check('⛔ (I2-0) ekran NIE ROZGAŁĘZIA SIĘ po kluczach wglądów — wybór należy do rankera',
+    kluczeNaEkranie.length === 0,
+    `klucze wpisane na ekranie: ${kluczeNaEkranie.join(', ')} — ekran zaczął decydować, który `
+    + 'z sześciu wglądów pokazać. Ten wybór ma jedno miejsce (ranker), bo tylko ono zna '
+    + 'wyciszenie przy kontuzji, hamulec bólu i osłonę wzrostową; ekran wyciszy wgląd, '
+    + 'którego ranker by przepuścił, albo pokaże ten, który ranker wstrzymał.');
+
+  // ── ⭐ (I2-0c) ZASTRZEŻENIE WG-33 MA DOJŚĆ DO ZAWODNIKA ──
+  // `naKandydata` doszywa `czegoNieMowi` do `dlaczego` — to jest JEDYNA droga,
+  // którą „czego ta liczba nie mówi" (Z0-a, obowiązkowe przy dowodzie słabym)
+  // wychodzi na ekran. Jeżeli którakolwiek z dwóch ścieżek rysowania przestanie
+  // pokazywać `dlaczego`, liczba oparta na słabym dowodzie zostanie zawodnikowi
+  // podana jako fakt bez zastrzeżenia — i nikt tego nie zobaczy, bo część 1
+  // i część 3 nadal będą na miejscu.
+  check('⭐ (I2-0) `dlaczego` (z doszytym `czegoNieMowi`) rysują OBIE ścieżki — pierwsza i reszta',
+    /\{p\.dlaczego\}/.test(dzis) && /pokazacDlaczego=\{i !== 0\}/.test(dzis)
+    && /\{pozycja\.dlaczego\}/.test(karta),
+    'zniknęła jedna z dwóch ścieżek rysowania `dlaczego`: pierwsza pozycja rysuje je sama '
+    + '(`{p.dlaczego}` pod nagłówkiem „dlaczego akurat to"), pozostałe przez kartę '
+    + '(`pokazacDlaczego={i !== 0}`). `czegoNieMowi` wchodzi WYŁĄCZNIE tędy (WG-33 / Z0-a), '
+    + 'więc bez tego zawodnik czyta liczbę ze słabego dowodu bez ani jednego zastrzeżenia.');
+
+  // ── ⛔ (I2-0d) CZEGO ZAWODNIK NIE MA ZOBACZYĆ ──
+  // Pola maszynowe wglądu. „Siła dowodu: słaby" i „rejestr: propozycja" to są
+  // zdania o NAS, o naszym sposobie liczenia — nie o zawodniku. `ilePomiarow`
+  // istnieje po to, żeby strażnik nie musiał zgadywać liczby z tekstu.
+  const POLA_MASZYNOWE = ['silaDowodu', 'rejestrZnaczenia', 'ilePomiarow'];
+  const maszynoweNaEkranie = POLA_MASZYNOWE.filter(
+    (p) => new RegExp(`\\{[^}]*\\b(wglad|pozycja)\\.${p}\\b`).test(dzis + karta));
+  check('⛔ (I2-0) pola maszynowe wglądu NIE wychodzą do zawodnika (`silaDowodu`, `rejestr`, `ilePomiarow`)',
+    maszynoweNaEkranie.length === 0,
+    `narysowane pola maszynowe: ${maszynoweNaEkranie.join(', ')} — to są zdania o naszym sposobie `
+    + 'liczenia, nie o zawodniku. „Siła dowodu: słaby" nic mu nie mówi, a „3 pomiary" zaprasza '
+    + 'do porównywania się (N3). Zastrzeżenie ma iść zdaniem (`czegoNieMowi`), nie etykietą.');
+
+  // ── ⭐ (I2-0e) ZAPADKA NA SKASOWANIE ──
+  // Cztery zakazy wyżej („nie importuj progów", „nie znaj kluczy", „nie rysuj
+  // pól maszynowych") spełnia w komplecie ekran, który NIE RYSUJE WGLĄDU WCALE.
+  // Ta asercja wymaga, żeby oś pomiarów naprawdę niosła LICZBĘ I JEDNOSTKĘ:
+  // sama lista dat nie jest osią, tylko listą dat.
+  check('⭐ (I2-0) oś pomiarów NAPRAWDĘ niesie liczbę i jednostkę, formatowane funkcją modułu',
+    /liczbaPoPolsku\(p\.wartosc\)/.test(dzis) && /\{p\.jednostka\}/.test(dzis)
+    && /dataPoPolsku\(p\.dzien\)/.test(dzis),
+    'z osi zniknęła wartość, jednostka albo data — a wtedy cztery zakazy wyżej są spełnione '
+    + 'przez ekran, który wglądu nie pokazuje. Zawodnik traci jedyne miejsce, w którym może '
+    + 'sprawdzić, na jakich pomiarach stoi zdanie o nim (WG-34); zostaje mu samo twierdzenie.');
+}
 
 // ═════════════════════════════════════════════════════════════════════
 // 0. WEJŚCIA TESTOWE

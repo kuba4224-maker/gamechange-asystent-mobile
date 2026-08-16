@@ -10,8 +10,37 @@
 // i dokładnie ten defekt, który makieta nazywa trzema różnymi pustkami.
 //
 // ⛔ ZAKAZ `new URL(...)` — O53, TS2769.
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CHOROBA K4 (ograniczenie O75)
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — nazwane liczbą, nie odczuciem. Ten plik miał 57 ASERCJI
+// i ANI JEDNEJ, która czytałaby jakikolwiek EKRAN. Jedyny `readFileSync`
+// czytał `lib/planLekcji.ts`, czyli WŁASNY MODUŁ. Audyt H1 (15.08) podał
+// commit „z defektem" `0705760` — STARSZY niż commit narodzin modułu
+// (`be39585`, 14.08). To jest błąd H1 (O74): na `0705760` tego modułu jeszcze
+// nie było, więc żaden jego strażnik nie miał prawa się tam zapalić.
+//
+// DLACZEGO TO JEST GROŹNE AKURAT TUTAJ. Ten moduł rozróżnia trzy stany dnia:
+// `NIE_WIEM`, `WOLNE`, `SZKOLA` — i to rozróżnienie jest CAŁYM jego sensem.
+// `parsujPlanLekcji(null)` daje `odczytany: false`, czyli „nie udało się
+// odczytać", co jest CZYMŚ INNYM niż „zawodnik nie podał planu", co znów jest
+// czymś innym niż „podał i nie ma szkoły". Trzy stany policzone bezbłędnie
+// w module i SKLEJONE NA EKRANIE przechodziły tu 57 na 57. Skutek dla
+// zawodnika, który wpisał cały plan: ekran Profilu pokazuje mu PUSTY
+// FORMULARZ w dniu, w którym baza nie odpowiedziała — a zapis z pustych pól
+// SKASOWAŁBY plan, którego appka właśnie nie widzi.
+//
+// ⚠️ ZMIERZONE 16.08.2026: tabela planu lekcji ma dziś ZERO WIERSZY, więc
+// każdy zawodnik jest dziś w gałęzi „nie wiemy, kiedy masz szkołę". To nie
+// zmienia zadania tego strażnika — pilnujemy ŚCIEŻKI NA EKRANIE, nie danych;
+// asercje niżej są na KSZTAŁT DECYZJI, nigdzie nie ma liczby wierszy.
+//
+// ⚠️ CZEGO TA SEKCJA NIE UDAJE. Czyta źródło ekranu JAKO TEKST. Nie uruchamia
+// Reacta i nie wie, czy ekran się rysuje. Podmiana wywołania na inne, równie
+// zepsute, przejdzie tu niezauważona.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   parsujPlanLekcji,
@@ -23,12 +52,211 @@ import {
   PROG_CIASNO_MINUT,
   type WierszPlanuLekcji,
 } from './planLekcji';
+// ⚠️ Brzmienie pustki „nie wiemy, kiedy masz szkołę" mieszka w `trzyPustki`
+// (czysty moduł, zero importów), a `app/(tabs)/profil.tsx` trzyma jego KOPIĘ
+// w lokalnej stałej. Sekcja 0 pilnuje, żeby te dwie kopie były co do znaku
+// takie same — patrz asercja o brzmieniu.
+import { PUSTKA_BRAK_KONFIGURACJI_TEKST } from './trzyPustki';
 
 let passed = 0;
 let failed = 0;
 function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I2 16.08.2026 — EKRANY, KTÓRE RYSUJĄ PLAN LEKCJI (K4 / O75)
+// ═══════════════════════════════════════════════════════════════════
+// Wszystkie asercje niżej czytają ŹRÓDŁA EKRANÓW I POŚREDNIKA, nie moduł.
+// Bez nich 57 asercji tego pliku opisuje funkcję, której nikt nie musi wołać.
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * Źródło BEZ komentarzy — pliki tego projektu CYTUJĄ w komentarzach zepsute
+ * wywołania i nazwy stanów („Nieudany odczyt NIE UDAJE pustego planu.
+ * `parsujPlanLekcji(null)` daje `odczytany: false`" stoi komentarzem
+ * w `profil.tsx`), więc strażnik czytający surowy tekst przechodziłby NA
+ * WŁASNEJ DOKUMENTACJI — a jedynym sposobem, żeby go zapalić, byłoby
+ * skasowanie wyjaśnienia.
+ */
+const bezKomentarzy = (s: string): string => s
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n')
+  .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+  .join('\n');
+
+/**
+ * ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76).
+ * Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
+ * narzędzia — a jest EKRANEM, KTÓRY ZNIKNĄŁ Z REPOZYTORIUM.
+ */
+const BRAK_PLIKOW: string[] = [];
+const surowe = (wzgledna: string): string => {
+  const p = join(root, wzgledna);
+  if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+  return readFileSync(p, 'utf8');
+};
+
+const PLIK_KALENDARZ = 'app/(tabs)/kalendarz.tsx';
+const PLIK_PROFIL = 'app/(tabs)/profil.tsx';
+const PLIK_WIDOK_TYGODNIA = 'lib/widokTygodnia.ts';
+const kalendarz = bezKomentarzy(surowe(PLIK_KALENDARZ));
+const profilSurowy = surowe(PLIK_PROFIL);
+const profil = bezKomentarzy(profilSurowy);
+const widokTygodnia = bezKomentarzy(surowe(PLIK_WIDOK_TYGODNIA));
+
+{
+  console.log('0. EKRANY, KTÓRE RYSUJĄ PLAN LEKCJI (K4 / O75)');
+
+  check('⛔ (I2-0) każdy plik z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+  const zrodlaEkranow = new Map(
+    EKRANY.map((p) => [p, bezKomentarzy(readFileSync(join(root, p), 'utf8'))] as const));
+
+  check('(I2-0) (strażnik strażnika) mam co przemiatać — katalogi ekranów nie są puste',
+    EKRANY.length >= 20,
+    `przemiotłem ${EKRANY.length} plików w app/ i components/ — jeżeli to zero albo garstka, `
+    + 'to nie „nikt nie rysuje planu lekcji", tylko przemiatanie trafiło w zły katalog, '
+    + 'a asercje na RÓWNOŚĆ niżej przeszłyby na pustym zbiorze');
+
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c`, nie przepisane z pamięci.
+  // RÓWNOŚĆ, nie „≥ 1" (O73): „co najmniej jeden konsument" przeszłoby także
+  // wtedy, gdy Profil przestanie rysować formularz planu, a zostanie sam
+  // kalendarz — czyli gdy zawodnik nie będzie już miał GDZIE planu podać.
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/planLekcji'/.test(zrodlaEkranow.get(p) ?? ''));
+  const KONSUMENCI = [PLIK_KALENDARZ, PLIK_PROFIL].sort();
+  const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
+  check('⭐ (I2-0) plan lekcji rysują DOKŁADNIE te dwa ekrany, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył Profil: zawodnik nie ma gdzie podać planu, a kalendarz do końca świata mówi mu '
+    + '„nie wiemy, kiedy masz szkołę"; ubył kalendarz: plan jest zbierany i nigdzie nieużywany; '
+    + 'doszedł nowy: sprawdź, czy rozróżnia `odczytany: false` od pustego planu.');
+
+  // ── ⛔ TRZECI STAN: „NIE UDAŁO SIĘ ODCZYTAĆ" ≠ „NIE PODAŁEŚ PLANU" ──
+  // Defekt, którego pilnuje: ekran robi `data ?? []` przy błędzie odczytu.
+  // Wtedy `parsujPlanLekcji` dostaje pustą tablicę, oddaje `odczytany: true`
+  // i produkt mówi zawodnikowi, który wpisał cały plan, że nie wie o nim nic.
+  // W Profilu to jest gorsze niż zdanie: otwiera PUSTY FORMULARZ, a zapis
+  // z pustych pól kasuje plan, którego appka w tej chwili nie widzi.
+  for (const [nazwa, tekst] of [[PLIK_KALENDARZ, kalendarz], [PLIK_PROFIL, profil]] as const) {
+    check(`⛔ (I2-0) ${nazwa}: nieudany odczyt idzie do \`parsujPlanLekcji(null)\`, nie do pustej listy`,
+      /if\s*\(\s*[\w.]*[Ee]rror\s*\)\s*\{[\s\S]{0,400}?parsujPlanLekcji\(\s*null\s*\)/.test(tekst),
+      'gałąź błędu odczytu nie oddaje modułowi `null` — „nie udało się odczytać" sklei się '
+      + 'z „nie podałeś planu", a to jest kłamstwo o zawodniku, którego nie da się zauważyć '
+      + 'inaczej niż zaglądając do bazy');
+  }
+
+  check('⭐ (I2-0) Profil rysuje TRZY stany planu, nie dwa — wczytywanie ≠ nieodczytany ≠ plan',
+    /stanPlanuLekcji\s*===\s*null\s*\?/.test(profil)
+    && /!\s*stanPlanuLekcji\.odczytany\s*\?/.test(profil),
+    'zniknął stan „nie udało się odczytać" albo stan „jeszcze wczytuję"; zawodnik z wpisanym planem '
+    + 'zobaczy pusty formularz i uzna, że produkt skasował mu plan — a jeżeli go zapisze, to naprawdę skasuje');
+
+  check('⛔ (I2-0) Profil pyta o stan dnia `oknoDnia` i sprawdza `stan` ZANIM sięgnie po okna',
+    /oknoDnia\(/.test(profil) && /okno\.stan\s*!==\s*'SZKOLA'/.test(profil),
+    'ekran sięga po `okna[0]` bez pytania o stan dnia — `NIE_WIEM` i `WOLNE` nie mają okien, '
+    + 'więc albo poleci wyjątek, albo (gorzej) dzień bez wiedzy narysuje się jako dzień wolny');
+
+  // ── ⛔ JEDEN RACHUNEK DNIA TYGODNIA, NIE DWA ──
+  // `player_school_slots.weekday` jest w numeracji ISO-8601 (1 = poniedziałek),
+  // a `Date.getDay()` liczy inaczej (0 = niedziela). Dwa przeliczenia znaczą
+  // szkołę zapisaną w niedzielę i nikogo, kto wie dlaczego.
+  check('⛔ (I2-0) Profil NIE liczy dnia tygodnia sam — ani jednego `getDay()`',
+    !/getDay\(\)/.test(profil) && /isoDzienTygodnia\(/.test(profil),
+    'na ekranie pojawił się drugi rachunek dnia tygodnia; przeliczenie ma JEDNO miejsce '
+    + 'i jest nim `isoDzienTygodnia()` w lib/planLekcji.ts — inaczej zawodnik dostaje szkołę '
+    + 'przesuniętą o dzień i nie ma jak zgadnąć, że to numeracja');
+
+  // ── ⛔ WALIDACJA ZAPISU STOI W MODULE ──
+  check('⛔ (I2-0) Profil waliduje zapis przez `zbudujOknaDoZapisu` i NIE ZAPISUJE, gdy odmówi',
+    /zbudujOknaDoZapisu\(/.test(profil)
+    && /if\s*\(\s*!\s*wynik\.ok\s*\)\s*\{[\s\S]{0,200}?return\s*;/.test(profil),
+    'ekran zapisuje plan bez zgody modułu albo mimo jego odmowy — reguły „koniec po początku", '
+    + '„godzina z doby" i „pusty dzień to deklaracja, nie brak" przestają obowiązywać dokładnie tam, '
+    + 'gdzie zawodnik je wpisuje');
+
+  check('⭐ (I2-0) do bazy idzie WYNIK modułu (`wynik.okna`), nie surowa treść formularza',
+    /p_slots:\s*wynik\.okna/.test(profil),
+    'do `set_school_timetable` jedzie coś innego niż to, co moduł zwalidował i znormalizował — '
+    + 'walidacja staje się ozdobą, a w bazie ląduje `8:00` obok `08:00` jako dwie różne godziny');
+
+  // ── ⛔ TRZY ODPOWIEDZI `czyPlanLekcjiZnany`, NIE DWIE ──
+  // `null` znaczy „nie wiemy, czy wiemy" i NIE MA PRAWA narysować zdania
+  // „nie wiemy, kiedy masz szkołę". `!tydzien.planLekcjiZnany` skleja `null`
+  // z `false` i pokazuje to zdanie także wtedy, gdy odczyt padł.
+  check('⛔ (I2-0) kalendarz porównuje `planLekcjiZnany === false`, a nie zaprzecza mu',
+    /tydzien\.planLekcjiZnany\s*===\s*false/.test(kalendarz)
+    && !/!\s*tydzien\.planLekcjiZnany\b/.test(kalendarz),
+    'ekran sklei „odczytałem i nie wiesz" z „nie wiem, czy wiem"; zawodnik przeczyta '
+    + '„Nie wiemy, kiedy masz szkołę" także w dniu, w którym baza po prostu nie odpowiedziała');
+
+  check('⛔ (I2-0) kalendarz nie rozstrzyga sam, czy plan jest znany — pyta `czyPlanLekcjiZnany`',
+    /planLekcjiZnany:\s*czyPlanLekcjiZnany\(/.test(kalendarz),
+    'na ekranie pojawiła się druga odpowiedź na to samo pytanie; trzy stany (`null`/`false`/`true`) '
+    + 'mają JEDNO miejsce, bo tylko tam da się je sprawdzić bez appki');
+
+  check('⛔ (I2-0) kalendarz oddaje plan modułowi tygodnia, zamiast liczyć tydzień u siebie',
+    /zbudujTydzien\(\{[\s\S]{0,600}?\bplanLekcji\b/.test(kalendarz),
+    'plan jest odczytany i nie dociera do budowania tygodnia — pasek zajętości i wykrywanie '
+    + '„ciasno" liczą się wtedy na pustce, a tydzień z pełnym planem wygląda na wolny');
+
+  // ── ⭐ ZAPADKA NA SKASOWANIE ──
+  // Bez tych dwóch asercji wszystkie powyższe spełnia też ekran, który planu
+  // nie pokazuje wcale. Strażnik nagradzałby wtedy skasowanie funkcji.
+  check('⭐ (I2-0) kalendarz NAPRAWDĘ rysuje gałąź „nie wiemy, kiedy masz szkołę"',
+    /tydzien\.planLekcjiZnany\s*===\s*false[\s\S]{0,300}?PUSTKA_BRAK_KONFIGURACJI_TEKST/.test(kalendarz),
+    'zniknęło zdanie o nieznanym planie; zawodnik widzi tydzień, który wygląda na wolny, '
+    + 'i nie dowiaduje się, że to my nie wiemy, kiedy ma szkołę');
+
+  check('⭐ (I2-0) Profil NAPRAWDĘ rysuje formularz planu i przycisk zapisu',
+    /DNI_TYGODNIA\.map\(/.test(profil) && /onPress=\{zapiszPlanLekcji\}/.test(profil),
+    'zniknął formularz planu lekcji albo jego zapis; wszystkie asercje wyżej spełnia też ekran, '
+    + 'na którym zawodnik nie ma jak podać, kiedy jest w szkole');
+
+  // ── BRZMIENIE: dwie kopie tego samego zdania ──
+  // ⚠️ DŁUG NAZWANY WPROST, nie ukryty. `app/(tabs)/profil.tsx` trzyma KOPIĘ
+  // zdania z `lib/trzyPustki.ts` w lokalnej stałej `PLAN_LEKCJI_PUSTKA`.
+  // Ta asercja nie każe kopii zniknąć — każe jej być CO DO ZNAKU taka sama.
+  // Zapali się w dniu, w którym ktoś poprawi brzmienie w jednym miejscu:
+  // wtedy kalendarz i Profil mówią zawodnikowi dwie różne rzeczy o tym samym.
+  check('⛔ (I2-0) kopia brzmienia pustki w Profilu jest CO DO ZNAKU tym samym zdaniem, co w module',
+    profil.includes(PUSTKA_BRAK_KONFIGURACJI_TEKST),
+    `w \`${PLIK_PROFIL}\` nie ma już zdania „${PUSTKA_BRAK_KONFIGURACJI_TEKST}" — brzmienie rozjechało się `
+    + 'między `lib/trzyPustki.ts` (kalendarz) a lokalną stałą Profilu, więc zawodnik czyta o tej samej '
+    + 'pustce dwa różne zdania w dwóch miejscach appki');
+
+  // ── POŚREDNIK: `lib/widokTygodnia.ts` ──
+  check('⛔ (I2-0) pośrednik `widokTygodnia` liczy `planLekcjiZnany` funkcją modułu',
+    /planLekcjiZnany:\s*czyPlanLekcjiZnany\(/.test(widokTygodnia)
+    && /odczytPlanu\s*=\s*we\.planLekcji\s*!==\s*null\s*&&\s*we\.planLekcji\.odczytany/.test(widokTygodnia),
+    'widok tygodnia rozstrzyga „czy znamy plan" po swojemu albo zgubił rozróżnienie `odczytany` — '
+    + 'kalendarz jest wtedy w porządku, a i tak pokazuje zły stan');
 }
 
 // Wiersze DOKŁADNIE w kształcie, w jakim wraca `public.school_week(date)` —

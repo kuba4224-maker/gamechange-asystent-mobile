@@ -6,6 +6,48 @@
 // Albo razem z resztą: `node tests/run-selftests.mjs`.
 // Uruchom ponownie po każdej zmianie w lib/materials.ts ORAZ po każdej zmianie
 // w lib/labels.ts (test 2 pilnuje zgodności obu plików).
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CHOROBA K4 (ograniczenie O75)
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — liczbą. Ten plik miał 40 ASERCJI i ANI JEDNEJ, która
+// czytałaby EKRAN. Sprawdzał wyłącznie własny moduł przez `import`. Audyt H1
+// (15.08) zmierzył: nie istnieje stan repozytorium z pilnowanym defektem,
+// na którym ten strażnik by się zapalił.
+//
+// DLACZEGO TO JEST GROŹNE AKURAT TUTAJ. Cała różnica między BIBLIOTEKĄ
+// a PÓŁKĄ (decyzja C1: „wartość nie leży w dostępie do treści, tylko
+// w trafieniu w moment") mieszka w trzech rzeczach, które robi EKRAN:
+//   • rysuje zdanie `u.why` — „dlaczego akurat ten materiał dla Ciebie";
+//   • rysuje `sharedNote` — 11 materiałów na 13 segmentów NIE jest dziurą
+//     i appka mówi to jako WIEDZĘ O GRZE, nie jako przeprosiny (decyzja B2);
+//   • zachowuje KOLEJNOŚĆ z `unlockedMaterials` — najpierw materiał do Celu,
+//     nad którym zawodnik pracuje TERAZ, potem to, co wyszło z diagnozy.
+//     Kolejność jest świadomie NIEALFABETYCZNA.
+// Każdą z tych trzech da się skasować jednym cięciem w `.tsx`, a 40 asercji
+// niżej dalej świeci na zielono, bo one badają wyłącznie funkcję.
+//
+// ⚠️ CZEGO TA SEKCJA CELOWO NIE POWTARZA. `lib/surowaWartosc.selftest.ts`
+// przemiata `biblioteka.tsx` i `ja.tsx` pod kątem SUROWYCH WARTOŚCI z bazy,
+// a `lib/trzyPustki.selftest.ts` i `lib/pustkaWCalymRepo.selftest.ts` —
+// pod kątem rozróżnienia „nic nie masz" od „nie udało się wczytać"
+// (`rozpoznajPustke`, `?? []` przy nieodpytanym `.error`). Powtórzona lista
+// rozjechałaby się z pierwszą i wtedy jeden strażnik świeciłby na zielono na
+// tym, na czym drugi świeci na czerwono. TUTAJ pilnujemy WYŁĄCZNIE materiałów:
+// tytułów, segmentów i brzmień.
+//
+// CO JEST TERAZ — sekcja 0 niżej. Ekrany ODKRYWANE Z KATALOGU (O69), zbiór
+// konsumentów na RÓWNOŚĆ (O73), brak pliku to FAIL Z NAZWĄ, nigdy `ENOENT` (O76).
+//
+// ⚠️ CZEGO TA SEKCJA NIE UDAJE. Czyta źródło ekranu JAKO TEKST, nie uruchamia
+// Reacta. Podmiana wywołania na inne, równie zepsute, przejdzie niezauważona.
+//
+// ⚠️ NIE UŻYWAĆ `new URL(...)` (O53): `tsconfig.json` ciągnie DOM, `tsc` pada
+// wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { SEGMENT_ORDER, SEGMENT_LABELS } from './labels';
 import { formatHintSource } from './componentHints';
 import {
@@ -26,6 +68,175 @@ let failed = 0;
 function check(label: string, cond: boolean, detail: string) {
   if (cond) { passed++; console.log(`OK   - ${label}`); }
   else { failed++; console.log(`FAIL - ${label}: ${detail}`); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ 0. PAS I2 16.08.2026 — EKRANY, KTÓRE RYSUJĄ MATERIAŁY (K4 / O75)
+// ═══════════════════════════════════════════════════════════════════
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * Źródło BEZ komentarzy — pliki tego projektu CYTUJĄ w komentarzach nazwy
+ * funkcji i zepsute wywołania („⛔ USUNIĘTE Z FUNKCJI `load()`: `(goalsRes.data
+ * ?? [])`"), więc strażnik czytający surowy tekst przechodziłby na własnej
+ * dokumentacji, a jedynym sposobem, żeby go zapalić, byłoby skasowanie
+ * wyjaśnienia — czyli tej wiedzy, dla której powstał.
+ */
+const bezKomentarzy = (s: string): string => s
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n')
+  .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+  .join('\n');
+
+/** ⛔ Brak pliku to FAIL Z NAZWĄ, nigdy wyjątek `ENOENT` (O76). */
+const BRAK_PLIKOW: string[] = [];
+const surowe = (wzgledna: string): string => {
+  const p = join(root, wzgledna);
+  if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+  return readFileSync(p, 'utf8');
+};
+
+const PLIK_BIBLIOTEKA = 'app/(tabs)/biblioteka.tsx';
+const PLIK_JA = 'app/(tabs)/ja.tsx';
+const PLIK_LAYOUT = 'app/(tabs)/_layout.tsx';
+const biblioteka = bezKomentarzy(surowe(PLIK_BIBLIOTEKA));
+const ja = bezKomentarzy(surowe(PLIK_JA));
+const layout = bezKomentarzy(surowe(PLIK_LAYOUT));
+
+{
+  console.log('0. EKRANY, KTÓRE RYSUJĄ MATERIAŁY (K4 / O75)');
+
+  check('⛔ (I2-0) każdy plik ekranu z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  function chodz(katalog: string, out: string[] = []): string[] {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  }
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(root, k)))
+    .map((p) => relative(root, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/materials'/.test(bezKomentarzy(readFileSync(join(root, p), 'utf8'))));
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c`, nie przepisane z pamięci.
+  // RÓWNOŚĆ, nie „≥ 1" (O73): „co najmniej jeden konsument" przeszłoby także
+  // wtedy, gdy zniknie WEJŚCIE w „Ja" — a trasa biblioteki jest CHOWANA
+  // (`href: null`), więc bez tego wejścia nie da się do niej dojść wcale.
+  const KONSUMENCI = [PLIK_BIBLIOTEKA, PLIK_JA].sort();
+  const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
+  check('⭐ (I2-0) materiały rysują DOKŁADNIE te pliki, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył: zawodnik przestał gdzieś widzieć materiały, a 40 asercji niżej nadal jest zielonych; '
+    + 'doszedł: sprawdź, czy nowe miejsce nie liczy odblokowań własną regułą obok `unlockedMaterials`.');
+
+  // ── ⛔ ODBLOKOWANIE LICZY MODUŁ, NIE EKRAN ──
+  // Defekt: ekran zaczyna sam sprawdzać „czy mam Cel w tym segmencie".
+  // Wtedy w produkcie są DWIE reguły odblokowania, obie przekonane, że są
+  // jedyne — a licznik w „Ja" i lista w bibliotece pokazują różne liczby.
+  check('⛔ (I2-0) oba ekrany liczą odblokowania FUNKCJĄ modułu (`unlockedMaterials`)',
+    /setLibrary\(\s*unlockedMaterials\(/.test(biblioteka)
+    && /setLibraryCount\(\s*unlockedMaterials\(/.test(ja),
+    'któryś ekran policzył odblokowania sam; wtedy podpis w „Ja" („3 materiały otwarte dla Ciebie") '
+    + 'i lista na ekranie biblioteki mogą po cichu mówić o dwóch różnych zbiorach — a zawodnik '
+    + 'wchodzi tam właśnie po to, żeby zobaczyć TE materiały, o których przed chwilą przeczytał liczbę');
+
+  check('⛔ (I2-0) ekran nie sortuje, nie filtruje i nie tnie wyniku `unlockedMaterials`',
+    !/library\s*\.\s*(sort|filter|slice|reverse)\s*\(/.test(biblioteka),
+    'ekran układa własną kolejność materiałów; kolejność z modułu jest ŚWIADOMIE nieafabetyczna — '
+    + 'najpierw materiał do Celu, nad którym zawodnik pracuje TERAZ, potem to, co wyszło z diagnozy. '
+    + 'Zawodnik wchodzi tu z pytaniem „co mam przeczytać", nie „co posiadam"');
+
+  // ── ⛔ TYTUŁY I OPISY POCHODZĄ Z MODUŁU, NIE Z EKRANU ──
+  // Decyzja A1: „tytuł bierzemy z bazy, nie z nazwy pliku". Te same napisy
+  // stoją w `component_hints.zrodlo`, więc źródło podpowiedzi na „Dziś"
+  // („Moc, s. 8") i pozycja w bibliotece („Moc") muszą mówić o tym samym
+  // materiale TYM SAMYM SŁOWEM.
+  {
+    const wpisaneTytuly = MATERIALS.filter((m) => biblioteka.includes(m.title) || ja.includes(m.title));
+    const wpisaneOpisy = MATERIALS.filter((m) => biblioteka.includes(m.about));
+    check('⛔ (I2-0) ani jeden tytuł ani opis materiału NIE jest wpisany w ekran ręcznie',
+      /\{u\.material\.title\}/.test(biblioteka) && /\{u\.material\.about\}/.test(biblioteka)
+      && wpisaneTytuly.length === 0 && wpisaneOpisy.length === 0,
+      `KOPIE TYTUŁÓW: ${wpisaneTytuly.map((m) => m.id).join(', ') || '—'} · `
+      + `KOPIE OPISÓW: ${wpisaneOpisy.map((m) => m.id).join(', ') || '—'} — `
+      + 'tytuł na ekranie ma być TYM SAMYM napisem co w `component_hints.zrodlo` (decyzja A1); '
+      + 'kopia rozjedzie się przy pierwszej zmianie nazwy i zawodnik zobaczy „Moc, s. 8" przy '
+      + 'podpowiedzi, a inny napis przy pozycji w bibliotece');
+  }
+
+  // ── ⭐ TO, CO ODRÓŻNIA BIBLIOTEKĘ OD PÓŁKI ──
+  check('⭐ (I2-0) przy każdej pozycji stoi zdanie „dlaczego akurat to" (`u.why`)',
+    /\{u\.why\}/.test(biblioteka),
+    'zniknęło jedno zdanie uzasadnienia przy pozycji — i to jest CAŁA różnica między biblioteką '
+    + 'a półką (decyzja C1: wartość jest w trafieniu w moment, nie w katalogu). Bez niego zawodnik '
+    + 'dostaje listę tytułów i nie wie, dlaczego ma przeczytać akurat ten');
+
+  check('⛔ (I2-0) nota o współdzielonym materiale rysowana WARUNKOWO, ze struktury modułu',
+    /u\.material\.sharedNote\s*\?/.test(biblioteka),
+    'zniknęła nota `sharedNote` albo jej warunek: 11 materiałów na 13 segmentów NIE JEST DZIURĄ '
+    + '(decyzja B2) i appka mówi to jako wiedzę o grze — bez tej noty zawodnik z gardłem '
+    + 'w Technice Specjalistycznej widzi pozycję „Technika fundamentalna" i myśli, że go pominięto');
+
+  // ── ⛔ BRZMIENIA ZE STAŁYCH MODUŁU, NIE ICH KOPIE NA EKRANIE ──
+  check('⛔ (I2-0) tytuł, wstęp i przypis ekranu biblioteki idą ze stałych modułu, bez kopii',
+    /\{LIBRARY_SCREEN_TITLE\}/.test(biblioteka) && /\{LIBRARY_SCREEN_INTRO\}/.test(biblioteka)
+    && /\{LIBRARY_NO_DOWNLOAD_TEXT\}/.test(biblioteka)
+    && !biblioteka.includes(LIBRARY_SCREEN_TITLE) && !biblioteka.includes(LIBRARY_SCREEN_INTRO)
+    && !biblioteka.includes(LIBRARY_NO_DOWNLOAD_TEXT) && !biblioteka.includes(LIBRARY_EMPTY_TEXT),
+    'na ekranie stoi KOPIA któregoś z tych zdań albo któregoś zabrakło. `LIBRARY_NO_DOWNLOAD_TEXT` '
+    + 'jest tu najdroższy: to jedyne miejsce, w którym produkt mówi, że pliku dziś NIE MA i skąd '
+    + 'zamiast niego biorą się zdania na „Dziś". Bez niego zawodnik czeka na pobieranie, którego nie ma');
+
+  check('⛔ (I2-0) licznik otwartych materiałów liczy `libraryCountLine`, a nie ekran',
+    /libraryCountLine\(\s*library\.length\s*\)/.test(biblioteka),
+    'ekran zaczął sam składać zdanie o liczbie; ta reguła odmienia liczebnik („1 materiał otwarty", '
+    + '„3 materiały otwarte", „11 materiałów otwartych") i druga kopia rozjedzie się na pierwszej nastce');
+
+  check('⛔ (I2-0) wejście w „Ja" ma podpis z modułu (`libraryEntryHint`), nie własny napis',
+    /libraryEntryHint\(\s*libraryCount\s*\)/.test(ja) && !ja.includes(LIBRARY_SECTION_LABEL),
+    'w „Ja" stoi wpisany ręcznie podpis wejścia; ten podpis ma się MIEŚCIĆ W JEDNEJ LINII wiersza '
+    + 'menu (≤ 36 znaków — asercja niżej), bo dłuższy zawija się i podnosi cały ekran „Ja", '
+    + 'z którego biblioteka wyprowadziła się właśnie po to, żeby go obniżyć');
+
+  // ── ⭐ ZAPADKA NA SKASOWANIE ──
+  // Bez tych dwóch asercji wszystko powyższe spełnia też produkt, w którym
+  // biblioteki NIE DA SIĘ OTWORZYĆ. Strażnik nagradzałby wtedy skasowanie.
+  check('⭐ (I2-0) biblioteka NAPRAWDĘ rysuje listę materiałów — `library.map` idzie do widoku',
+    /library\.map\(/.test(biblioteka),
+    'zniknęło renderowanie listy; wszystkie asercje wyżej spełnia też ekran, który nie pokazuje '
+    + 'ani jednego materiału — a wtedy strażnik NAGRADZA skasowanie funkcji');
+
+  // ⚠️ Element `<Tabs.Screen name="biblioteka" … />` wycinany W CAŁOŚCI, a nie
+  // szukany oknem znaków. ZMIERZONE 16.08.2026: okno `[\s\S]{0,160}?href: null`
+  // PRZECHODZIŁO po skasowaniu `href: null` z tego wpisu, bo dosięgało `href:
+  // null` NASTĘPNEGO wpisu w pliku. `[^>]*` zatrzymuje się na `/>` i nie ma jak
+  // przeczytać cudzej trasy. To jest dokładnie ten rodzaj asercji, która
+  // wygląda na zieloną i nie pilnuje niczego.
+  const wpisBiblioteki = layout.match(/<Tabs\.Screen\s+name="biblioteka"[^>]*\/>/)?.[0] ?? '';
+  check('⭐ (I2-0) do biblioteki DA SIĘ DOJŚĆ: trasa jest chowana, a wejście stoi w „Ja"',
+    /href:\s*null/.test(wpisBiblioteki)
+    && /renderRow\(\s*'\/biblioteka'\s*,\s*LIBRARY_SECTION_LABEL/.test(ja),
+    'albo zniknęło wejście w „Ja", albo trasa przestała być chowana. Ubytek wejścia znaczy, że '
+    + 'biblioteka istnieje i NIKT nie może do niej wejść (trasa `href: null` nie ma zakładki) — '
+    + 'funkcja zbudowana i niewidoczna. Nadmiar (brak `href: null`) znaczy PIĄTĄ ZAKŁADKĘ w pasku, '
+    + 'czyli skasowanie decyzji B8 — Expo Router pokazuje KAŻDY plik z `app/(tabs)/` (znalezisko B14)');
 }
 
 // ═════════════════════════════════════════════════════════════

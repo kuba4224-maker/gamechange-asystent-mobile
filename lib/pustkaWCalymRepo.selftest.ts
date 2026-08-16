@@ -535,5 +535,398 @@ console.log('\n3. ⭐ TEST MUTACYJNY — liczba FAIL-i przy każdej mutacji');
     'mutacja wyciekła poza swój obiekt Zasady');
 }
 
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS I2 16.08.2026 — CZY PUSTKA MA DOKĄD PROWADZIĆ (K4 / O75)
+// ═════════════════════════════════════════════════════════════════════
+//
+// ── CO BYŁO ZEPSUTE — nazwane liczbą, nie odczuciem ──────────────────
+//
+// ZMIERZONE 16.08.2026 przy przeliczaniu rejestru WT: w CAŁYM tym pliku
+// nie było ANI JEDNEGO wystąpienia słowa `onPress` ani `Touchable`.
+// To samo w `lib/trzyPustki.selftest.ts` (zmierzone tego samego dnia: zero).
+// Czyli: dwa strażniki pilnujące pustek sprawdzały, JAK PUSTKA BRZMI
+// i CZY PRODUKT JĄ ROZPOZNAJE — a ani jeden nie sprawdzał, CZY PUSTKA
+// MA DOKĄD PROWADZIĆ.
+//
+// ⛔ CO PRZEZ TO PRZESZŁO NA ZIELONO — DWA MIEJSCA, NIE JEDNO.
+//   • `app/(tabs)/kalendarz.tsx`, zakładka „Listy", sekcja „Nadchodzące":
+//     CTA pustki było gołym `<Text>` ze strzałką „→", bez `onPress`.
+//     ⛔ Pustka ŚLEPA CAŁKOWICIE — w tej sekcji nie było żadnego innego wejścia.
+//   • `app/(tabs)/dzis.tsx`, karta „Dziś w kalendarzu": to samo
+//     (`<Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>`).
+// Zawodnik widział coś, co WYGLĄDA jak przycisk, dotykał go i NIE DZIAŁO SIĘ
+// NIC — a to jest gorsze niż brak wyjścia, bo produkt obiecał wyjście
+// i go nie dał. Nie zakładaj, że defekt jest jeden, bo ktoś wymienił jeden:
+// PRZEMIEĆ.
+//
+// ⚠️ OBA WESZŁY COMMITEM `0705760` (pas T, 14.08.2026) i OBA PRZEŻYŁY PAS C1
+// (`e4be45d`), KTÓRY OGŁOSIŁ NAPRAWĘ OBIETNICY WT-33 („każda pustka kończy
+// się dokładnie jedną akcją"). C1 dodał wyjście w widoku tygodnia i pominął
+// je w „Nadchodzących", przemianowując przy tym zmienną w tej samej linii.
+// Dowód: `git log -S 'pustkaNadchodzace.cta'`, `git log -L 983,988`.
+//
+// ── ✅ NAPRAWIONE 16.08.2026 — DECYZJA KUBY NA PYTANIE B3: „NIE MA" ──
+// Kuba rozstrzygnął, że napis ze strzałką bez `onPress` NIE SPEŁNIA WT-33,
+// czyli że obietnica stała na `JEST` przez dwa pasy nieprawdziwie. Oba miejsca
+// dostały `TouchableOpacity` z `onPress`, który TĘ pustkę zamyka:
+//   • „Nadchodzące" → `brak_danych` przewija do formularza „Dodaj do
+//     kalendarza" stojącego wyżej NA TYM SAMYM ekranie (`setZakladka('listy')`
+//     byłoby tam ruchem donikąd — już tam jesteśmy);
+//   • karta „Dziś w kalendarzu" → `brak_danych` prowadzi do Kalendarza,
+//     reszta do Profilu.
+// ⚠️ `blad_odczytu` ZOSTAJE NAPISEM w obu miejscach (decyzja Kuby tego samego
+// dnia): jego CTA to INSTRUKCJA („Pociągnij w dół, żeby sprawdzić jeszcze
+// raz."), wyjściem jest `RefreshControl`, a strzałka jest obietnicą akcji.
+//
+// ── DLACZEGO ASERCJA JEST BEZWZGLĘDNA, A NIE ZAPADKĄ NA RÓWNOŚĆ ──
+// Bo dług został spłacony do zera, a próg „tyle, co wczoraj" przepuszczałby
+// go w nieskończoność — „zgadza się z pomiarem" jest wtedy zdaniem prawdziwym
+// i bezużytecznym naraz. `falszywePrzyciski.length === 0` NIE MA LISTY
+// WYJĄTKÓW: nie da się jej uciszyć skreśleniem pozycji, tylko naprawą ekranu.
+// Zapadki na równość zostają obok i pilnują drugiej strony: żeby nikt nie
+// ZDJĄŁ pustki, jej wyjścia ani strzałki (ten ostatni ruch jest najtańszym
+// sposobem schowania długu przed asercją bezwzględną).
+//
+// ⚠️ CZEGO TEN BLOK NIE UDAJE. Czyta źródło ekranu JAKO TEKST i liczy
+// przodków JSX. Nie uruchamia Reacta i nie wie, czy `onPress` cokolwiek
+// robi — `onPress={() => {}}` przejdzie tu niezauważone. Sprawdza
+// AFORDANCJĘ, nie skutek.
+{
+  console.log('\n4. ⭐ (I2) PUSTKA, KTÓRA MA DOKĄD PROWADZIĆ — wyjścia w CAŁYM repozytorium');
+
+  /**
+   * Źródło bez komentarzy, ale Z ZACHOWANIEM NUMERÓW LINII — inaczej numer
+   * w komunikacie FAIL-a wskazywałby nie to miejsce, co trzeba.
+   *
+   * ⚠️ Nie da się tu użyć `zyweZrodlo` z `lib/trzyPustki.ts`: ta wersja
+   * KASUJE komentarze blokowe razem z ich znakami nowej linii (i słusznie —
+   * tamtym asercjom numery linii są niepotrzebne, **O63**).
+   * Tutaj komentarz zamieniany jest na spacje tej samej długości.
+   */
+  const bezKomentarzy = (s: string): string => s
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/^([ \t]*)\/\/.*$/gm, (_m, wciecie) => wciecie);
+
+  // ── ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76) ──
+  // Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
+  // narzędzia — a jest EKRANEM, KTÓRY ZNIKNĄŁ Z REPOZYTORIUM. Wymienione są
+  // DWA ekrany, na których 16.08 spłacono dług WT-33: gdyby któryś zmienił
+  // nazwę, zapadki niżej i tak by zapaliły, ale powiedziałyby „ubyło pustki"
+  // o ekranie, który po prostu nazywa się inaczej.
+  const EKRANY_NAPRAWY_B3 = ['app/(tabs)/kalendarz.tsx', 'app/(tabs)/dzis.tsx'];
+  const BRAK_PLIKOW = EKRANY_NAPRAWY_B3.filter((p) => !existsSync(join(appRoot, p)));
+
+  check('⛔ (I2-0) oba ekrany naprawione 16.08 (B3) istnieją i dają się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu zapadki niżej '
+    + 'zameldują „ubyło pustki" o czymś, czego nikt nie usunął.');
+
+  // ─────────────────────────────────────────────────────────────────
+  // DETEKTOR — czyj to przodek w JSX
+  // ─────────────────────────────────────────────────────────────────
+  const DOTYKALNE = new Set([
+    'TouchableOpacity', 'TouchableHighlight', 'TouchableWithoutFeedback', 'Pressable', 'Button',
+  ]);
+
+  /**
+   * Czy `<` w tym miejscu OTWIERA znacznik JSX, a nie jest znakiem „mniejsze"
+   * albo nawiasem typu generycznego.
+   *
+   * ⚠️ ROZSTRZYGA ZNAK PRZED, NIE PO. `useState<Goal[]>` i `Wejscie<T>` mają
+   * przed `<` znak identyfikatora; `return (\n <View>` i `{x ? <Text>` nie mają.
+   * Bez tego rozróżnienia typy generyczne wchodziłyby na stos jako elementy
+   * i przodkowie byliby zmyśleni.
+   */
+  const otwieraZnacznik = (s: string, i: number): boolean => {
+    const nastepny = s[i + 1];
+    if (nastepny !== '/' && nastepny !== '>' && !(nastepny >= 'A' && nastepny <= 'Z')) return false;
+    return !/[A-Za-z0-9_$.]/.test(i > 0 ? s[i - 1] : '\n');
+  };
+
+  /** Koniec znacznika — z przeskokiem napisów i zbalansowanych `{}`, żeby `=>` w propie nie udawało `>`. */
+  const koniecZnacznika = (s: string, od: number): number => {
+    let i = od;
+    let klamry = 0;
+    while (i < s.length) {
+      const c = s[i];
+      if (c === '"' || c === "'" || c === '`') {
+        const cudz = c;
+        i++;
+        while (i < s.length && s[i] !== cudz) { if (s[i] === '\\') i++; i++; }
+        i++;
+        continue;
+      }
+      if (c === '{') { klamry++; i++; continue; }
+      if (c === '}') { klamry--; i++; continue; }
+      if (c === '>' && klamry === 0) return i;
+      i++;
+    }
+    return -1;
+  };
+
+  /** Stos otwartych elementów JSX w danym miejscu pliku — czyli lista PRZODKÓW. */
+  const przodkowieJSX = (zywy: string, cel: number): string[] => {
+    const stos: string[] = [];
+    let i = 0;
+    while (i < cel) {
+      if (zywy[i] !== '<' || !otwieraZnacznik(zywy, i)) { i++; continue; }
+      const zamykajacy = zywy[i + 1] === '/';
+      const nazwa = /^[A-Za-z0-9_.]*/.exec(zywy.slice(i + (zamykajacy ? 2 : 1)))![0];
+      const koniec = koniecZnacznika(zywy, i + 1);
+      if (koniec < 0) { i++; continue; }
+      if (koniec >= cel) break;
+      if (zamykajacy) {
+        const gdzie = stos.lastIndexOf(nazwa);
+        if (gdzie >= 0) stos.length = gdzie;
+      } else if (zywy[koniec - 1] !== '/') stos.push(nazwa);
+      i = koniec + 1;
+    }
+    return stos;
+  };
+
+  type MiejscePustki = { klucz: string; linia: number; maWyjscie: boolean; strzalka: boolean; tresc: string };
+
+  /**
+   * Wszystkie miejsca, w których ekran RYSUJE WYJŚCIE Z PUSTKI: `{cokolwiek.cta}`
+   * albo stałą `PUSTKA_…_CTA…` z `lib/trzyPustki.ts`.
+   *
+   * ⚠️ Klucz to `plik :: wyrażenie #n`, NIE numer linii (**O63**): dopisany
+   * komentarz przesuwa numer i przypisuje cudzy błąd nie temu, kto go popełnił.
+   * Numer linii idzie do KOMUNIKATU, żeby dało się to znaleźć bez zgadywania.
+   */
+  const WYJSCIE_PUSTKI = /\{\s*(?:[A-Za-z_$][\w$]*\.cta|PUSTKA_[A-Z_]*CTA[A-Z_]*)\s*\}/g;
+
+  const zmierzPlik = (sciezka: string, surowe: string): MiejscePustki[] => {
+    const zywy = bezKomentarzy(surowe);
+    const linie = surowe.split('\n');
+    const licznik = new Map<string, number>();
+    const out: MiejscePustki[] = [];
+    for (const m of zywy.matchAll(WYJSCIE_PUSTKI)) {
+      const i = m.index!;
+      // ⛔ `${p.cta}` w szablonie to SKLEJANIE NAPISU, nie rysowanie wyjścia
+      // (`app/(tabs)/ja.tsx` robi tak przy budowaniu podpisu karty).
+      if (zywy[i - 1] === '$') continue;
+      const wyrazenie = m[0].replace(/[{}\s]/g, '');
+      const n = (licznik.get(wyrazenie) ?? 0) + 1;
+      licznik.set(wyrazenie, n);
+      const linia = zywy.slice(0, i).split('\n').length;
+      const koniecLinii = zywy.indexOf('\n', i);
+      out.push({
+        klucz: `${sciezka} :: ${wyrazenie} #${n}`,
+        linia,
+        maWyjscie: przodkowieJSX(zywy, i).some((e) => DOTYKALNE.has(e)),
+        strzalka: /→/.test(zywy.slice(i, koniecLinii < 0 ? undefined : koniecLinii)),
+        tresc: (linie[linia - 1] ?? '').trim(),
+      });
+    }
+    return out;
+  };
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  // ⭐ `PLIKI_PRZEMIATANE` jest już policzone wyżej przez `chodzPo` i ma
+  // odjęte `_diag_backup/` oraz selftesty. Druga lista rozjechałaby się
+  // z pierwszą — lista na sztywno kłamie na zielono.
+  const EKRANY = PLIKI_PRZEMIATANE.filter((p) => p.startsWith('app/') || p.startsWith('components/'));
+  const MIEJSCA = EKRANY.flatMap((p) => zmierzPlik(p, ZRODLA_PRAWDZIWE[p]));
+
+  const zWyjsciem = MIEJSCA.filter((m) => m.maWyjscie);
+  // ⭐ FAŁSZYWY PRZYCISK: napis ze strzałką „→" i BEZ elementu dotykalnego
+  // nad sobą. Strzałka jest w tym produkcie afordancją dotknięcia — stoi
+  // pod nią `styles.pustkaCta` / `styles.cardAction`, kolor marki.
+  const falszywePrzyciski = MIEJSCA.filter((m) => !m.maWyjscie && m.strzalka);
+
+  // ── ⭐ POMIAR WYPISANY GŁOŚNO, przy każdym uruchomieniu ──
+  console.log(`   [pomiar] miejsc rysujących wyjście z pustki: ${MIEJSCA.length}`
+    + ` · z prawdziwym wyjściem: ${zWyjsciem.length}`
+    + ` · ⛔ FAŁSZYWYCH PRZYCISKÓW (strzałka bez onPress): ${falszywePrzyciski.length}`);
+  for (const m of MIEJSCA) {
+    const znak = m.maWyjscie ? '  wyjście  ' : (m.strzalka ? '⛔ FAŁSZYWY ' : '  napis    ');
+    console.log(`   [pomiar] ${znak} ${m.klucz}  (linia ${m.linia})  ${m.tresc}`);
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐ ZAPADKI NA RÓWNOŚĆ — wartości ZMIERZONE 16.08.2026, `main` = `123e09c`
+  // ═════════════════════════════════════════════════════════════════
+  // ⚠️ Poniższe trzy listy są POMIAREM, nie przepisaniem z pamięci. Każda
+  // porównywana jest na RÓWNOŚĆ, nie na „≥ 1" (**O73**): „co najmniej jedna
+  // pustka ma wyjście" przeszłoby także wtedy, gdy wyjście zniknie
+  // z czternastu miejsc na piętnaście.
+
+  // ═════════════════════════════════════════════════════════════════
+  // ⛔ ⭐ ASERCJA BEZWZGLĘDNA — DECYZJA KUBY, 16.08.2026, PYTANIE B3: „NIE MA"
+  // ═════════════════════════════════════════════════════════════════
+  // Obietnica WT-33 brzmi: „każda pustka kończy się dokładnie jedną akcją".
+  // Kuba rozstrzygnął, że napis ze strzałką bez `onPress` **NIE SPEŁNIA** tej
+  // obietnicy — czyli WT-33 stała na `JEST` przez dwa pasy nieprawdziwie.
+  //
+  // ⭐ TA ASERCJA NIE MA LISTY. Nie ma czego skreślić, nie ma czego dopisać
+  // i nie da się jej uciszyć inaczej niż naprawą ekranu. Miejsca są ODKRYWANE
+  // Z KATALOGU (`PLIKI_PRZEMIATANE` wyżej), a próg to ZERO — nie „tyle, co
+  // wczoraj". Zapadka na równość ze zmierzonym długiem byłaby tu słabsza:
+  // przepuszczałaby dług w nieskończoność, bo „zgadza się z pomiarem".
+  //
+  // Dwa fałszywe przyciski, które ta asercja zdjęła 16.08.2026 (oba weszły
+  // commitem `0705760`, pas T, i oba przeżyły pas C1, który ogłosił naprawę
+  // WT-33):
+  //   • `app/(tabs)/kalendarz.tsx`, zakładka „Listy", sekcja „Nadchodzące" —
+  //     pustka ŚLEPA CAŁKOWICIE, w tej sekcji nie było żadnego innego wejścia;
+  //   • `app/(tabs)/dzis.tsx`, karta „Dziś w kalendarzu" — „Dodaj trening →"
+  //     bez odbioru dotknięcia.
+  check('⛔ ⭐ (I2-0) KAŻDE CTA pustki obiecujące akcję (strzałka „→") siedzi w elemencie '
+    + 'dotykalnym z `onPress` — ZERO fałszywych przycisków, bez listy wyjątków (decyzja Kuby, B3)',
+    falszywePrzyciski.length === 0,
+    `⛔ FAŁSZYWE PRZYCISKI (${falszywePrzyciski.length}): `
+    + `${falszywePrzyciski.map((m) => `${m.klucz} (linia ${m.linia}) ${m.tresc}`).join('  |  ') || '—'} `
+    + '→ pustka rysuje „coś →", zawodnik dotyka obietnicy i NIC SIĘ NIE DZIEJE. '
+    + 'Naprawa: owinąć CTA w `TouchableOpacity` z `onPress`, który TĘ pustkę zamyka '
+    + '(wzorzec: `app/(tabs)/kalendarz.tsx`, sekcja „Nadchodzące"). '
+    + '⛔ NIE WOLNO uciszyć tej asercji zdjęciem strzałki z CTA, które akcję ma — '
+    + 'to łapie zapadka „NAPISÓW jest dokładnie tyle" niżej.');
+
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐ ZAPADKI NA RÓWNOŚĆ — wartości ZMIERZONE 16.08.2026, po naprawie B3
+  // ═════════════════════════════════════════════════════════════════
+  // ⚠️ Poniższe listy są POMIAREM, nie przepisaniem z pamięci. Każda
+  // porównywana na RÓWNOŚĆ, nie na „≥ 1" (**O73**): „co najmniej jedna pustka
+  // ma wyjście" przeszłoby także wtedy, gdy wyjście zniknie z czterech miejsc
+  // na pięć. Asercja bezwzględna wyżej pilnuje, że nikt nie DOŁOŻY fałszywego
+  // przycisku; te trzy pilnują, że nikt nie ZDEJMIE pustki ani jej wyjścia.
+
+  /** Wszystkie miejsca rysujące CTA pustki. Ubytek = pustka zniknęła z ekranu. */
+  const MIEJSCA_16_08 = [
+    'app/(tabs)/biblioteka.tsx :: pustka.cta #1',
+    'app/(tabs)/cele.tsx :: p.cta #1',
+    'app/(tabs)/centrum-decyzji.tsx :: p.cta #1',
+    'app/(tabs)/diagnoza.tsx :: pustkaOdczytu.cta #1',
+    'app/(tabs)/dziennik.tsx :: pustkaHistorii.cta #1',
+    'app/(tabs)/dzis.tsx :: pustka.cta #1',
+    'app/(tabs)/dzis.tsx :: pustkaDzis.cta #1',
+    'app/(tabs)/dzis.tsx :: pustkaDzis.cta #2',
+    'app/(tabs)/ja.tsx :: pustkaDiagnozy.cta #1',
+    'app/(tabs)/kalendarz.tsx :: PUSTKA_BRAK_KONFIGURACJI_CTA #1',
+    'app/(tabs)/kalendarz.tsx :: pustkaTygodnia.cta #1',
+    'app/(tabs)/kalendarz.tsx :: pustkaTygodnia.cta #2',
+    'app/(tabs)/kalendarz.tsx :: pustkaTygodnia.cta #3',
+    'app/(tabs)/mecz.tsx :: pustkaHistorii.cta #1',
+    'app/(tabs)/profil.tsx :: pustkaKontuzji.cta #1',
+    'components/DiagnosisProfileView.tsx :: pustka.cta #1',
+    'components/FocusBlockPlanner.tsx :: p.cta #1',
+  ];
+
+  /**
+   * ⭐ Miejsca z PRAWDZIWYM wyjściem — dotknięcie CTA coś robi.
+   * Piątka po naprawie z 16.08: dwa nowe (`dzis.tsx #2`, `kalendarz.tsx #3`)
+   * doszły do trzech, które wyjście miały wcześniej.
+   */
+  const Z_WYJSCIEM_16_08 = [
+    'app/(tabs)/dzis.tsx :: pustkaDzis.cta #2',
+    'app/(tabs)/ja.tsx :: pustkaDiagnozy.cta #1',
+    'app/(tabs)/kalendarz.tsx :: PUSTKA_BRAK_KONFIGURACJI_CTA #1',
+    'app/(tabs)/kalendarz.tsx :: pustkaTygodnia.cta #1',
+    'app/(tabs)/kalendarz.tsx :: pustkaTygodnia.cta #3',
+  ];
+
+  /**
+   * ⭐ NAPISY — CTA BEZ strzałki. To **nie jest** dług i to jest decyzja Kuby
+   * z 16.08.2026, podjęta razem z B3: wszystkie dwanaście rysują CTA rodzaju
+   * `blad_odczytu` („Pociągnij w dół, żeby sprawdzić jeszcze raz." albo „Wejdź
+   * tu jeszcze raz za chwilę." przy `daSieOdswiezyc: false`) — czyli
+   * INSTRUKCJĘ, nie przycisk. Wyjściem jest tam `RefreshControl` albo ponowne
+   * wejście. Owinięcie instrukcji w `TouchableOpacity` zrobiłoby z niej DRUGI
+   * RODZAJ FAŁSZYWEGO PRZYCISKU: element, który wygląda na dotykalny i nie ma
+   * dokąd prowadzić.
+   *
+   * ⛔ PO CO TU ZAPADKA. Bez niej asercję bezwzględną wyżej da się uciszyć
+   * najtańszym możliwym ruchem: **zdjęciem strzałki** z CTA, które akcję ma.
+   * Fałszywy przycisk znika z pomiaru, obietnica WT-33 znika z ekranu,
+   * a suita świeci. Wzrost tej listy zapala asercję i każe sprawdzić, CZY
+   * nowy napis naprawdę jest instrukcją, czy jest ukrytym długiem.
+   */
+  const NAPISY_16_08 = MIEJSCA_16_08.filter((k) => !Z_WYJSCIEM_16_08.includes(k));
+
+  const roznica = (zmierzone: string[], oczekiwane: string[]) => ({
+    brakujacy: oczekiwane.filter((k) => !zmierzone.includes(k)),
+    nadmiarowi: zmierzone.filter((k) => !oczekiwane.includes(k)),
+  });
+
+  const rWszystkie = roznica(MIEJSCA.map((m) => m.klucz), MIEJSCA_16_08);
+  check('⭐ (I2-0) CTA pustki rysują DOKŁADNIE te miejsca, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    rWszystkie.brakujacy.length === 0 && rWszystkie.nadmiarowi.length === 0,
+    `UBYŁO: ${rWszystkie.brakujacy.join(' | ') || '—'} · DOSZŁO: ${rWszystkie.nadmiarowi.join(' | ') || '—'} `
+    + '→ ubyło: zawodnik przestał gdzieś widzieć wyjście z pustki i żadna asercja tego pliku tego nie zauważa; '
+    + 'doszło: sprawdź, czy NOWE miejsce kończy się elementem dotykalnym, a nie samym napisem ze strzałką.');
+
+  const rWyjscia = roznica(zWyjsciem.map((m) => m.klucz), Z_WYJSCIEM_16_08);
+  check('⭐ (I2-0) pustki z PRAWDZIWYM wyjściem to dokładnie te PIĘĆ, co po naprawie B3 16.08',
+    rWyjscia.brakujacy.length === 0 && rWyjscia.nadmiarowi.length === 0,
+    `STRACIŁY WYJŚCIE: ${rWyjscia.brakujacy.join(' | ') || '—'} · ZYSKAŁY: ${rWyjscia.nadmiarowi.join(' | ') || '—'} `
+    + '→ straciło: ktoś zdjął `TouchableOpacity` i został sam napis — zawodnik dotyka i nic się nie dzieje; '
+    + 'zyskało: to jest NAPRAWA, dopisz ją do `Z_WYJSCIEM_16_08`.');
+
+  const rNapisy = roznica(MIEJSCA.filter((m) => !m.maWyjscie).map((m) => m.klucz), NAPISY_16_08);
+  check('⛔ (I2-0) NAPISÓW (CTA bez strzałki, instrukcja przy `blad_odczytu`) jest dokładnie tyle, '
+    + 'co 16.08 — tędy nie da się uciszyć asercji bezwzględnej zdjęciem strzałki',
+    rNapisy.brakujacy.length === 0 && rNapisy.nadmiarowi.length === 0,
+    `PRZESTAŁO BYĆ NAPISEM: ${rNapisy.brakujacy.join(' | ') || '—'} · `
+    + `⛔ ZOSTAŁO NAPISEM: ${rNapisy.nadmiarowi.join(' | ') || '—'} `
+    + '→ doszło: albo to nowa instrukcja `blad_odczytu` (wtedy dopisz), albo ktoś ZDJĄŁ STRZAŁKĘ z CTA, '
+    + 'które obiecywało akcję — czyli schował dług przed asercją bezwzględną zamiast go spłacić.');
+
+  // ⭐ ZAPADKA NA SKASOWANIE (wzorzec B2-5). Bez niej wszystkie trzy asercje
+  // wyżej spełnia się przez USUNIĘCIE pustek z ekranów — strażnik nagradzałby
+  // wtedy skasowanie. Pustka ma być LICZONA PRZEZ MODUŁ, nie zmyślona na ekranie.
+  const ekranyBezModulu = [...new Set(MIEJSCA.map((m) => m.klucz.split(' :: ')[0]))]
+    .filter((p) => !/rozpoznajPustke\s*\(/.test(bezKomentarzy(ZRODLA_PRAWDZIWE[p])));
+  check('⭐ (I2-0) każdy ekran z pustką liczy ją `rozpoznajPustke()`, a nie sam u siebie',
+    ekranyBezModulu.length === 0,
+    `ekran rysuje wyjście z pustki, ale nie woła modułu: ${ekranyBezModulu.join(', ')} — `
+    + 'drugi rachunek „którą to pustkę pokazać" rozjedzie się z `lib/trzyPustki.ts` po cichu, '
+    + 'a zawodnik przeczyta „nic nie masz zaplanowane" wtedy, gdy odczyt padł');
+
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐ STRAŻNIK STRAŻNIKA — detektor sprawdzony na PRÓBKACH, nie na brudzie
+  // ═════════════════════════════════════════════════════════════════
+  // ⚠️ Ta sama lekcja, co przy `PROBKA_TRAFIA_*` wyżej (**O71**): materiał,
+  // który znika razem z naprawą kodu, jest materiałem, na którym nie da się
+  // oprzeć testu. Gdy Kuba rozstrzygnie B3 i obie pustki dostaną `onPress`,
+  // `falszywePrzyciski` będzie puste — a detektor nadal musi być dowiedziony.
+  {
+    const PROBKA_Z_WYJSCIEM =
+      'const A = () => (<View>'
+      + '<Text style={s.empty}>{p.tekst}</Text>'
+      + '<TouchableOpacity onPress={() => router.push("/profil")}>'
+      + '<Text style={s.cta}>{p.cta} →</Text></TouchableOpacity></View>);';
+    const PROBKA_BEZ_WYJSCIA =
+      'const B = () => (<View>'
+      + '<Text style={s.empty}>{p.tekst}</Text>'
+      + '<Text style={s.cta}>{p.cta} →</Text></View>);';
+    // ⛔ Próbka, na której detektor MA MILCZEĆ mimo obecności `TouchableOpacity`
+    // w pliku: przycisk jest ZAMKNIĘTY przed pustką, więc nie jest jej przodkiem.
+    // Bez niej „detektor działa" znaczyłoby tylko „detektor widzi słowo
+    // TouchableOpacity gdziekolwiek", a taki detektor jest bezużyteczny.
+    const PROBKA_PRZYCISK_OBOK =
+      'const C = () => (<View>'
+      + '<TouchableOpacity onPress={x}><Text>co innego</Text></TouchableOpacity>'
+      + '<Text style={s.cta}>{p.cta} →</Text></View>);';
+
+    const zProbki = (zrodlo: string) => zmierzPlik('probka.tsx', zrodlo)[0];
+
+    check('⭐ (I2-0) (strażnik strażnika) detektor WIDZI wyjście, gdy CTA siedzi w `TouchableOpacity`',
+      zProbki(PROBKA_Z_WYJSCIEM)?.maWyjscie === true,
+      'detektor nie rozpoznaje poprawnego kształtu — wtedy zapadka zgłaszałaby jako dług także naprawione miejsca');
+
+    check('⭐ (I2-0) (strażnik strażnika) detektor NAZYWA fałszywy przycisk: strzałka bez `onPress`',
+      zProbki(PROBKA_BEZ_WYJSCIA)?.maWyjscie === false && zProbki(PROBKA_BEZ_WYJSCIA)?.strzalka === true,
+      'detektor przepuszcza goły `<Text>` ze strzałką — czyli dokładnie ten defekt, dla którego ten blok powstał');
+
+    check('⛔ (I2-0) (strażnik strażnika) detektor MILCZY, gdy przycisk stoi OBOK pustki, nie nad nią',
+      zProbki(PROBKA_PRZYCISK_OBOK)?.maWyjscie === false,
+      'detektor liczy zamknięty `</TouchableOpacity>` jako przodka — wtedy każda pustka na ekranie '
+      + 'z jakimkolwiek przyciskiem wyglądałaby na naprawioną');
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

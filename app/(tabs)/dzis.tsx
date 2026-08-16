@@ -3364,7 +3364,32 @@ export default function DzisScreen() {
                 {pustkaDzis ? (
                   <>
                     <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
-                    <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
+                    {/* ⭐ PAS I2 16.08.2026 — WT-33, decyzja Kuby na B3: „NIE MA".
+                        DO 16.08 STAŁ TU GOŁY `<Text>` ZE STRZAŁKĄ. Zawodnik czytał
+                        „Dodaj trening →", dotykał i nie działo się nic — napis
+                        o wyjściu zamiast wyjścia. Drugi taki sam był w Kalendarzu,
+                        w sekcji „Nadchodzące"; oba weszły commitem `0705760`.
+
+                        ⚠️ `blad_odczytu` ZOSTAJE NAPISEM, i to jest decyzja, nie
+                        przeoczenie. Jego CTA brzmi „Pociągnij w dół, żeby sprawdzić
+                        jeszcze raz." — wyjściem jest `RefreshControl`, nie dotknięcie.
+                        Owinięcie instrukcji w `TouchableOpacity` zrobiłoby z niej
+                        drugi rodzaj fałszywego przycisku. Dlatego bez strzałki:
+                        strzałka jest obietnicą akcji.
+
+                        `krokWTekscie` znaczy „krok stoi już w zdaniu wyżej" —
+                        wtedy `cta` jest puste i nie rysujemy nic. */}
+                    {pustkaDzis.krokWTekscie ? null
+                      : pustkaDzis.rodzaj === 'blad_odczytu' ? (
+                        <Text style={styles.cardBody}>{pustkaDzis.cta}</Text>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.inlineLink}
+                          onPress={() => router.push(pustkaDzis.rodzaj === 'brak_danych' ? '/kalendarz' : '/profil')}
+                        >
+                          <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
+                        </TouchableOpacity>
+                      )}
                   </>
                 ) : (
                   // ⭐ PLAN-D-F1 — `?? []` NIE WRACA TU TYLNYMI DRZWIAMI.

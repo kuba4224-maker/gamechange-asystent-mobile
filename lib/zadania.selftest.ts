@@ -32,8 +32,8 @@
 // + `fileURLToPath`. `tsconfig.json` appki ciągnie DOM i `new URL` wywraca
 // kontrolę typów na TS2769 (kosztowało rundę 13.08).
 
-import { readFileSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -166,7 +166,200 @@ console.log(sciezkaMigracji
   : `⛔ ${BRAK_MIGRACJI}\n`);
 
 // ═════════════════════════════════════════════════════════════════════
-console.log('R1. KUBEŁEK NIE JEST KOLUMNĄ');
+console.log('⭐ 0. (I2) EKRAN, KTÓRY RYSUJE ZADANIA ZAWODNIKA (K4 / O75)');
+// ═════════════════════════════════════════════════════════════════════
+//
+// ── CO BYŁO ZEPSUTE — nazwane liczbą, nie odczuciem ──────────────────
+//
+// Ten plik miał 69 asercji i ANI JEDNEJ, która czytałaby jakikolwiek EKRAN.
+// Cały jego zasięg to `readFileSync(lib/zadania.ts)` plus plik migracji.
+// Pas I1 zdjął go z listy ślepych za chorobę K5 (`POMINIETE` udające
+// przejście przy asercjach RLS) — ale K5 i **K4** NIE SĄ ROZŁĄCZNE i K4
+// tu został: strażnik nadal nie widział ekranu.
+//
+// ⚠️ NAGŁÓWEK TEGO PLIKU MÓWIŁ „Nie sprawdza EKRANU — ekranu nie ma,
+// buduje go pas C2". To była prawda 14.08 przez kilka godzin. EKRAN JEST
+// OD `e1845e4` (pas C2, 14.08.2026): `components/ListaZadan.tsx`.
+// Zdanie „ekranu nie ma" zestarzało się cicho i przez dwie doby usprawiedliwiało
+// zasięg, którego nic już nie usprawiedliwiało (**O67**).
+//
+// ── CO TU PILNUJEMY, A CZEGO PILNUJE KTO INNY ───────────────────────
+// ⛔ `lib/listaZadan.selftest.ts` (naprawiony przez I1) czyta TEN SAM ekran
+// i pilnuje KOLEJKI: sortowania, kubełków, sum, czterech zdań `zdanieOdczytu`,
+// zapisu odhaczenia i podniesienia. TEGO TU NIE POWTARZAMY.
+//
+// Ten blok pilnuje ZADAŃ ZAWODNIKA (`player_tasks`) — czyli tej części
+// łańcucha, którą liczy `lib/zadania.ts`:
+//   1. zadanie napisane przez zawodnika DOCHODZI z bazy na ekran
+//      (te same nazwy tabeli i kolumn, jedna kopia);
+//   2. POCHODZENIE (`origin`) jest WIDOCZNE i ROZRÓŻNIANE — „Ty to dodałeś."
+//      to nie jest to samo zdanie co „To wstawił system, nie Ty.";
+//   3. zadanie systemowe NIE UDAJE zadania zawodnika, a wartość `origin`,
+//      której ta wersja appki nie zna, nie wychodzi na ekran surowa.
+//
+// ── DLACZEGO TO JEST GROŹNE AKURAT TUTAJ ────────────────────────────
+// `zadanieZWiersza` ODRZUCA wiersz, którego nie umie przeczytać — i robi to
+// SŁUSZNIE. Skutek jest jednak taki, że rozjazd między zapytaniem na ekranie
+// a regułą w module NIE DAJE BŁĘDU: zadanie zawodnika po prostu ZNIKA
+// z listy, a odrzucenie ląduje w `odrzucone`. Ekran mówi wtedy „lista jest
+// niepełna", zawodnik nie wie, czego brakuje, a te 69 asercji świeci 69/69.
+//
+// ⚠️ CZEGO TEN BLOK NIE UDAJE. Czyta źródło ekranu JAKO TEKST. Nie uruchamia
+// Reacta i nie wie, czy ekran się rysuje. Podmiana wywołania na inne, równie
+// zepsute, przejdzie tu niezauważona.
+{
+  const bezKom = bezKomentarzyTS;
+
+  // ── ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76) ──
+  // Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
+  // narzędzia — a jest EKRANEM, KTÓRY ZNIKNĄŁ Z REPOZYTORIUM.
+  const BRAK_PLIKOW: string[] = [];
+  const surowe = (wzgledna: string): string => {
+    const p = join(appRoot, wzgledna);
+    if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+    return readFileSync(p, 'utf8');
+  };
+
+  const PLIK_LISTY = 'components/ListaZadan.tsx';
+  const PLIK_KARTY = 'components/PozycjaKolejkiCard.tsx';
+  const PLIK_RANKERA = 'lib/kolejkaPodania.ts';
+  const lista = bezKom(surowe(PLIK_LISTY));
+  const karta = bezKom(surowe(PLIK_KARTY));
+  const ranker = bezKom(surowe(PLIK_RANKERA));
+
+  check('⛔ (I2-0) każdy plik z listy strażnika istnieje i daje się odczytać',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce ekranu. `
+    + 'Popraw listę w tym pliku ALBO przywróć ekran; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
+  // ── Odkrywanie z katalogu, nie lista na sztywno (O69) ──
+  // ⚠️ Lista na sztywno KŁAMIE NA ZIELONO: dopisany konsument, który czyta
+  // `player_tasks` po swojemu, nie pojawiłby się w niej nigdy.
+  const POMIN_KAT = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  const chodz = (katalog: string, out: string[] = []): string[] => {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodz(p, out);
+      else if (p.endsWith('.ts') || p.endsWith('.tsx')) out.push(p);
+    }
+    return out;
+  };
+  const EKRANY = ['app', 'components']
+    .flatMap((k) => chodz(join(appRoot, k)))
+    .map((p) => relative(appRoot, p).split(sep).join('/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .sort();
+
+  const konsumenci = EKRANY.filter(
+    (p) => /from\s+'[^']*\/zadania'/.test(bezKom(readFileSync(join(appRoot, p), 'utf8'))));
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c` (po D2 i I1), nie przepisane
+  // z pamięci. RÓWNOŚĆ, nie „≥ 1" (**O73**): „co najmniej jeden konsument"
+  // przeszłoby także wtedy, gdy modal „Moje zadania" przestanie czytać
+  // `player_tasks`, a zostanie sam podpis wejścia na ekranie „Ja".
+  const KONSUMENCI = ['app/(tabs)/dzis.tsx', 'app/(tabs)/ja.tsx', PLIK_LISTY].sort();
+  const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
+  const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
+  check('⭐ (I2-0) zadania zawodnika czytają DOKŁADNIE te pliki, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+    brakujacy.length === 0 && nadmiarowi.length === 0,
+    `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
+    + '→ ubył: zawodnik przestał gdzieś widzieć swoje zadania, a te 69 asercji niżej nadal jest zielonych; '
+    + 'doszedł: sprawdź, czy nowe miejsce nie czyta `player_tasks` z własną listą kolumn.');
+
+  // ── ⛔ JEDNA NAZWA TABELI I JEDNA LISTA KOLUMN ────────────────────
+  // Defekt, którego pilnuje: ekran wpisuje `'player_tasks'` i listę kolumn
+  // ręcznie. Wtedy nowa kolumna dołożona do `KOLUMNY_ZADANIA` NIE PRZYCHODZI
+  // z bazy, `zadanieZWiersza` odrzuca wiersz z powodem „wiersz bez `…`",
+  // a ZADANIE ZAWODNIKA ZNIKA MU Z LISTY BEZ ANI JEDNEGO BŁĘDU.
+  check('⛔ (I2-0) ekran pyta bazę NAZWĄ Z MODUŁU (`TABELA_ZADAN`), nie napisem wpisanym u siebie',
+    /\.from\(\s*TABELA_ZADAN\s*\)/.test(lista) && !new RegExp(`['"]${TABELA_ZADAN}['"]`).test(lista),
+    `na ekranie stoi kopia nazwy tabeli „${TABELA_ZADAN}" — literówka albo zmiana nazwy `
+    + 'rozjedzie się po cichu, a zawodnik dostanie „nie masz nic do zrobienia" zamiast swoich zadań');
+
+  check('⛔ (I2-0) ekran pyta bazę LISTĄ KOLUMN Z MODUŁU (`SELECT_ZADANIA`), nie wpisaną ręcznie',
+    /\.select\(\s*SELECT_ZADANIA\s*\)/.test(lista)
+    && !/\.select\(\s*['"][^'"]*\breason_fact\b/.test(lista),
+    'lista kolumn wpisana na ekranie rozjedzie się ze stałą po cichu — brakująca kolumna '
+    + 'nie daje błędu, tylko odrzucenie wiersza przez `zadanieZWiersza`, czyli ZNIKNIĘCIE zadania');
+
+  // ── ⛔ ZAPIS MUSI SPEŁNIAĆ REGUŁĘ ODCZYTU ────────────────────────
+  // `zadanieZWiersza` odrzuca wiersz w stanie innym niż `open` BEZ daty zmiany
+  // („fakt bez momentu"). Ekran, który zapisze samo `state: 'done'`, sprawi,
+  // że odhaczone zadanie stanie się wierszem NIECZYTELNYM — zniknie z listy
+  // nie dlatego, że jest zrobione, tylko dlatego, że jest zepsute.
+  const zapisOdhaczenia = /\.update\(\{[^}]*\bstate:\s*'done'[^}]*\}\)/.exec(lista)?.[0] ?? '';
+  check('⛔ (I2-0) odhaczenie zapisuje `state` I `state_changed_at` naraz — stan bez momentu jest odrzucany przy odczycie',
+    zapisOdhaczenia.length > 0 && /state_changed_at\s*:/.test(zapisOdhaczenia),
+    `zapis odhaczenia na ekranie: ${zapisOdhaczenia || '(nie znalazłem `state: \'done\'`)'} — `
+    + 'bez `state_changed_at` `zadanieZWiersza` odrzuci ten wiersz z powodem „fakt bez momentu", '
+    + 'więc zadanie zniknie zawodnikowi jako NIECZYTELNE, a nie jako zrobione');
+
+  // ── ⭐ POCHODZENIE ZADANIA JEST WIDOCZNE I ROZRÓŻNIANE (WG-17) ────
+  // ⚠️ Kanał jest długi: `origin` z bazy → `Zadanie.zrodlo` (moduł) →
+  // `skadToWiemy.klucz` (ranker) → zdanie `SKAD_TO_WIEMY` (karta). Rozerwanie
+  // go w KTÓRYMKOLWIEK miejscu daje pozycję bez wiersza „skąd to wiemy" —
+  // i wtedy zadanie wstawione przez system wygląda dokładnie tak samo,
+  // jak zadanie, które zawodnik napisał sobie sam.
+  check('⭐ (I2-0) ranker bierze klucz pochodzenia Z MODUŁU (`z.zrodlo`), nie liczy go po swojemu',
+    /klucz:\s*z\.zrodlo\s*\?\?/.test(ranker),
+    'ranker przestał przekazywać `zrodlo` zadania do śladu — wiersz „skąd to wiemy" '
+    + 'zniknie albo powie coś, czego moduł nie stwierdził');
+
+  const brakZdania = (ZRODLA_ZADANIA as readonly string[])
+    .filter((z) => !new RegExp(`(^|\\n)\\s*${z}\\s*:\\s*['"]`).test(karta));
+  check('⭐ (I2-0) KAŻDE znane źródło z `ZRODLA_ZADANIA` ma na ekranie swoje zdanie „skąd to wiemy"',
+    brakZdania.length === 0,
+    `źródła bez zdania w SKAD_TO_WIEMY: ${brakZdania.join(', ')} — pozycja z takim `
+    + '`origin` traci wiersz „skąd to wiemy" (`SKAD_TO_WIEMY[klucz]` = `undefined`), '
+    + 'a zawodnik nie ma jak odróżnić rzeczy, którą dodał sobie sam, od tej, którą wstawił mu produkt');
+
+  // ⛔ ZADANIE SYSTEMOWE NIE UDAJE ZADANIA ZAWODNIKA — dwa różne zdania.
+  const zdanieDla = (z: string): string | null =>
+    new RegExp(`(^|\\n)\\s*${z}\\s*:\\s*'((?:[^'\\\\]|\\\\.)*)'`).exec(karta)?.[2] ?? null;
+  const zdaniePlayer = zdanieDla('player');
+  const zdanieSystem = zdanieDla('system');
+  check('⛔ ⭐ (I2-0) „Ty to dodałeś" i „to wstawił system" to DWA RÓŻNE zdania, nie jedno',
+    zdaniePlayer !== null && zdanieSystem !== null && zdaniePlayer !== zdanieSystem,
+    `player: „${zdaniePlayer ?? '(brak)'}" · system: „${zdanieSystem ?? '(brak)'}" — `
+    + 'gdy oba brzmią tak samo, produkt przypisuje zawodnikowi rzecz, której nie wybrał, '
+    + 'albo odbiera mu autorstwo rzeczy, którą wybrał (Z0: fakt_o_tobie ≠ propozycja)');
+
+  // ⛔ WARTOŚĆ SPOZA ZBIORU NIE WYCHODZI NA EKRAN SUROWA.
+  // `lib/zadania.ts` przy nieznanym `origin` daje `zrodlo: null` i chowa
+  // surowiec w `nieznaneZrodlo`; ranker wstawia wtedy klucz `nieznane`.
+  // Karta MA dla tego klucza nie mieć zdania — wiersz się wtedy nie rysuje.
+  check('⛔ (I2-0) nieznane źródło NIE dostaje zgadniętego zdania — klucza `nieznane` nie ma w `SKAD_TO_WIEMY`',
+    !/(^|\n)\s*nieznane\s*:\s*['"]/.test(karta)
+    && /SKAD_TO_WIEMY\[\s*pozycja\.skadToWiemy\.klucz\s*\]/.test(karta)
+    && /skad\s*!==\s*undefined/.test(karta),
+    'karta albo zgaduje brzmienie dla źródła, którego ta wersja appki nie zna, albo przestała '
+    + 'sprawdzać `undefined` — w obu wypadkach zawodnik czyta o pochodzeniu zdanie, '
+    + 'którego produkt nie ma prawa postawić (Z0)');
+
+  check('⛔ (I2-0) surowa wartość `origin` z bazy nie jest rysowana zawodnikowi',
+    !/\{\s*[A-Za-z_$][\w$.]*\.nieznaneZrodlo\s*\}/.test(karta)
+    && !/\{\s*[A-Za-z_$][\w$.]*\.nieznaneZrodlo\s*\}/.test(lista),
+    'na ekranie stoi `{…nieznaneZrodlo}` — zawodnik zobaczy surową wartość z kolumny '
+    + '(„club_import" wygląda jak etykieta, więc nikt nigdy nie zgłosi, że etykiety brakuje)');
+
+  // ── ⭐ ZAPADKA NA SKASOWANIE ─────────────────────────────────────
+  // Bez niej WSZYSTKIE asercje wyżej spełnia też ekran, który zadań
+  // zawodnika nie pokazuje wcale — a strażnik nagradzałby wtedy skasowanie.
+  check('⭐ (I2-0) ekran NAPRAWDĘ czyta zadania modułem: `odczytZadan({ data, error })` z całej odpowiedzi',
+    /odczytZadan\(\s*\{[^}]*\bdata:[^}]*\berror:[^}]*\}\s*\)/.test(lista),
+    'zniknęło wywołanie `odczytZadan` z pełną odpowiedzią bazy — cztery stany R5 nie mają '
+    + 'z czego powstać, a `data ?? []` zamieni odmowę RLS w pogodne „nic nie masz do zrobienia"');
+
+  check('⭐ (I2-0) …i NAPRAWDĘ oddaje ten odczyt kolejce — bez tego zadania są policzone i nienarysowane',
+    /\bzadania:\s*weZadania\b/.test(lista) && /\bodczyt:\s*weZadania\b/.test(lista),
+    'wynik `odczytZadan` nie dociera do wejść kolejki albo do stanu ekranu — zadanie zawodnika '
+    + 'jest wtedy odczytane bezbłędnie i nie pojawia się na żadnej liście');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\nR1. KUBEŁEK NIE JEST KOLUMNĄ');
 // ═════════════════════════════════════════════════════════════════════
 {
   // ⚠️ ASERCJA NA REGUŁĘ, NIE NA DZISIEJSZĄ LISTĘ PÓL: nowa kolumna z dowolną

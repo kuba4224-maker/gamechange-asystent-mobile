@@ -160,11 +160,42 @@ export type Trafienie = { funkcja: string; fragment: string };
  * (`{`${x.segment_id} — …`}`) ani przepuszczonej przez zmienną pomocniczą
  * dwie linie wyżej. Łapie zapis, który ludzie naprawdę piszą.
  */
+/**
+ * ⭐ PAS I2 16.08.2026 — DRUGA POŁOWA SŁOWNIKA OGONÓW, ZMIERZONA MUTACJAMI.
+ *
+ * ── CO BYŁO ZEPSUTE, CO DO POZYCJI ───────────────────────────────────
+ * Lista ogonów wyżej opisuje NAZWY KOLUMN W BAZIE (`segment_id`, `injury_type`).
+ * Ale surowa wartość NIE DOCHODZI DZIŚ NA EKRAN POD NAZWĄ KOLUMNY — dochodzi
+ * pod nazwą POLA, do którego przepakował ją produkt. Pas F2 nadał temu polu
+ * nazwę `surowy` (`OpisSegmentu = { znany: false; surowy; komunikat }`
+ * w `lib/labels.ts`), a klucz z `diagnostics.scores` chodzi po ekranie wyniku
+ * diagnozy jako gołe `id`.
+ *
+ * ⛔ ZMIERZONE 16.08.2026 TRZEMA MUTACJAMI NA DYSKU (nota I2):
+ *   • `components/DiagnosisProfileView.tsx`, wiersz deficytu —
+ *     `{opisDeficytu.surowy}` zamiast dwugałęziowego wyrażenia: **0 FAIL-i**;
+ *   • ten sam wiersz, `{id}` (klucz z `diagnostics.scores`):  **0 FAIL-i**;
+ *   • `app/(tabs)/biblioteka.tsx`, `{u.material.surowy}`:      **0 FAIL-i**
+ *     — i to w pliku, którego NIE pilnuje ani `nazwaObszaruNaEkranie`
+ *     (cztery pliki pasa G1), ani `(E2-5)`. Trzy strażniki, zero czerwieni.
+ *   KONTROLA: ta sama pozycja z ogonem ze starej listy (`{opisDeficytu.surowy_id}`)
+ *   dawała **2 FAIL-e** — czyli ślepota była w SŁOWNIKU, nie w regule „dziecko
+ *   tekstowe JSX" ani w białych znakach.
+ *
+ * ⭐ ROZSZERZENIE KOSZTUJE DZIŚ ZERO: na `main` = `123e09c` daje **0 nowych
+ * trafień** w 83 przemiatanych plikach i **0** w `_diag_backup/`. To nie jest
+ * poszerzenie „na wszelki wypadek" — to zamknięcie dziury zmierzonej mutacją.
+ *
+ * ⚠️ `^id$` musi być ZAKOTWICZONE z obu stron: bez tego łapałoby `valid`,
+ * `hybrid` i każdą nazwę kończącą się na „id".
+ */
+const OGON_PASA_I2 = /^(id|surowy|surowa|klucz)$|_surowy$|_klucz$/i;
+
 export function surowyRenderNazwy(zywy: string): Trafienie[] {
   // Kolumny, których wartość jest IDENTYFIKATOREM, a nie zdaniem dla człowieka.
   // ⚠️ `_note`, `_description`, `title` celowo poza listą: tam treść pisze
   // człowiek i renderowanie jej wprost jest poprawne, nie wyciekiem.
-  const PODEJRZANY_OGON = /(_type|_id|_location|_reason|_category|_response|_direction|segment|segmentId)$/i;
+  const PODEJRZANY_OGON = /(_type|_id|_location|_reason|_category|_response|_direction|segment|segmentId)$|^(id|surowy|surowa|klucz)$|_surowy$|_klucz$/i;
   const re = />\s*\{\s*([A-Za-z_$][\w$]*(?:\??\.[\w$]+)*)\s*\}\s*</g;
   const out: Trafienie[] = [];
   let m: RegExpExecArray | null = re.exec(zywy);
@@ -257,6 +288,23 @@ const PROBKI: Probka[] = [
     co: 'render', maTrafic: false,
     zrodlo: 'export const Karta = () => (<View key={row.segment_id} segmentId={x.segment_id} '
       + 'style={styles.cardSegment}><Text>{row.title}</Text></View>);',
+  },
+  // ── ⭐ PAS I2 16.08.2026 — dwie próbki na dziurę zmierzoną mutacją ──
+  {
+    nazwa: '⭐ (I2) postać 2 · surowa wartość pod nazwą POLA `surowy`, nie kolumny',
+    co: 'render', maTrafic: true,
+    zrodlo: 'export const Wiersz = () => (<View><Text style={s.n}>{opisDeficytu.surowy}</Text></View>);',
+  },
+  {
+    nazwa: '⭐ (I2) postać 2 · gołe `id` — klucz z `diagnostics.scores` jako nazwa obszaru',
+    co: 'render', maTrafic: true,
+    zrodlo: 'export const Wiersz = () => (<View><Text style={s.n}>{id}</Text></View>);',
+  },
+  {
+    nazwa: '⭐ (I2) postać 2 · KONTROLA rozszerzenia — `valid`, `hybrid`, `title` NIE są identyfikatorami',
+    co: 'render', maTrafic: false,
+    zrodlo: 'export const Wiersz = () => (<View><Text>{row.valid}</Text><Text>{o.hybrid}</Text>'
+      + '<Text>{u.material.title}</Text></View>);',
   },
   {
     nazwa: 'postać 3 · zwykłe wywołanie helpera',
@@ -826,6 +874,36 @@ console.log('\n4. ⭐ TEST MUTACYJNY — liczba FAIL-i przy każdej mutacji');
           + 'export const opis = (x: string) => opiszSegment(x);'),
       },
     },
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ⭐ PAS I2 16.08.2026 — DWIE MUTACJE ODWZOROWUJĄCE POMIAR NA DYSKU
+    // ═══════════════════════════════════════════════════════════════════
+    // ⚠️ Obie były PUSZCZONE NAPRAWDĘ, `perl -0pi -e` na pliku produkcyjnym
+    // i cofnięte przez `git checkout HEAD --`. Przed rozszerzeniem słownika
+    // ogonów dawały **0 FAIL-i** w tym pliku. Tutaj są zapisane strukturalnie,
+    // żeby nikt nie musiał powtarzać tego na dysku (O55).
+    {
+      nazwa: 'I2-M1 · ⭐⭐ surowa wartość na ekranie pod nazwą POLA `surowy`',
+      opis: 'wiersz wąskiego gardła rysuje `{opisDeficytu.surowy}` zamiast dwóch gałęzi. '
+        + 'Zawodnik czyta „explosive_power" jako nazwę SWOJEGO obszaru. ZMIERZONE 16.08: '
+        + 'przed rozszerzeniem słownika ogonów ta mutacja dawała 0 FAIL-i',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: zeZrodlem('components/DiagnosisProfileView.tsx',
+          'export const Wiersz = () => (<View><Text style={s.deficitName}>{opisDeficytu.surowy}</Text></View>);'),
+      },
+    },
+    {
+      nazwa: 'I2-M2 · ⭐⭐ gołe `id` z `diagnostics.scores` na ekranie spoza pasa G1',
+      opis: 'Biblioteka rysuje `{u.material.surowy}`. ⛔ TEGO PLIKU NIE PILNUJE ANI '
+        + '`nazwaObszaruNaEkranie` (cztery pliki pasa G1), ANI `(E2-5)` — zmierzone 16.08: '
+        + 'trzy strażniki, zero czerwieni. To jest dziura, którą zamyka rozszerzenie ogonów',
+      zasady: {
+        ...ZASADY_PRAWDZIWE,
+        zrodla: zeZrodlem('app/(tabs)/biblioteka.tsx',
+          'export default function Biblioteka(){ return (<View><Text style={s.t}>{u.material.surowy}</Text></View>); }'),
+      },
+    },
   ];
 
   console.log(`\nbateria ma ${ROZMIAR} asercji · na prawdziwych zasadach FAIL-i: ${failePrawdziwe}\n`);
@@ -917,6 +995,93 @@ console.log('\n5. ⭐ KONTROLA HISTORYCZNA (O70) — detektor puszczony na choro
       `${helperStare.length} trafień — a `
       + '`lib/labels.ts` powstał 08.08.2026, więc w kopii z 29.07 nie ma czego wołać');
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n6. ⭐ PAS I2 16.08.2026 — SŁOWNIK OGONÓW SPRZĘŻONY Z KODEM (K4 / O75)');
+// ═════════════════════════════════════════════════════════════════════
+// ⚠️ KOREKTA KLASY WOBEC AUDYTU H1. H1 zaliczył ten plik do „ślepych"
+// z powodu §5: „pilnuje LISTY DŁUGU, nie naprawy; F2 nic nie naprawił
+// w produkcji, więc commit z «jego» defektem nie istnieje". Pierwsza część
+// jest prawdziwa, DRUGA SIĘ ZDEZAKTUALIZOWAŁA: pas G1 (`d893d38`, 16.08)
+// zdjął 11 z 12 wywołań `segmentLabel()`, więc stan „z defektem" to dziś
+// po prostu `d893d38^`. **Ten plik NIE JEST K4** — czyta 83 pliki
+// produkcyjne z `app/`, `components/` i `lib/`, w tym każdy ekran.
+//
+// ⭐ ALE MA WŁASNĄ CHOROBĘ, ZMIERZONĄ MUTACJĄ 16.08 I OPISANĄ PRZY
+// `OGON_PASA_I2`: przemiata wszystkie ekrany i NIE WIDZI na nich surowej
+// wartości, jeżeli ta nie nazywa się jak kolumna w bazie. Sekcja niżej
+// SPRZĘGA słownik ogonów z kodem, żeby przy następnej zmianie nazwy pola
+// zapalił się strażnik, a nie zawodnik.
+{
+  const root = dirname(libDir);
+  const BRAK: string[] = [];
+  const zrodlo = (wzgledna: string): string => {
+    const p = join(root, wzgledna);
+    if (!existsSync(p)) { BRAK.push(wzgledna); return ''; }
+    return zyweZrodlo(readFileSync(p, 'utf8'));
+  };
+
+  const PLIK_LABELS = 'lib/labels.ts';
+  const PLIK_WIDOK = 'components/DiagnosisProfileView.tsx';
+  const labels = zrodlo(PLIK_LABELS);
+  const widok = zrodlo(PLIK_WIDOK);
+
+  check('⛔ (I2-0) oba pliki, z których wyprowadzam słownik ogonów, istnieją',
+    BRAK.length === 0,
+    `NIE MA: ${BRAK.join(', ')} — asercje niżej czytają PUSTY tekst i nie znaczą nic`);
+
+  // ── SPRZĘŻENIE 1: nazwa pola, którym surowa wartość chodzi po produkcie ──
+  // `OpisSegmentu = { znany: false; surowy: string; komunikat: string }`.
+  // Detektor musi znać nazwę TEGO pola, bo to pod nią wartość dojeżdża na ekran.
+  const poleSurowe = /znany:\s*false;\s*(\w+):\s*string/.exec(labels)?.[1] ?? '';
+  check('⭐ (I2-0) pole z surową wartością w `lib/labels.ts` nadal nazywa się tak, jak zna je detektor',
+    poleSurowe !== '' && OGON_PASA_I2.test(poleSurowe),
+    `gałąź „nieznany" w \`OpisSegmentu\` niesie surową wartość w polu \`${poleSurowe || '(nie znalazłem)'}\`, `
+    + 'którego SŁOWNIK OGONÓW NIE ZNA — od tej chwili `<Text>{opis.' + (poleSurowe || 'x') + '}</Text>` '
+    + 'przechodzi tu na zielono, a zawodnik czyta surowe id z bazy jako nazwę swojego obszaru. '
+    + 'Dopisz ten ogon do `OGON_PASA_I2`');
+
+  // ── SPRZĘŻENIE 2: nazwa zmiennej, pod którą klucz `diagnostics.scores`
+  //    chodzi po ekranie wyniku diagnozy. Dziś to gołe `id`. ──
+  const kluczDeficytu = /deficits\.map\(\s*\(\s*\[\s*(\w+)\s*\]/.exec(widok)?.[1] ?? '';
+  check('⭐ (I2-0) klucz deficytu na ekranie nadal nosi nazwę, którą detektor rozpoznaje',
+    kluczDeficytu !== '' && OGON_PASA_I2.test(kluczDeficytu),
+    `\`${PLIK_WIDOK}\` wiąże klucz z \`diagnostics.scores\` pod nazwą \`${kluczDeficytu || '(nie znalazłem)'}\`, `
+    + 'spoza słownika ogonów — regresja `<Text>{' + (kluczDeficytu || 'x') + '}</Text>` przeszłaby tu bez śladu. '
+    + 'Dopisz ten ogon do `OGON_PASA_I2` albo popraw tę asercję, ale nie zostawiaj jej zielonej');
+
+  // ── ZAPADKA: rozszerzenie ma DZIŚ zero trafień — RÓWNOŚĆ, nie „≥ 0" ──
+  // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c`: 0 trafień w 83 przemiatanych
+  // plikach. Nie „prawie zero" — zero. Każde nowe wymaga werdyktu tak samo,
+  // jak wymaga go trafienie starego słownika (§3).
+  const NOWY_OGON_TYLKO = />\s*\{\s*([A-Za-z_$][\w$]*(?:\??\.[\w$]+)*)\s*\}\s*</g;
+  const trafieniaI2: string[] = [];
+  for (const plik of PLIKI_PRZEMIATANE) {
+    const zywy = zyweZrodlo(ZRODLA_PRAWDZIWE[plik]);
+    const re = new RegExp(NOWY_OGON_TYLKO.source, 'g');
+    let m: RegExpExecArray | null = re.exec(zywy);
+    while (m !== null) {
+      const ogon = m[1].split('.').pop() ?? '';
+      if (OGON_PASA_I2.test(ogon)) trafieniaI2.push(`${plik} :: ${nazwaFunkcjiNad(zywy, m.index)} — ${m[0].replace(/\s+/g, ' ').trim()}`);
+      m = re.exec(zywy);
+    }
+  }
+  console.log(`   ogony pasa I2 (${OGON_PASA_I2.source}) — trafień dziś: ${trafieniaI2.length} (zmierzone 16.08: 0)`);
+  check('⭐ (I2-0) rozszerzenie słownika ogonów daje DOKŁADNIE 0 trafień — tyle, co 16.08 (O73)',
+    trafieniaI2.length === 0,
+    `${trafieniaI2.length} NOWYCH pod ogonami pasa I2 — przeczytaj DROGĘ ZAPISU i wydaj werdykt: `
+    + `${trafieniaI2.join(' | ')}`);
+
+  // ── ZAPADKA NA WYPADNIĘCIE EKRANU Z PRZEMIATANIA ──
+  // Bez tej asercji dziura zamknięta wyżej otwiera się z powrotem przez
+  // wyłączenie pliku ze zbioru — a licznik „mam co przemiatać ≥ 50" tego nie widzi.
+  const EKRANY_OBOWIAZKOWE = [PLIK_WIDOK, 'app/(tabs)/biblioteka.tsx', 'app/(tabs)/ja.tsx', PLIK_LABELS];
+  const wypadly = EKRANY_OBOWIAZKOWE.filter((p) => !PLIKI_PRZEMIATANE.includes(p));
+  check('⛔ (I2-0) ekrany, na których zmierzono dziurę, SĄ w zbiorze przemiatanym',
+    wypadly.length === 0,
+    `wypadły z przemiatania: ${wypadly.join(', ')} — detektor przestał widzieć ścieżkę, `
+    + 'na której 16.08 zmierzono trzy mutacje z zerem FAIL-i');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
