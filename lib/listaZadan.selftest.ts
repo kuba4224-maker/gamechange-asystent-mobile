@@ -274,6 +274,10 @@ function pozycjaZCzasem(id: string, sekundy: number | null): PozycjaKolejki {
     milczy: null,
     termin: null,
     godzina: null,
+    // ⭐ PAS B2 16.08.2026 — `ileRazem` jest polem OBOWIĄZKOWYM `PozycjaKolejki`.
+    // `1` = pozycja pojedyncza, nic nie zwinięto — a tak właśnie wygląda każda
+    // pozycja budowana ręcznie na potrzeby sumy czasu.
+    ileRazem: 1,
   };
 }
 

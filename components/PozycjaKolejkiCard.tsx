@@ -88,6 +88,32 @@ export const KUBELEK_ETYKIETA: Record<Kubelek, string> = {
 export const PODNIESIONE_PRZEZ_CIEBIE = 'Podniosłeś to do „Teraz".';
 export const SYSTEM_PROPONOWAL = 'System proponował: ';
 
+// ⚠️ DO PRZEJRZENIA — B2
+// ⭐ PAS B2 16.08.2026 — LICZNIK ZWINIĘTYCH POWTÓRZEŃ.
+// Ranker (`lib/kolejkaPodania.ts#zwinPowtorzenia`) scala pozycje o tym samym
+// rodzaju i tym samym zdaniu w JEDEN wiersz. ⛔ Wiersz, który tego nie mówi,
+// jest UKRYCIEM, nie porządkiem (Z0): zawodnik z dwunastoma sesjami w Bloku
+// zobaczyłby jedną i miałby prawo sądzić, że tylko tyle ma zaplanowane.
+export const POWTORZENIE_PRZED = 'To samo powtarza się jeszcze ';
+export const POWTORZENIE_RAZ = ' raz.';
+export const POWTORZENIE_RAZY = ' razy.';
+
+/**
+ * „Ile jeszcze razy" — z `pozycja.ileRazem`, czyli Z RANKERA, nigdy z długości
+ * czegokolwiek, co ekran ma pod ręką.
+ *
+ * ⚠️ `ileRazem` LICZY WIERSZ, NA KTÓRYM STOI. Zawodnik czyta jedno zdanie
+ * i pyta, ile TAKICH SAMYCH jeszcze przed nim — więc wypisujemy `ileRazem − 1`.
+ * ⛔ `1` (i cokolwiek mniejszego) oddaje `null` i wiersz się nie rysuje: „to samo
+ * powtarza się jeszcze 0 razy" jest hałasem, nie informacją.
+ */
+export function opiszPowtorzenie(ileRazem: number): string | null {
+  if (!Number.isFinite(ileRazem)) return null;
+  const pozostale = Math.floor(ileRazem) - 1;
+  if (pozostale < 1) return null;
+  return POWTORZENIE_PRZED + String(pozostale) + (pozostale === 1 ? POWTORZENIE_RAZ : POWTORZENIE_RAZY);
+}
+
 /**
  * „Ile zajmie" — bez odmiany przez przypadki, świadomie.
  * ⚠️ `null` NIE JEST ZEREM: przy braku danych ta funkcja oddaje `null`, a wiersz
@@ -170,6 +196,8 @@ export default function PozycjaKolejkiCard({
   const termin = pozycja.termin !== null && pozycja.termin !== dzis
     ? opiszTermin(pozycja.termin)
     : null;
+  // ⭐ PAS B2 — liczba scalonych powtórzeń. `null` przy pozycji pojedynczej.
+  const powtorzenie = opiszPowtorzenie(pozycja.ileRazem);
 
   return (
     <View style={[styles.pozycja, pierwsza && styles.pozycjaPierwsza, milczy && styles.pozycjaMilczaca]}>
@@ -205,6 +233,14 @@ export default function PozycjaKolejkiCard({
         <Text style={styles.czas}>
           {[termin, czas].filter((x) => x !== null).join('  ·  ')}
         </Text>
+      ) : null}
+
+      {/* ── ⭐ PAS B2: ILE TAKICH SAMYCH RZECZY JEST W TYM JEDNYM WIERSZU ── */}
+      {/* ⛔ Wiersz rysuje się WYŁĄCZNIE przy zwiniętej pozycji (`ileRazem > 1`).
+          Napis pochodzi ze stałych tego pliku przez `opiszPowtorzenie` — ⛔ ani
+          jednej kopii wpisanej wprost w JSX, ani liczby policzonej tutaj. */}
+      {powtorzenie !== null ? (
+        <Text style={[styles.powtorzenie, milczy && styles.tekstMilczacy]}>{powtorzenie}</Text>
       ) : null}
 
       {/* ── POZYCJA WSTRZYMANA: WIDOCZNA, WYSZARZONA, Z POWODEM ─────── */}
@@ -268,6 +304,8 @@ const styles = StyleSheet.create({
   godzina: { ...typography.bodyMedium, fontSize: 13, color: colors.brand },
   dlaczego: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 4 },
   czas: { ...typography.bodyMedium, fontSize: 12, color: colors.textTertiary, marginTop: 4 },
+  // ⭐ PAS B2 — ta sama waga co „ile zajmie": to jest fakt o planie, nie ostrzeżenie.
+  powtorzenie: { ...typography.bodyMedium, fontSize: 12, color: colors.textSecondary, marginTop: 4 },
   milczenie: { marginTop: 8 },
   milczeniePowod: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary },
   milczenieWarunek: { ...typography.body, fontSize: 12, lineHeight: 18, color: colors.textTertiary, marginTop: 2 },

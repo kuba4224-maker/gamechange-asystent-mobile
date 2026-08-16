@@ -62,6 +62,32 @@
 // Osłona — `czyOslonaAktywna()` stamtąd samo. Druga kopia tej samej reguły
 // to gwarantowany cichy rozjazd: obie działają, obie mają zielone testy,
 // a odpowiadają różnie.
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PAS B2 16.08.2026 — PIĘĆ RAZY TO SAMO ZDANIE (sekcja 9b)
+// ═════════════════════════════════════════════════════════════════════
+// CO BYŁO ZEPSUTE — nazwane liczbą, zmierzone na produkcji 16.08.2026
+// (zawodnik `8d7e1ebb…`, projekt `kqrbztsvepjtggjmmcdx`):
+//
+//   `calendar_events` = 12 wierszy · JEDEN tytuł („Blok Skupienia: Bieg
+//   ciągły w strefie tlenowej") · JEDEN `focus_block_id` · 12 RÓŻNYCH dat.
+//
+// Ranker robił z tego PIĘĆ osobnych pozycji (daty ≥ dziś), stojących na
+// miejscach 4–8 z wagami 650/650/650/500/500. Skutek zmierzony
+// uruchomieniem, nie odczytany z kodu: JEDYNY wgląd mówiący coś o tym
+// zawodniku (`brak_roku_urodzenia`) stał na miejscu DZIEWIĄTYM — poza
+// prefiksem „Dziś" (4) i poza prefiksem „Tydzień" (8). Był policzony,
+// przeszedł bramkę, miał `id` — i nie było widoku, który by go wydał.
+//
+// To łamie P0 (rzecz ważna nie może wymagać dotknięcia — tu nie wystarczało
+// nawet dotknięcie) i N1 (ekran zajmuje się powtórzeniem WŁASNEGO planu
+// zamiast tym, co zmierzył u zawodnika).
+//
+// CO ROBI TERAZ. `ulozKolejke()` — po posortowaniu, nigdy na ekranie —
+// scala pozycje o tym samym RODZAJU i tym samym ZDANIU w JEDEN wiersz,
+// który NIESIE LICZBĘ scalonych rzeczy. Reguły stoją w sekcji 9b.
+// ⛔ Zwijanie NIE JEST filtrowaniem: nic nie znika bez śladu, bo wiersz
+// mówi wprost, ile rzeczy w sobie ma (Z0).
 // ═════════════════════════════════════════════════════════════════════
 
 import { coPokazacNaDzis, czyOslonaAktywna, obowiazuje } from './ograniczenia';
@@ -289,6 +315,19 @@ export type PozycjaKolejki = {
   termin: string | null;
   /** Godzina 'HH:MM' albo `null` = zawodnik jej nie podał (D10). */
   godzina: string | null;
+  /**
+   * ⭐ PAS B2 — ILE POZYCJI NIESIE TEN JEDEN WIERSZ, RAZEM Z NIM SAMYM.
+   *
+   * `1` = pozycja pojedyncza, nic nie zwinięto. `5` = ranker zastał pięć
+   * pozycji o tym samym rodzaju i tym samym zdaniu i wydał jedną.
+   *
+   * ⛔ POLE JEST OBOWIĄZKOWE I NIE MA WARTOŚCI DOMYŚLNEJ. Zwijanie, które
+   * chowa liczbę, jest ukryciem, nie porządkiem (Z0): zawodnik ma przeczytać
+   * jedno zdanie PLUS informację, że to samo czeka go jeszcze N razy.
+   * Gdyby to pole było opcjonalne, ekran musiałby zgadywać `?? 1` — czyli
+   * mówić „jedna rzecz" o pięciu.
+   */
+  ileRazem: number;
 };
 
 /** Kandydat — to, co producent oddaje bramce. ⚠️ `skadToWiemy` może tu być `null`: bramka go wtedy ODRZUCI z powodem. */
@@ -888,6 +927,123 @@ function policzKontekst(w: WejsciaKolejki): Kontekst {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// 9b. ZWIJANIE POWTÓRZEŃ (PAS B2, 16.08.2026)
+// ─────────────────────────────────────────────────────────────────────
+// ⛔ TO ROBI RANKER, NIE EKRAN — i to jest cała decyzja D1 tego pasa.
+// Ekran, który sam scala pozycje, jest DRUGIM PRODUCENTEM tego, co zawodnik
+// widzi. Rozjechałby się z pierwszym przy pierwszej zmianie i oba byłyby
+// przy tym zielone. Kolejność ma jedno źródło (WG-22) — liczba wierszy też.
+
+/**
+ * KLUCZ ZWIJANIA — „to samo" znaczy: ten sam RODZAJ i to samo ZDANIE,
+ * KTÓRE CZYTA ZAWODNIK (decyzja D2).
+ *
+ * ⛔ NIE `id` i NIE `focus_block_id`. Zawodnik nie widzi ani jednego, ani
+ * drugiego; dwanaście wierszy `calendar_events` o jednym tytule ma dwanaście
+ * różnych `id` i JEDEN `focus_block_id`, więc oba te klucze odpowiadają na
+ * inne pytanie niż „czy zawodnik czyta pięć razy to samo".
+ *
+ * ⛔ TERMINU I GODZINY W KLUCZU NIE MA — CELOWO. To jest dokładnie ta rzecz,
+ * która się w powtórzeniu RÓŻNI (12 dat) i którą zwinięty wiersz niesie
+ * osobno (D5). Wpisanie terminu do klucza znaczyłoby „nie zwijaj nigdy".
+ *
+ * ⚠️ STAN POZYCJI WCHODZI DO KLUCZA (decyzja D3). Pozycja MILCZĄCA i pozycja
+ * mówiąca to dwa różne fakty, nawet przy identycznym zdaniu: karta rysuje
+ * przy milczącej powód i warunek powrotu, a scalenie jej z mówiącą schowałoby
+ * jedno i drugie. Tak samo `podniesioneRecznie`: decyzja zawodnika ma zostać
+ * widoczna (M1, M2), a nie wtopić się w wiersz, którego sam nie podnosił.
+ *
+ * ⚠️ ZMIERZONE 16.08.2026 — CZEGO W TYM KLUCZU NIE MA I DLACZEGO.
+ * `status` wydarzenia (`scheduled` / `cancelled` / `completed`) NIE DOCHODZI
+ * do rankera: `zKalendarza()` przepuszcza wyłącznie `status === 'scheduled'`,
+ * więc pozycja odwołana nigdy nie powstaje i nie ma jak wpaść do grupy.
+ * PIĄTY stan `odwolane` z pasa K1 (`lib/wykonanieSesji.ts`) żyje po stronie
+ * LICZNIKA PRACY, a nie kolejki — `WejsciaKolejki` nie ma pola, którym by tu
+ * wszedł. Dzień, w którym stan wykonania zacznie docierać do rankera, jest
+ * dniem, w którym ta funkcja MUSI go dopisać do klucza; do tego czasu rolę
+ * „stanu" pełnią tu `milczy` i `podniesioneRecznie`.
+ */
+export function kluczZwijania(p: PozycjaKolejki): string {
+  const stan = `${p.milczy === null ? '' : p.milczy.powod}|${p.podniesioneRecznie ? 'R' : '-'}`;
+  // ⚠️ ROZDZIELACZ `\x1f` (ASCII Unit Separator), nie ':' i nie spacja — tytuł
+  // wydarzenia MOŻE zawierać jedno i drugie („Blok Skupienia: Bieg ciągły…"),
+  // a rozdzielacz, który da się wpisać w treść, sklei dwie RÓŻNE pozycje w jedną.
+  return [p.zrodlo, p.rodzajPracy, p.co.trim(), p.dlaczego ?? '', stan].join('\x1f');
+}
+
+/**
+ * ⭐ ZWIJANIE. Wejście MUSI być już posortowane `porownaj` — ta funkcja
+ * NIE SORTUJE i nie ma prawa sortować: kolejność ustala jedno miejsce.
+ *
+ * CO ODDAJE. Tę samą listę, w tej samej kolejności, z grupami powtórzeń
+ * zastąpionymi JEDNYM wierszem, który:
+ *   • stoi TAM, GDZIE STAŁA NAJWYŻSZA pozycja grupy (nie wyżej, nie niżej);
+ *   • jest PRAWDZIWĄ, NIEZMIENIONĄ pozycją z tej grupy — z własnym `id`,
+ *     własnym śladem i własnym terminem. ⛔ Nie jest zlepkiem: wiersz, którego
+ *     `skadToWiemy` wskazuje inny rekord niż jego termin, jest zapisem
+ *     nieprawdy (to jest dokładnie defekt T1-2, który ten pas prostuje obok);
+ *   • niesie `ileRazem` = liczebność grupy (D4).
+ *
+ * KTÓRA POZYCJA ZOSTAJE GŁOWĄ — i dlaczego to załatwia D5 i D6 naraz:
+ *   1. NAJWYŻSZA WAGA w grupie. To jest D6 wprost: waga zwiniętego wiersza
+ *      RÓWNA SIĘ wadze najwyżej stojącej z grupy. ⛔ NIE SUMA. Suma
+ *      podniosłaby powtórzenie PONAD rzeczy niepowtórzone — produkt
+ *      nagradzałby sam siebie za to, że coś powiedział pięć razy, czyli
+ *      robiłby dokładnie odwrotność tego, po co ten pas powstał (N1).
+ *   2. Przy równej wadze — NAJBLIŻSZY TERMIN (D5). ⚠️ TO NIE JEST OZDOBNIK.
+ *      Zmierzone 16.08.2026: trzy pozycje grupy miały wagę 650 i terminy
+ *      20, 22 i 18 sierpnia, a remis w `porownaj` rozstrzyga `id` PORÓWNANIEM
+ *      NAPISÓW — więc najwyżej stała pozycja z 20 sierpnia. Wiersz mówiący
+ *      „20 sierpnia" u zawodnika, który ma to samo 18 sierpnia, jest zdaniem
+ *      nieprawdziwym o jego planie. Bez tego kroku D5 i D6 stoją w sprzeczności.
+ *      `termin === null` jest NAJDALEJ, nie najbliżej: „bez terminu" to nie
+ *      jest „dzisiaj".
+ *   3. Przy równej wadze i równym terminie — kolejność z `porownaj`.
+ *
+ * ⚠️ Krok 2 nie może złamać kroku 1: premia terminowa jest MONOTONICZNA
+ * (`terminDzisiaj` 300 > `terminWTygodniu` 150 > 0), a wszystkie pozostałe
+ * składniki wagi zależą od pól, które SĄ w kluczu grupy. Bliższy termin
+ * nigdy nie ma niższej wagi w obrębie grupy — i asercja `zwiniętego` w
+ * strażniku sprawdza to na wyniku, nie na tym zdaniu.
+ */
+export function zwinPowtorzenia(pozycje: PozycjaKolejki[]): PozycjaKolejki[] {
+  /** Data jako liczba porównywalna; `null` (bez terminu) = najdalej, jaka jest. */
+  const bliskosc = (p: PozycjaKolejki): number => {
+    if (p.termin === null) return Number.POSITIVE_INFINITY;
+    const d = dzienNaLiczbe(p.termin);
+    // ⚠️ Data NIECZYTELNA to nie jest „bez terminu" — ale też nie jest
+    // dowodem bliskości. Ląduje tuż przed brakiem terminu, nigdy przed datą.
+    return d === null ? Number.MAX_SAFE_INTEGER : d;
+  };
+
+  const kolejnoscGrup: string[] = [];
+  const grupy = new Map<string, PozycjaKolejki[]>();
+  for (const p of pozycje) {
+    const k = kluczZwijania(p);
+    const g = grupy.get(k);
+    if (g === undefined) { grupy.set(k, [p]); kolejnoscGrup.push(k); } else { g.push(p); }
+  }
+
+  const wynik: PozycjaKolejki[] = [];
+  for (const k of kolejnoscGrup) {
+    const grupa = grupy.get(k) as PozycjaKolejki[];
+    if (grupa.length === 1) {
+      // ⛔ POZYCJA NIEPOWTÓRZONA WYCHODZI CO DO ZNAKU TAKA, JAKA WESZŁA.
+      // Zwijanie nie ma prawa ruszyć niczego, co nie było powtórzone.
+      wynik.push(grupa[0]);
+      continue;
+    }
+    let glowa = grupa[0];
+    for (const p of grupa) {
+      if (p.waga > glowa.waga) { glowa = p; continue; }
+      if (p.waga === glowa.waga && bliskosc(p) < bliskosc(glowa)) glowa = p;
+    }
+    wynik.push({ ...glowa, ileRazem: grupa.length });
+  }
+  return wynik;
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // 10. JEDNA FUNKCJA WEJŚCIOWA (B1-3)
 // ─────────────────────────────────────────────────────────────────────
 
@@ -953,19 +1109,29 @@ export function ulozKolejke(w: WejsciaKolejki, zasady: Zasady = ZASADY): Kolejka
       milczy: zasady.wycisz(k, ctx),
       termin: k.termin,
       godzina: k.godzina,
+      // ⭐ PAS B2 — kandydat jest ZAWSZE jedną rzeczą. Liczba rośnie dopiero
+      // przy zwijaniu, niżej. ⛔ Nie `undefined`: pole bez wartości kazałoby
+      // ekranowi zgadywać.
+      ileRazem: 1,
     });
   }
 
   pozycje.sort(zasady.porownaj);
 
+  // ⭐ PAS B2 — ZWIJANIE POWTÓRZEŃ. ⛔ PO sortowaniu i PRZED wydaniem kolejki:
+  // grupa musi wiedzieć, która jej pozycja stała najwyżej, a widoki (`wezDlaWidoku`,
+  // `wezKubelek`) mają dostać JUŻ ZWINIĘTĄ listę — inaczej każdy z nich zwijałby
+  // po swojemu i liczba wierszy przestałaby mieć jedno źródło.
+  const zwiniete = zwinPowtorzenia(pozycje);
+
   const nieWiem = zasady.zbierzNieWiem(w);
   const wyciszonaCalkowicie = ctx.wszystkoMilczy === 'tak';
-  const stan: StanKolejki = pozycje.length > 0
+  const stan: StanKolejki = zwiniete.length > 0
     ? 'sa_pozycje'
     : (nieWiem.length > 0 ? 'nie_wiem' : 'pusto');
 
   return {
-    pozycje,
+    pozycje: zwiniete,
     stan,
     niepelna: nieWiem.length > 0 || odrzucone.length > 0,
     nieWiem,
@@ -974,12 +1140,17 @@ export function ulozKolejke(w: WejsciaKolejki, zasady: Zasady = ZASADY): Kolejka
     wyciszonaCalkowicie,
     powod: opisKolejkiDoLogu({
       stan,
-      liczba: pozycje.length,
-      milczacych: pozycje.filter((p) => p.milczy !== null).length,
+      liczba: zwiniete.length,
+      milczacych: zwiniete.filter((p) => p.milczy !== null).length,
       nieWiem,
       odrzucone,
       wyciszonaCalkowicie,
       widokPowod: ctx.widok.powod,
+      // ⭐ PAS B2 — ile pozycji ZNIKNĘŁO z listy przez zwinięcie. ⛔ Zwinięcie,
+      // którego nie widać w logu, jest zwinięciem nie do zdiagnozowania:
+      // „kolejka ma 5 pozycji" i „kolejka ma 9 pozycji, z czego 5 to jedno
+      // powtórzenie" to dwie różne odpowiedzi na pytanie, czemu ekran wygląda tak.
+      przedZwinieciem: pozycje.length,
     }),
   };
 }
@@ -1040,11 +1211,16 @@ export function opisKolejkiDoLogu(p: {
   odrzucone: Odrzucona[];
   wyciszonaCalkowicie: boolean;
   widokPowod: string;
+  /** ⭐ PAS B2 — ile pozycji było PRZED zwinięciem powtórzeń. */
+  przedZwinieciem?: number;
 }): string {
   const czesci = [
     `kolejka: ${p.stan} (${p.liczba} pozycji, w tym ${p.milczacych} milczących)`,
     p.widokPowod,
   ];
+  if (p.przedZwinieciem !== undefined && p.przedZwinieciem > p.liczba) {
+    czesci.push(`ZWINIĘTE POWTÓRZENIA: ${p.przedZwinieciem} → ${p.liczba} pozycji`);
+  }
   if (p.wyciszonaCalkowicie) {
     czesci.push('WYCISZONA CAŁKOWICIE — żaden widok nie wyda ani jednej pozycji');
   }

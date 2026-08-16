@@ -756,6 +756,48 @@ check('rocznik PODANY → pozycja znika i mówi dlaczego (nie ma czego uzupełni
   'pozycja nie zniknęła albo zniknęła bez powodu');
 
 // ═════════════════════════════════════════════════════════════════════
+// ⭐ 2b. PAS B2 16.08.2026 — ŚLAD WSKAZUJE TĘ TABELĘ, Z KTÓREJ JEST `id`
+// ═════════════════════════════════════════════════════════════════════
+// ZNALEZISKO T1-2, zmierzone i naprawione przy pasie B2. Wgląd `odbyte_sesje`
+// budował ślad `skad: 'daily_logs'` z `idWiersza: odbyte[0].id`, a `odbyte`
+// filtruje `w.kalendarz.dane` — czyli `id` był identyfikatorem `calendar_events`.
+// ŚLAD WSKAZYWAŁ WIERSZ, KTÓREGO W TAMTEJ TABELI NIE MA.
+//
+// ⚠️ TA ASERCJA NIE CZYTA KODU, TYLKO WYNIK (O90). Sprawdza, że `idWiersza`
+// naprawdę należy do zbioru identyfikatorów, którym `skad` się nazywa —
+// asercja „czy w pliku stoi `calendar_events`" przeszłaby także wtedy, gdyby
+// napis stał przy zupełnie innym `id`.
+console.log('\n── 2b. ŚLAD ODBYTYCH SESJI (T1-2, pas B2) ──');
+{
+  const kompletDlaSladu = policzWglady(KOMPLET);
+  const wynik = wynikDla(kompletDlaSladu.wyniki, 'odbyte_sesje');
+  const kandydatSesji = kompletDlaSladu.kandydaci.find((k) => k.id.includes('odbyte_sesje')) ?? null;
+  const idyKalendarza = KOMPLET.kalendarz.rodzaj === 'jest' ? KOMPLET.kalendarz.dane.map((e) => e.id) : [];
+  const idyDziennika = KOMPLET.dziennik.rodzaj === 'jest' ? KOMPLET.dziennik.dane.map((l) => l.idWiersza) : [];
+  const s = kandydatSesji !== null && czyPrawdziwySlad(kandydatSesji.skadToWiemy) ? kandydatSesji.skadToWiemy : null;
+
+  check('⭐ (B2/T1-2) licznik odbytych sesji w ogóle powstaje na komplecie — bez tego asercja niżej nic nie znaczy',
+    wynik.rodzaj === 'jest' && s !== null,
+    `wynik: ${wynik.rodzaj} · kandydat: ${kandydatSesji?.id ?? 'BRAK'}`);
+
+  check('⭐ (B2/T1-2) ślad wglądu `odbyte_sesje` nazywa `calendar_events` — TĘ tabelę, z której jest jego `id`',
+    s !== null && s.skad === 'calendar_events'
+    && s.idWiersza !== null && idyKalendarza.includes(s.idWiersza)
+    && !idyDziennika.includes(s.idWiersza),
+    `ślad: ${JSON.stringify({ skad: s?.skad, idWiersza: s?.idWiersza })} · `
+    + `id wydarzeń: ${JSON.stringify(idyKalendarza)} · id wpisów Dziennika: ${JSON.stringify(idyDziennika)} — `
+    + 'ślad wskazujący wiersz, którego w nazwanej tabeli nie ma, jest zapisem nieprawdy (Z0): dziś '
+    + 'nieszkodliwym, bo `idWiersza` nikt nie rozwiązuje, ale w dniu, w którym cokolwiek po nim sięgnie '
+    + 'do bazy, produkt powie zawodnikowi „wiemy to stąd" o miejscu, w którym tego nie ma');
+
+  check('⭐ (B2/T1-2) `klucz` brzmienia ZOSTAJE `journal` — `skad` nazywa tabelę, `klucz` wybiera zdanie',
+    s !== null && s.klucz === 'journal',
+    `klucz: ${s?.klucz} — to są dwa różne pytania: z jakiej tabeli jest \`id\` (`
+    + '`calendar_events`) i co zawodnik ma przeczytać („Z Twojego Dziennika."). '
+    + 'Zmiana klucza razem ze `skad` przestawiłaby zawodnikowi brzmienie bez powodu');
+}
+
+// ═════════════════════════════════════════════════════════════════════
 // 3. GRANICA B1 / B1-a — NIC O STANIE PSYCHICZNYM
 // ═════════════════════════════════════════════════════════════════════
 console.log('\n── 3. GRANICA B1 / B1-a ──');

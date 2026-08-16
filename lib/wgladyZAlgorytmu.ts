@@ -657,8 +657,19 @@ const odbyteSesje: Producent = (w) => {
     kandydat: naKandydata({
       wglad,
       id: idWgladu(klucz, w.dzis),
+      // ⭐ PAS B2 16.08.2026 — ZNALEZISKO T1-2, POPRAWKA JEDNEJ LINII.
+      // Do 16.08 stało tu `skad: 'daily_logs'`, a `odbyte[0].id` jest
+      // identyfikatorem `calendar_events` (`odbyte` filtruje `w.kalendarz.dane`,
+      // wyżej w tej funkcji). Ślad wskazywał WIERSZ, KTÓREGO W TAMTEJ TABELI
+      // NIE MA. Dziś nieszkodliwe, bo `idWiersza` nie jest nigdzie rozwiązywany
+      // ani pokazywany zawodnikowi — ale w dniu, w którym cokolwiek zacznie po
+      // tym śladzie sięgać do bazy, jest to zapis nieprawdy (Z0).
+      // ⚠️ `klucz: 'journal'` ZOSTAJE i to nie jest niedopatrzenie: klucz wybiera
+      // BRZMIENIE dla zawodnika („Z Twojego Dziennika."), a ten wgląd naprawdę
+      // mówi o wpisach w Dzienniku. `skad` nazywa TABELĘ, z której pochodzi `id`.
+      // To są dwa różne pytania i mają dwie różne odpowiedzi.
       skadToWiemy: slad({
-        rejestr: 'fakt_o_tobie', skad: 'daily_logs', idWiersza: odbyte[0].id, klucz: 'journal',
+        rejestr: 'fakt_o_tobie', skad: 'calendar_events', idWiersza: odbyte[0].id, klucz: 'journal',
       }),
       rodzajPracy: 'porzadek',
       ileZajmieSekund: 60,
