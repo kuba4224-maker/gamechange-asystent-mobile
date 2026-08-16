@@ -31,7 +31,13 @@
 // formatowanie należy do `opiszCzas()` w komponencie i ma tam ZOSTAĆ jedyne.
 // ═════════════════════════════════════════════════════════════════════
 import { KUBELKI, type Kubelek, type PozycjaKolejki, type Wejscie } from './kolejkaPodania';
-import { TABELA_ZADAN, czyOdczytNiepelny, type OdczytZadan } from './zadania';
+import {
+  MAKS_DLUGOSC_TYTULU,
+  TABELA_ZADAN,
+  czyOdczytNiepelny,
+  type OdczytZadan,
+  type PowodOdmowyWlasnego,
+} from './zadania';
 
 /** Znacznik dla Kuby i dla strażnika. Nie usuwać do czasu zatwierdzenia brzmień. */
 export const BRZMIENIE_DO_PRZEJRZENIA = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-C2, 14.08.2026)';
@@ -95,6 +101,71 @@ export const ODHACZ = 'Zrobione';
 export const ODHACZONE_PREFIKS = 'Odhaczone: ';
 export const BLAD_ODHACZENIA = 'Nie udało mi się zapisać odhaczenia. Zadanie zostaje na liście.';
 export const BLAD_PODNIESIENIA = 'Nie udało mi się zapisać podniesienia. Kolejność się nie zmieniła.';
+
+// ─────────────────────────────────────────────────────────────────────
+// 1a. ⭐ PLAN-D-T1 08.2026 — POLE „DOPISZ COŚ SWOJEGO"
+// ─────────────────────────────────────────────────────────────────────
+// ⚠️ DO PRZEJRZENIA — T1. Dziewięć zdań niżej jest NOWYCH i żadne nie zostało
+// zatwierdzone. Wszystkie stoją w nocie `claude/PRZEKAZANIE_PAS_T1_16_08_2026.md`
+// §8 jako propozycje, do zmiany w jednym miejscu.
+//
+// ── PO CO TO POWSTAŁO ───────────────────────────────────────────────
+// Do 16.08.2026 ten ekran nie mógł dostać ANI JEDNEJ rzeczy do odhaczenia:
+// w całym produkcie nie było ani jednego `insert` do `player_tasks`.
+// Pozycje wpadające na listę z kalendarza i z wglądów NIE MAJĄ tam wiersza,
+// więc `mozliweOdhaczenie` i `mozliwePodniesienie` oddają dla nich `false`.
+//
+// ── ⛔ CZEGO TO POLE NIE ROBI I ROBIĆ NIE BĘDZIE ────────────────────
+//  1. ⛔ NIE ZAMALOWUJE PUSTKI. Gdy zawodnik nie ma zadań, `ZADANIA_BRAK`
+//     nadal mówi „Nie masz zapisanego ani jednego zadania." Pole stoi obok
+//     tego zdania, nie zamiast niego: pusta lista jest uczciwa (zakaz 4
+//     z nagłówka `components/ListaZadan.tsx`).
+//  2. ⛔ NIE PYTA O TERMIN. Żadnego „do kiedy", żadnego przypomnienia,
+//     żadnego licznika dni (**N1** — nie karzemy za nieobecność, a termin
+//     jest karą w przebraniu). Kubełek wyznacza RANKER, nie kalendarz.
+//  3. ⛔ NIE POZWALA UDAWAĆ PRODUKTU. Wiersz idzie z `origin='player'`
+//     i pustymi polami systemowymi — bo tyle i tylko tyle wpuszcza polityka
+//     `player_tasks_insert_own`.
+
+export const DODAJ_NAGLOWEK = 'Dopisz coś swojego';
+export const DODAJ_PLACEHOLDER = 'np. Kupić nowe wkładki do korków';
+export const DODAJ_PRZYCISK = 'Dodaj';
+export const DODAJ_ZAPISUJE = 'Zapisuję…';
+export const DODANE_PREFIKS = 'Dodane: ';
+
+/**
+ * ⛔ BŁĄD ZAPISU MA WŁASNE ZDANIE, NIE CISZĘ (**R5**) — i mówi wprost, że
+ * tekst zawodnika NIE PRZEPADŁ. Ekran go nie czyści; komunikat i zachowanie
+ * muszą mówić to samo, inaczej jedno z dwojga kłamie.
+ */
+export const BLAD_DODANIA =
+  'Nie udało mi się zapisać tego zadania. Twój tekst zostaje w polu — spróbuj jeszcze raz.';
+
+/**
+ * Trzy powody odmowy → trzy RÓŻNE zdania.
+ * ⚠️ Zdanie o za długim tytule LICZY ZNAKI ZE STAŁEJ, a nie z liczby wpisanej
+ * tu ręcznie: granica mieszka w bazie (`player_tasks_title_len`) i rozjazd
+ * znaczyłby, że produkt obiecuje zawodnikowi więcej, niż baza przyjmie.
+ */
+export const ODMOWA_BRAK_KONTA = 'Jeszcze nie wczytałem Twojego konta. Spróbuj za chwilę.';
+export const ODMOWA_TYTUL_PUSTY = 'Napisz jednym zdaniem, co masz do zrobienia.';
+export const ODMOWA_TYTUL_ZA_DLUGI =
+  `To jest za długie jak na jedną rzecz do zrobienia — zmieść się w ${MAKS_DLUGOSC_TYTULU} znakach.`;
+
+const ZDANIA_ODMOWY: Record<PowodOdmowyWlasnego, string> = {
+  brak_konta: ODMOWA_BRAK_KONTA,
+  tytul_pusty: ODMOWA_TYTUL_PUSTY,
+  tytul_za_dlugi: ODMOWA_TYTUL_ZA_DLUGI,
+};
+
+/**
+ * Kod odmowy z `zbudujZadanieWlasne` → zdanie dla zawodnika.
+ * ⚠️ `Record` po typie związkowym sprawia, że NOWY kod odmowy bez zdania
+ * nie skompiluje się — a nie: pokaże zawodnikowi `undefined`.
+ */
+export function zdanieOdmowyDodania(kod: PowodOdmowyWlasnego): string {
+  return ZDANIA_ODMOWY[kod];
+}
 
 /**
  * ⚠️ Dlaczego lista nie ma przycisku „Podnieś" przy KAŻDEJ pozycji — brzmienie

@@ -41,6 +41,21 @@
 //  4. ⛔ ZERO wiersza `player_tasks` dokładanego „na próbę". Pusta lista jest
 //     uczciwa; zamalowana nie.
 //
+// ── ⭐ PLAN-D-T1 08.2026 (16.08.2026) — TEN EKRAN DOSTAJE PRODUCENTA ─
+// Do dziś `player_tasks` nie miała w CAŁYM PRODUKCIE ani jednego `insert`:
+// ekran z trzema kubełkami, polem odhaczenia i sumą czasu nie mógł dostać
+// ani jednej rzeczy do odhaczenia, choćby zawodnik używał aplikacji rok.
+// Pole „Dopisz coś swojego" jest producentem (a) — zadaniem WŁASNYM zawodnika,
+// zapisywanym przez RLS (`origin='player'`, pola systemowe puste, bo tyle
+// wpuszcza polityka `player_tasks_insert_own`).
+// ⚠️ ZAKAZ 4 WYŻEJ ZOSTAJE NIENARUSZONY: pole nie dokłada wiersza „na próbę"
+// ani przykładowego. Gdy zawodnik nie ma zadań, zdanie `ZADANIA_BRAK` nadal
+// mówi, że ich nie ma — pole stoi OBOK tego zdania, nie zamiast niego.
+// ⛔ Producent (b) — zadanie systemowe z wglądu — NIE MIESZKA W APPCE i mieszkać
+// nie może: polityka RLS zawodnika odrzuci wiersz z `system_key`, i to jest
+// zabezpieczenie, nie przeszkoda. Buduje go `zbudujZadanieSystemoweZWgladu`
+// z `lib/zadania.ts`, a wstawia backend na `service_role` (kontrakt: nota T1 §7).
+//
 // ── CZEGO TEN EKRAN ŚWIADOMIE NIE BUDUJE — i co z tego wynika ────────
 // `jednaOdpowiedz` = `null`, `dodatkowi` = brak. Powód nie jest lenistwem:
 // obie te rzeczy są dziś PRODUKOWANE WEWNĄTRZ `app/(tabs)/dzis.tsx`
@@ -57,7 +72,7 @@
 // ═════════════════════════════════════════════════════════════════════
 import { useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, typography, spacing, radii, minTouchHeight } from '../constants/theme';
@@ -88,6 +103,8 @@ import {
 import {
   odczytZadan,
   opisOdczytuDoLogu,
+  zbudujZadanieWlasne,
+  MAKS_DLUGOSC_TYTULU,
   SELECT_ZADANIA,
   TABELA_ZADAN,
   type OdczytZadan,
@@ -128,6 +145,13 @@ import {
   mozliweOdhaczenie,
   wejscieZOdpowiedzi,
   powodBledu,
+  DODAJ_NAGLOWEK,
+  DODAJ_PLACEHOLDER,
+  DODAJ_PRZYCISK,
+  DODAJ_ZAPISUJE,
+  DODANE_PREFIKS,
+  BLAD_DODANIA,
+  zdanieOdmowyDodania,
 } from '../lib/listaZadan';
 
 // Kształty wierszy, dokładnie takie, w jakich wracają z bazy. ⚠️ Te same
@@ -190,6 +214,13 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
   const [zapisuje, setZapisuje] = useState<string | null>(null);
   const [bladZapisu, setBladZapisu] = useState<string | null>(null);
   const [ostatnioOdhaczone, setOstatnioOdhaczone] = useState<string | null>(null);
+  // ⭐ PLAN-D-T1 — producent (a). ⚠️ `nowyTytul` NIE jest czyszczony przy błędzie
+  // zapisu: tekst, który zawodnik napisał, nie ma prawa zniknąć dlatego, że
+  // baza odmówiła. Pilnuje tego asercja w `lib/zadania.selftest.ts`.
+  const [nowyTytul, setNowyTytul] = useState('');
+  const [dodaje, setDodaje] = useState(false);
+  const [bladDodania, setBladDodania] = useState<string | null>(null);
+  const [ostatnioDodane, setOstatnioDodane] = useState<string | null>(null);
   // WT-29 — „Kiedyś" startuje ZWINIĘTY. Dwa pozostałe są rozwinięte: rzecz
   // z terminem jest rzeczą na teraz, a nie do przeglądania.
   const [rozwiniete, setRozwiniete] = useState<Record<Kubelek, boolean>>({
@@ -214,9 +245,15 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
           .eq('user_id', userId).order('created_at', { ascending: false }),
         supabase.from('pain_entries').select('id,intensity,excludes_from_training,created_at')
           .eq('user_id', userId).order('created_at', { ascending: false }).limit(20),
-        // ⭐ WEJŚCIE, O KTÓRE CHODZI W CAŁYM TYM PASIE. ⚠️ Zmierzone 14.08.2026:
-        // `player_tasks` ma 0 wierszy, więc dziś to zapytanie odda `brak_danych`
-        // u każdego zawodnika. Tak ma być — producenta zadań buduje pas B3.
+        // ⭐ WEJŚCIE, O KTÓRE CHODZI W CAŁYM TYM PASIE.
+        // ⚠️ PLAN-D-T1 16.08.2026 — POPRAWKA KOMENTARZA, KTÓRY STARZAŁ SIĘ CICHO
+        // (O67). Stało tu: „Zmierzone 14.08.2026: `player_tasks` ma 0 wierszy…
+        // producenta zadań buduje pas B3". Producent (a) jest OD TERAZ W TYM
+        // PLIKU (pole „Dopisz coś swojego" niżej), więc to zapytanie przestaje
+        // z definicji oddawać `brak_danych`.
+        // ⚠️ Pomiar produkcji 16.08.2026: `player_tasks` nadal ma 0 wierszy —
+        // ale teraz dlatego, że nikt jeszcze nic nie dopisał, a nie dlatego,
+        // że nie ma czym.
         supabase.from(TABELA_ZADAN).select(SELECT_ZADANIA).eq('user_id', userId),
         supabase.from('weekly_voice')
           .select(`week_start, voice, reason, spoke_at, ${KOLUMNA_OGRANICZEN}`)
@@ -337,9 +374,46 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
     if (visible) {
       setBladZapisu(null);
       setOstatnioOdhaczone(null);
+      setBladDodania(null);
+      setOstatnioDodane(null);
       load();
     }
   }, [visible, load]);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PRODUCENT (a) — ZADANIE WŁASNE ZAWODNIKA (PLAN-D-T1)
+  // ═══════════════════════════════════════════════════════════════════
+  // ⛔ Zapis idzie KLIENTEM ZALOGOWANEGO ZAWODNIKA, czyli przez RLS. Wiersz
+  // buduje `zbudujZadanieWlasne` — ten plik nie skleja obiektu sam, bo wtedy
+  // pięć warunków polityki `player_tasks_insert_own` żyłoby w ekranie i nikt
+  // by ich nie sprawdził bez uruchomienia appki.
+  // ⛔ Błąd zapisu ma WŁASNE ZDANIE, nie ciszę (R5) — ten sam wzorzec co `odhacz`.
+  const dodaj = useCallback(async () => {
+    const zbudowane = zbudujZadanieWlasne({ userId, tytul: nowyTytul });
+    if (!zbudowane.ok) {
+      // ⚠️ Odmowa PRZED dotknięciem bazy dostaje własne zdanie z `lib/listaZadan.ts`,
+      // a nie ten sam komunikat co awaria zapisu: „nic nie napisałeś" i „nie udało
+      // się zapisać" to dwie różne rzeczy i tylko jedna z nich jest o produkcie.
+      console.log(`lista zadań: nie dodaję — ${zbudowane.powod}`);
+      setBladDodania(zdanieOdmowyDodania(zbudowane.kod));
+      return;
+    }
+    setDodaje(true);
+    setBladDodania(null);
+    const { error } = await supabase.from(TABELA_ZADAN).insert(zbudowane.wiersz);
+    setDodaje(false);
+    if (error) {
+      console.error(`lista zadań: zadanie nie zapisane — ${powodBledu(error)}`);
+      setBladDodania(BLAD_DODANIA);
+      // ⛔ CELOWO BEZ `setNowyTytul('')`. Wyczyszczone pole po nieudanym zapisie
+      // wygląda dokładnie tak samo jak po udanym — zawodnik straciłby tekst
+      // i myślał, że zadanie jest na liście.
+      return;
+    }
+    setOstatnioDodane(zbudowane.wiersz.title);
+    setNowyTytul('');
+    await load();
+  }, [userId, nowyTytul, load]);
 
   // ═══════════════════════════════════════════════════════════════════
   // ⛔ JEDEN ARGUMENT. Drugi (`Zasady`) jest wyłącznie dla strażnika
@@ -502,6 +576,49 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
                 <Text style={styles.infoDrobne}>{ODHACZONE_PREFIKS + ostatnioOdhaczone}</Text>
               ) : null}
 
+              {/* ⭐ PLAN-D-T1 — PRODUCENT (a): POLE I PRZYCISK.
+                  Stoi NAD kubełkami i POD zdaniem o stanie odczytu — świadomie:
+                  zawodnik z pustą listą czyta najpierw prawdę o niej („Nie masz
+                  zapisanego ani jednego zadania."), a dopiero potem widzi, czym
+                  ją wypełnić. Odwrotna kolejność zamalowałaby pustkę formularzem.
+                  ⚠️ Poza gałęzią `wyciszonaCalkowicie`: na ścieżce wyjścia ekran
+                  milczy w całości i ten pas tego nie zmienia. */}
+              <View style={styles.dodaj}>
+                <Text style={styles.dodajNaglowek}>{DODAJ_NAGLOWEK}</Text>
+                <View style={styles.dodajWiersz}>
+                  <TextInput
+                    style={styles.dodajPole}
+                    value={nowyTytul}
+                    onChangeText={setNowyTytul}
+                    placeholder={DODAJ_PLACEHOLDER}
+                    placeholderTextColor={colors.textTertiary}
+                    editable={!dodaje}
+                    /* ⚠️ Ta sama granica co CHECK `player_tasks_title_len` i co
+                       zdanie odmowy — jedna stała, trzy miejsca, zero rozjazdu. */
+                    maxLength={MAKS_DLUGOSC_TYTULU}
+                    accessibilityLabel={DODAJ_NAGLOWEK}
+                  />
+                  <TouchableOpacity
+                    style={styles.dodajPrzycisk}
+                    onPress={dodaj}
+                    disabled={dodaje}
+                    accessibilityRole="button"
+                    accessibilityLabel={DODAJ_PRZYCISK}
+                  >
+                    <Text style={styles.dodajPrzyciskTekst}>
+                      {dodaje ? DODAJ_ZAPISUJE : DODAJ_PRZYCISK}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {/* ⛔ Błąd i odmowa mają WŁASNE ZDANIE, nie ciszę (R5). */}
+                {bladDodania !== null ? (
+                  <Text style={styles.ostrzezenie}>{bladDodania}</Text>
+                ) : null}
+                {ostatnioDodane !== null ? (
+                  <Text style={styles.infoDrobne}>{DODANE_PREFIKS + ostatnioDodane}</Text>
+                ) : null}
+              </View>
+
               {/* ⭐ TRZY KUBEŁKI, każdy przez `wezKubelek`. Kolejność kubełków
                   bierzemy z rankera (`KUBELKI`), nie z własnej stałej. */}
               {KUBELKI_LISTY.map((k) => renderKubelek(k, kolejka, dane.wejscia.dzis))}
@@ -529,6 +646,22 @@ const styles = StyleSheet.create({
   infoDrobne: { ...typography.body, fontSize: 12, lineHeight: 18, color: colors.textTertiary, marginTop: 4 },
   // ⚠️ Rozróżnienie niesie TEKST, nie kolor — koloru zawodnik się nie domyśli.
   ostrzezenie: { ...typography.bodyMedium, fontSize: 13, lineHeight: 19, color: colors.textPrimary, marginTop: 8 },
+  // ⭐ PLAN-D-T1 — pole „Dopisz coś swojego". Ta sama ramka co kubełek, żeby
+  // zawodnik rozpoznał, że to jest część tej samej listy, a nie osobny przyrząd.
+  dodaj: {
+    marginTop: 24, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.lg, backgroundColor: colors.surface, padding: 16,
+  },
+  dodajNaglowek: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
+  dodajWiersz: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  dodajPole: {
+    flex: 1, minHeight: minTouchHeight, paddingHorizontal: 12, paddingVertical: 8,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radii.md,
+    backgroundColor: colors.background,
+    ...typography.body, fontSize: 14, color: colors.textPrimary,
+  },
+  dodajPrzycisk: { minHeight: minTouchHeight, justifyContent: 'center', paddingLeft: 14 },
+  dodajPrzyciskTekst: { ...typography.bodyMedium, fontSize: 14, color: colors.brand },
   kubelek: {
     marginTop: 24, borderWidth: 1, borderColor: colors.border,
     borderRadius: radii.lg, backgroundColor: colors.surface, padding: 16,

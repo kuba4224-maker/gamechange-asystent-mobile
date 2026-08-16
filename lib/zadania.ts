@@ -7,13 +7,18 @@
 // (kolumna 2, „Ja → Moje zadania") i jedyną funkcją, która zamienia surowy
 // wiersz z bazy na tę pozycję — albo na jawne „nie wiem".
 //
-// ⛔ NIE JEST EKRANEM. Listy „Moje zadania" nie ma i po tej rundzie nadal
-//    nie będzie — buduje ją pas C2.
+// ⛔ NIE JEST EKRANEM. ⚠️ PLAN-D-T1 16.08.2026 — POPRAWKA ZDANIA, KTÓRE
+//    ZESTARZAŁO SIĘ CICHO (O67): stało tu „Listy «Moje zadania» nie ma
+//    i po tej rundzie nadal nie będzie — buduje ją pas C2". Ekran JEST
+//    od `e1845e4` (pas C2, 14.08.2026): `components/ListaZadan.tsx`.
+//    Ten plik nadal nim nie jest — ale nie wolno mu już mówić, że ekranu nie ma.
 // ⛔ NIE JEST RANKEREM. Kolejność i kubełki `Teraz / W tym tygodniu / Kiedyś`
 //    liczy `lib/kolejkaPodania.ts` (pas B1). Tego pliku tu nie ma i ta sesja
 //    go nie zakłada.
 // ⛔ NIE DOTYKA SUPABASE. Zero importu klienta, zero `fetch`, zero Reacta.
-//    Odczyt pisze C2 i podaje tutaj to, co dostał.
+//    Odczyt pisze C2 i podaje tutaj to, co dostał. ⭐ TAK SAMO ZAPIS: ten plik
+//    BUDUJE wiersz do wstawienia i NIE WSTAWIA GO. Wstawia ekran (zadanie
+//    zawodnika, przez RLS) albo backend na `service_role` (zadanie systemowe).
 // ⛔ NIE CZYTA ZEGARA. Ani `Date.now()`, ani `new Date()`. Wszystkie momenty
 //    zostają napisami ISO dokładnie takimi, jakie przyszły z bazy; kto
 //    potrzebuje „dziś", dostaje je parametrem. Pilnuje tego strażnik.
@@ -46,6 +51,15 @@
 // ═════════════════════════════════════════════════════════════════════
 
 import { toJestBrakDostepu } from './dostepKonta';
+// ⚠️ PLAN-D-T1 08.2026 — IMPORT WYŁĄCZNIE TYPU I TO JEST KONIECZNOŚĆ, NIE STYL.
+// `lib/wgladyZAlgorytmu.ts` → `lib/kolejkaPodania.ts` → `lib/zadania.ts`
+// (`REJESTRY_Z0`, import WARTOŚCI). Import wartości stąd domknąłby cykl ESM
+// i `REJESTRY_Z0` bywałoby `undefined` w chwili inicjalizacji modułu —
+// czyli produkt przestałby rozpoznawać rejestry Z0 w sposób zależny od
+// kolejności ładowania. `import type` jest wymazywany przy transpilacji,
+// więc krawędzi w grafie modułów nie ma, a kontrola typów zostaje: zmiana
+// kształtu `Wglad` zapala `tsc`, a nie dopiero zawodnika.
+import type { Wglad } from './wgladyZAlgorytmu';
 
 // ─────────────────────────────────────────────────────────────────────
 // 1. NAZWY W BAZIE — jedno źródło, żeby literówka nie żyła w trzech plikach
@@ -446,6 +460,17 @@ export function zadanieZWiersza(wiersz: unknown): WynikMapowania {
 // ─────────────────────────────────────────────────────────────────────
 
 /**
+ * ⭐ PLAN-D-T1 08.2026 — JEDNA LICZBA, NIE TRZY.
+ * Ta sama granica stoi w bazie jako `player_tasks_title_len`
+ * (`char_length(title) between 1 and 120`) i w brzmieniu, które czyta
+ * zawodnik. Rozjazd między nimi znaczy, że produkt przyjmuje tytuł,
+ * którego baza nie przyjmie — czyli zawodnik traci to, co napisał,
+ * i dostaje błąd bez wyjaśnienia. Zapadka na równość z plikiem migracji
+ * stoi w `lib/zadania.selftest.ts`.
+ */
+export const MAKS_DLUGOSC_TYTULU = 120;
+
+/**
  * Klucz naturalny zadania systemowego (WG-18).
  *
  * ⚠️ ZIARNISTOŚĆ KLUCZA JEST REGUŁĄ ODDUPLIKOWANIA — nie ozdobą. Klucz
@@ -513,8 +538,11 @@ export function zbudujZadanieSystemowe(wejscie: {
 
   const tytul = wejscie.tytul.trim();
   if (!tytul) return { ok: false, powod: 'tytuł jest pusty' };
-  if (tytul.length > 120) {
-    return { ok: false, powod: `tytuł ma ${tytul.length} znaków, mieści się 120` };
+  if (tytul.length > MAKS_DLUGOSC_TYTULU) {
+    return {
+      ok: false,
+      powod: `tytuł ma ${tytul.length} znaków, mieści się ${MAKS_DLUGOSC_TYTULU}`,
+    };
   }
 
   const fakt = wejscie.faktZLiczbami.trim();
@@ -567,6 +595,294 @@ export function zbudujZadanieSystemowe(wejscie: {
       effort_seconds: ile,
       due_on: termin,
       system_key: wejscie.kluczSystemowy.trim(),
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 5a. ⭐ PRODUCENT (a) — ZADANIE, KTÓRE ZAWODNIK PISZE SOBIE SAM
+// ─────────────────────────────────────────────────────────────────────
+// PLAN-D-T1 08.2026 (16.08.2026).
+//
+// ── PO CO TO POWSTAŁO — jedną liczbą ────────────────────────────────
+// Do 16.08.2026 w CAŁYM PRODUKCIE nie było ani jednego `insert` do
+// `player_tasks`. Ekran „Moje zadania" miał trzy kubełki, pole odhaczenia,
+// podnoszenie do „Teraz" i sumę czasu — i nie mógł dostać ANI JEDNEJ rzeczy
+// do odhaczenia, choćby zawodnik używał aplikacji rok. Tabela z RLS, trzema
+// politykami i wyzwalaczem stała pusta, bo nikt do niej nie pisał.
+//
+// ── DLACZEGO WSZYSTKIE POLA SYSTEMOWE SĄ TU `null` ──────────────────
+// ⛔ TO NIE JEST UPROSZCZENIE. Polityka `player_tasks_insert_own` ma PIĘĆ
+// warunków `with check` i trzy z nich brzmią `system_key is null`,
+// `source_table is null`, `source_row_id is null`. Zawodnik NIE MOŻE wstawić
+// wiersza udającego zadanie produktu — i to jest zabezpieczenie nieletniego,
+// nie przeszkoda. Ten kod dostosowuje się do polityki, nie odwrotnie.
+// ⚠️ Wartości wpisane JAWNIE, a nie pominięte: `insert` bez klucza zostawia
+// bazie domyślną wartość, a domyślna wartość może się zmienić w migracji,
+// której ten plik nie zobaczy. Jawny `null` jest twierdzeniem.
+
+/** Dlaczego zadanie własne się nie zbudowało. ⚠️ To są KODY, nie brzmienia. */
+export type PowodOdmowyWlasnego = 'brak_konta' | 'tytul_pusty' | 'tytul_za_dlugi';
+
+export type WynikBudowyWlasnego =
+  | { ok: true; wiersz: WierszDoZapisu }
+  /**
+   * ⚠️ `kod` istnieje po to, żeby zdanie dla zawodnika mieszkało w JEDNYM
+   * miejscu (`lib/listaZadan.ts`), a nie było sklejane tutaj. `powod` jest
+   * dla konsoli i dla strażnika — nie dla ekranu.
+   */
+  | { ok: false; kod: PowodOdmowyWlasnego; powod: string };
+
+/**
+ * Zadanie zawodnika → wiersz gotowy do `insert` przez KLIENTA ZALOGOWANEGO
+ * ZAWODNIKA (czyli przez RLS). Bez zegara, bez sieci, bez wyjątków.
+ *
+ * ⚠️ `userId` przyjmuje `null`, bo dokładnie tak wygląda go ekran, zanim
+ * sesja się wczyta. Gdyby typ tego zabraniał, wołający napisałby `userId!`
+ * i defekt przeniósłby się o jedną linię wyżej, w miejsce bez asercji.
+ */
+export function zbudujZadanieWlasne(wejscie: {
+  userId: string | null;
+  tytul: string;
+}): WynikBudowyWlasnego {
+  const userId = (wejscie.userId ?? '').trim();
+  if (!userId) {
+    return { ok: false, kod: 'brak_konta', powod: 'brak `userId` — sesja jeszcze się nie wczytała' };
+  }
+
+  const tytul = wejscie.tytul.trim();
+  if (!tytul) return { ok: false, kod: 'tytul_pusty', powod: 'tytuł jest pusty' };
+  if (tytul.length > MAKS_DLUGOSC_TYTULU) {
+    return {
+      ok: false,
+      kod: 'tytul_za_dlugi',
+      powod: `tytuł ma ${tytul.length} znaków, baza przyjmie ${MAKS_DLUGOSC_TYTULU}`,
+    };
+  }
+
+  return {
+    ok: true,
+    wiersz: {
+      user_id: userId,
+      title: tytul,
+      // ⚠️ Zadanie zawodnika NIE MA POWODU i to jest poprawne — powodem jest on
+      // sam. `zadanieZWiersza` dopuszcza brak powodu WYŁĄCZNIE przy `origin`
+      // równym `player`, a CHECK `player_tasks_system_ma_powod` mówi to samo.
+      reason_fact: null,
+      reason_text: null,
+      reason_register: null,
+      reason_key: null,
+      origin: 'player',
+      source_table: null,
+      source_row_id: null,
+      // ⛔ D5 (PLAN-D-T1): ZADANIE NIE MA TERMINU. Żadnego „do kiedy", żadnego
+      // licznika dni. Termin jest karą w przebraniu (N1: produkt nie nęka),
+      // a kubełek wyznacza ranker, nie kalendarz.
+      effort_seconds: null,
+      due_on: null,
+      system_key: null,
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 5b. ⭐ PRODUCENT (b) — ZADANIE SYSTEMOWE ZBUDOWANE Z WGLĄDU
+// ─────────────────────────────────────────────────────────────────────
+// PLAN-D-T1 08.2026 (16.08.2026).
+//
+// ⛔ TA FUNKCJA NICZEGO NIE WSTAWIA I WSTAWIAĆ NIE MOŻE. Polityka RLS
+// zawodnika odrzuci każdy wiersz z `system_key`. Wstawianie należy do
+// backendu na `service_role`; kontrakt stoi w nocie przekazania T1 §7.
+// ⭐ Gdyby appka umiała obejść tę politykę, zawodnik mógłby wstawić wiersz
+// udający zadanie produktu — migracja A4 zabroniła tego celowo.
+//
+// ── DWIE RZECZY, KTÓRE POMIAR PRODUKCJI ZMIENIŁ W TEJ FUNKCJI ───────
+// 1. ⛔ `player_tasks.source_row_id` jest typu **uuid**, a `pain_entries.id`,
+//    `daily_logs.id`, `calendar_events.id` i `match_contexts.id` są **bigint**
+//    (zmierzone 16.08.2026, `information_schema.columns`; `select '12'::uuid`
+//    kończy się `22P02 invalid input syntax for type uuid`). Ślad źródłowy
+//    PIĘCIU z sześciu wglądów NIE MIEŚCI SIĘ w tej kolumnie. Funkcja NIE
+//    UDAJE, że się mieści: odkłada ślad i NAZYWA to w `sladPominiety`.
+//    ⚠️ Cichy `null` byłby tu dokładnie tym „cichym brakiem", którego cały
+//    ten produkt się pozbywa — dlatego powód wychodzi wartością, nie do logu.
+// 2. ⛔ `reason_register` opisuje `reason_fact`, czyli CZĘŚĆ 1 wglądu (liczbę),
+//    a ta jest ZAWSZE `fakt_o_tobie`. `Wglad.rejestrZnaczenia` opisuje CZĘŚĆ 2
+//    i tabela NIE MA NA NIEGO KOLUMNY. Wpisanie tu `rejestrZnaczenia`
+//    („propozycja" przy pięciu z sześciu wglądów) podpisałoby POMIAR jako
+//    propozycję — czyli zmieszałoby dwa rejestry Z0 pod jednym podpisem.
+//    Rejestr CZĘŚCI 2 jest przy zapisie TRACONY; nazwane w nocie T1 §7.
+
+/** Ślad, który wgląd niesie w `Kandydat.skadToWiemy`. Zawężony do dwóch pól, których tu używamy. */
+export type SladWgladu = {
+  /** Nazwa tabeli źródłowej, np. `pain_entries`. */
+  skad: string;
+  /** Identyfikator wiersza źródłowego jako napis. `null` = fakt o BRAKU wartości. */
+  idWiersza: string | null;
+};
+
+/**
+ * Dlaczego ślad źródłowy nie wszedł do wiersza.
+ * ⚠️ KOD, NIE ZDANIE — po zdaniu po polsku nie da się nic policzyć, a strażnik
+ * ma umieć powiedzieć „pięć z sześciu wglądów traci ślad Z TEGO POWODU",
+ * a nie „coś tam pominięto".
+ */
+export type PowodPominietegoSladu =
+  /** Wgląd podał ślad bez nazwy tabeli. */
+  | 'brak_tabeli'
+  /** Ślad opisuje BRAK wartości, nie konkretny rekord (np. `brak_roku_urodzenia`). */
+  | 'brak_wiersza'
+  /** ⛔ Identyfikator nie jest `uuid`, a taka jest kolumna `source_row_id`. */
+  | 'id_nie_jest_uuid';
+
+export type SladPominiety = { powod: PowodPominietegoSladu; zdanie: string };
+
+export type KandydatZWgladu = {
+  wiersz: WierszDoZapisu;
+  /** Kontrakt powtórki (WG-18). ⚠️ Backend ma go użyć DOSŁOWNIE — patrz nota T1 §7. */
+  konflikt: string;
+  /**
+   * ⛔ `null` = ślad wszedł albo wgląd żadnego nie miał.
+   * Inaczej: ślad ISTNIAŁ i NIE WSZEDŁ, z kodem i ze zdaniem. To nie jest
+   * ostrzeżenie dla zawodnika — to jest odpowiedź dla tego, kto czyta wynik
+   * producenta i pyta, czemu w wierszu nie ma źródła.
+   */
+  sladPominiety: SladPominiety | null;
+};
+
+export type WynikZadaniaZWgladu =
+  | { ok: true; kandydat: KandydatZWgladu }
+  | { ok: false; powod: string };
+
+/** ⚠️ Wgląd wchodzi do tabeli JAKO `system`, nie jako `journal`/`calendar`. Patrz komentarz niżej. */
+export const ZRODLO_ZADANIA_Z_WGLADU: ZrodloZadania = 'system';
+
+/** Kanoniczny kształt `uuid` — jedyna rzecz, którą `source_row_id` przyjmie. */
+const KSZTALT_UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * CZĘŚĆ 2 wglądu jako jedno zdanie — ze zastrzeżeniem doklejonym DOKŁADNIE
+ * wtedy, gdy dowód jest słaby (Z0-a).
+ *
+ * ⚠️ TA SAMA REGUŁA CO `naKandydata()` w `lib/wgladyZAlgorytmu.ts` i nazywam
+ * to drugą kopią, zamiast udawać, że jej nie ma. Sklejenia nie da się stamtąd
+ * zaimportować bez domknięcia cyklu modułów (patrz komentarz przy imporcie na
+ * górze pliku), więc zamiast obietnicy w komentarzu stoi ZAPADKA NA RÓWNOŚĆ
+ * w `lib/zadania.selftest.ts`: dla każdego z sześciu wglądów
+ * `zdanieZnaczeniaWgladu(w)` musi być IDENTYCZNE z `naKandydata(...).dlaczego`.
+ * Rozjazd zapala strażnika, a nie czeka na zawodnika, który przeczyta dwa
+ * różne uzasadnienia tej samej rzeczy na dwóch ekranach.
+ */
+export function zdanieZnaczeniaWgladu(w: Wglad): string {
+  return w.czegoNieMowi === null ? w.znaczenie : `${w.znaczenie} ${w.czegoNieMowi}`;
+}
+
+/**
+ * Wgląd → kandydat do wstawienia jako zadanie systemowe, albo odmowa z powodem.
+ *
+ * ── ODWZOROWANIE, POLE PO POLU ──────────────────────────────────────
+ *   `title`           ← CZĘŚĆ 3 wglądu (`doZrobienia`). ⭐ To jest cały sens:
+ *                       „Zamów wizytę u fizjoterapeuty." JEST zadaniem i do
+ *                       16.08 nie miało jak nim zostać.
+ *   `reason_fact`     ← CZĘŚĆ 1 (`liczba`). Zamrożona w chwili powstania —
+ *                       `do nothing` przy powtórce pilnuje, żeby „od 5 dni"
+ *                       nie zmieniło się kiedyś w „od 12 dni" (Z0).
+ *   `reason_text`     ← CZĘŚĆ 2 (`znaczenie` + ewentualne zastrzeżenie).
+ *   `reason_register` ← ZAWSZE `fakt_o_tobie` — patrz punkt 2 wyżej.
+ *   `reason_key`      ← `wglad.klucz`. Po tym waży ranker.
+ *   `origin`          ← `system`. ⚠️ NIE `journal`/`calendar`, choć ślad z nich
+ *                       pochodzi: `origin` mówi, KTO to zadanie założył, a
+ *                       założył je produkt. Skąd wie — mówi `source_table`.
+ *   `system_key`      ← `zbudujKluczSystemowy(wglad.klucz, okno)` (WG-18, D4).
+ *   `due_on`          ← ⛔ ZAWSZE `null` (D5). Wglądy niosą `termin` do rankera
+ *                       i to jest w porządku — ale ranker układa KOLEJNOŚĆ,
+ *                       a termin w bazie jest zobowiązaniem wobec zawodnika.
+ *
+ * ⚠️ `okno` jest OBOWIĄZKOWE I NIE MA WARTOŚCI DOMYŚLNEJ. Ziarnistość klucza
+ * jest regułą odduplikowania: `powtarzajacy_sie_bol` znaczy „raz na zawsze",
+ * `powtarzajacy_sie_bol:2026-W33` znaczy „raz na tydzień". Producent, który
+ * nie wybierze świadomie, wybierze przypadkiem — a skutek (to samo zadanie
+ * codziennie od nowa) zobaczy dopiero zawodnik. D4 mówi `null`.
+ */
+export function zbudujZadanieSystemoweZWgladu(wejscie: {
+  wglad: Wglad;
+  userId: string;
+  /** Ślad z `Kandydat.skadToWiemy`. `null` = wgląd go nie ma. */
+  slad: SladWgladu | null;
+  /** Ziarnistość klucza. `null` = „raz na zawsze" (D4). Bez wartości domyślnej — celowo. */
+  okno: string | null;
+  ileZajmieSekund?: number | null;
+}): WynikZadaniaZWgladu {
+  const { wglad } = wejscie;
+
+  const kluczSystemowy = zbudujKluczSystemowy(wglad.klucz, wejscie.okno);
+  if (kluczSystemowy === null) {
+    return {
+      ok: false,
+      powod: `nie umiem zbudować klucza systemowego z („${wglad.klucz}", `
+        + `${wejscie.okno === null ? 'bez okna' : `„${wejscie.okno}"`}) — bez niego zadanie zdubluje się (WG-18)`,
+    };
+  }
+
+  // ── ŚLAD ŹRÓDŁOWY WOBEC TYPU KOLUMNY ──────────────────────────────
+  let sladDoZapisu: SladZrodlowy | null = null;
+  let sladPominiety: SladPominiety | null = null;
+  if (wejscie.slad !== null) {
+    const skad = wejscie.slad.skad.trim();
+    const idWiersza = (wejscie.slad.idWiersza ?? '').trim();
+    if (skad.length === 0) {
+      sladPominiety = {
+        powod: 'brak_tabeli',
+        zdanie: 'ślad bez nazwy tabeli — `source_table` i `source_row_id` zostają puste',
+      };
+    } else if (idWiersza.length === 0) {
+      // ⚠️ To NIE jest defekt: `brak_roku_urodzenia` opisuje BRAK wartości
+      // w wierszu profilu, a nie konkretny rekord. CHECK `player_tasks_zrodlo_calosc`
+      // wymaga, żeby oba pola były puste albo oba pełne — więc odkładamy oba.
+      sladPominiety = {
+        powod: 'brak_wiersza',
+        zdanie: `ślad z „${skad}" nie wskazuje wiersza (fakt o BRAKU wartości) — `
+          + 'CHECK `player_tasks_zrodlo_calosc` wymaga obu pól naraz, więc oba zostają puste',
+      };
+    } else if (!KSZTALT_UUID.test(idWiersza)) {
+      // ⛔ ZMIERZONE, NIE ZAŁOŻONE — patrz punkt 1 w komentarzu sekcji.
+      sladPominiety = {
+        powod: 'id_nie_jest_uuid',
+        zdanie: `„${skad}.id" = „${idWiersza}" nie jest uuid, a `
+          + '`player_tasks.source_row_id` jest kolumną `uuid` — wstawienie skończyłoby się '
+          + '`22P02 invalid input syntax for type uuid`, więc ślad NIE WCHODZI. '
+          + 'Naprawa należy do schematu, nie do tej funkcji (nota T1 §7).',
+      };
+    } else {
+      sladDoZapisu = { tabela: skad, idWiersza };
+    }
+  }
+
+  // ⭐ JEDNA DROGA WALIDACJI. Wszystkie reguły (tytuł, powód, rejestr, klucz,
+  // źródło, koszt, termin) sprawdza `zbudujZadanieSystemowe` — ta funkcja jest
+  // ADAPTEREM, nie drugim walidatorem. Druga kopia reguł rozjechałaby się
+  // z pierwszą przy pierwszej zmianie i obie byłyby zielone.
+  const zbudowane = zbudujZadanieSystemowe({
+    userId: wejscie.userId,
+    tytul: wglad.doZrobienia,
+    zrodlo: ZRODLO_ZADANIA_Z_WGLADU as Exclude<ZrodloZadania, 'player'>,
+    faktZLiczbami: wglad.liczba,
+    wyjasnienie: zdanieZnaczeniaWgladu(wglad),
+    rejestr: 'fakt_o_tobie',
+    kluczPowodu: wglad.klucz,
+    kluczSystemowy,
+    slad: sladDoZapisu,
+    ileZajmieSekund: wejscie.ileZajmieSekund ?? null,
+    // ⛔ D5 — termin nie wchodzi TU, a nie „nie wchodzi, bo go nie podano".
+    termin: null,
+  });
+  if (!zbudowane.ok) return { ok: false, powod: zbudowane.powod };
+
+  return {
+    ok: true,
+    kandydat: {
+      wiersz: zbudowane.wiersz,
+      konflikt: UPSERT_ZADANIA_SYSTEMOWEGO,
+      sladPominiety,
     },
   };
 }
