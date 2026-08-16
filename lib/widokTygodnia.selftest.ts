@@ -371,8 +371,10 @@ console.log('\n(5) ⭐ DZIEŃ PRZESZŁY MA TRZY STANY — brak wpisu ≠ „nie 
     stan(40) === 'odbylo_sie' && stan(43) === 'odbylo_sie',
     `${String(stan(40))} / ${String(stan(43))}`);
 
-  check('stan 2/3 — „nie odbyło się" (ktoś tę pozycję anulował)',
-    stan(41) === 'nie_odbylo_sie', String(stan(41)));
+  // ⭐ PLAN-D-K1 16.08.2026 — pozycja zdjęta z planu dostaje `odwolane`,
+  // a NIE „nie odbyło się". Zdanie o PLANIE, nie o zawodniku (D4).
+  check('stan 2/3 — „odwołane" (ktoś tę pozycję zdjął z planu)',
+    stan(41) === 'odwolane', String(stan(41)));
 
   check('⛔ stan 3/3 — „brak wpisu" JEST OSOBNY i NIE jest „nie odbyło się"',
     stan(42) === 'brak_wpisu' && stan(42) !== stan(41) && stan(42) !== stan(40),
@@ -393,7 +395,7 @@ console.log('\n(5) ⭐ DZIEŃ PRZESZŁY MA TRZY STANY — brak wpisu ≠ „nie 
   const stanBez = (id: number) =>
     bezDziennika.dni.flatMap((d) => d.pozycje).find((p) => p.id === id)?.stanPrzeszly ?? null;
   check('⛔ NIEUDANY ODCZYT dziennika ≠ „brak wpisu" — czwarty stan, `nie_odczytano`',
-    stanBez(42) === 'nie_odczytano' && stanBez(41) === 'nie_odbylo_sie'
+    stanBez(42) === 'nie_odczytano' && stanBez(41) === 'odwolane'
     && stanBez(40) === 'odbylo_sie',
     `${String(stanBez(42))} / ${String(stanBez(41))}`);
 
@@ -598,10 +600,20 @@ console.log('\n(7) EKRAN NAPRAWDĘ TO RYSUJE — asercje na źródło (ponad wym
   check('godzinę rysuje wspólna reguła, nie `if (e.scheduled_time)`',
     !/if\s*\(\s*\w+\.scheduled_time\s*\)/.test(kalendarz), 'ekran ma własną regułę godziny');
 
+  // ⭐ PLAN-D-K1 16.08.2026 — CZWARTA SEKCJA NAZYWA SIĘ DZIŚ TAK SAMO JAK
+  // PLAKIETKA. Do 16.08 stało tu `/Anulowane/`, czyli asercja PRZYPINAŁA
+  // DRUGĄ NAZWĘ tego samego faktu do ekranu. Nazwy nie ma już w źródle
+  // ekranu wpisanej wprost — bierze się ze stałej — więc asercja pyta
+  // o STAŁĄ, a osobno o to, że stała ma niepuste brzmienie.
   check('stare grupowanie NIE ZNIKŁO — żyje pod zakładką „Listy"',
     /Cykliczne/.test(kalendarz) && /Nadchodzące/.test(kalendarz)
-    && /Minione/.test(kalendarz) && /Anulowane/.test(kalendarz),
+    && /Minione/.test(kalendarz)
+    && /PLAKIETKI_STANU_PRZESZLEGO\.odwolane/.test(kalendarz),
     'cztery sekcje zniknęły z ekranu bez decyzji');
+  // ⛔ ZAPADKA NA BRAK DRUGIEJ NAZWY STOI W `lib/wykonanieSesji.selftest.ts`,
+  // grupa 11 — i przemiata CAŁE repozytorium, nie ten jeden ekran (O69).
+  // ⛔ Nie dublujemy jej tutaj: dwie zapadki na tę samą rzecz znaczą, że przy
+  // zmianie brzmienia ktoś poprawi jedną i zostawi drugą jako czerwoną.
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

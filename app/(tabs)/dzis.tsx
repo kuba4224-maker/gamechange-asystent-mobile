@@ -557,9 +557,15 @@ type DaneEkranu = {
    * `wydarzeniaDnia` — i to jest cała treść osobnego zapytania (§ niżej,
    * „ZAPYTANIE B5"). Tamte dwa jadą z odpowiedzi zawężonej do
    * `status in ('scheduled','completed')`, a licznik pracy MUSI widzieć
-   * `cancelled`: odwołanie jest dziś JEDYNYM dowodem „nie odbyło się"
+   * `cancelled`: odwołanie jest dziś JEDYNYM dowodem pracy NIEWYKONANEJ
    * (`session_verdicts` ma 0 wierszy, `status='completed'` 0 z 24,
    * `daily_logs.calendar_event_id` 0 z 10 — zmierzone 15.08.2026).
+   * ⚠️ PLAN-D-K1 16.08.2026 — DOPRECYZOWANIE, KTÓRE NIE JEST KOSMETYKĄ:
+   * do 16.08 stało tu „dowodem »nie odbyło się«", bo reguła zwracała wtedy
+   * dla odwołania `nie_odbylo_sie`. Dziś odwołanie daje PIĄTĄ wartość
+   * `odwolane` — ZAWODNIK czyta „Odwołane", a LICZNIK nadal liczy tę pozycję
+   * jako niewykonaną. Zmiana plakietki nie ruszyła tu ANI JEDNEJ LICZBY
+   * i pilnuje tego grupa 8 strażnika `lib/wykonanieSesji.selftest.ts`.
    * Bez odwołań licznik oddałby `brak_podstawy` u zawodnika, u którego
    * poprawną odpowiedzią jest „0 z 2".
    *
@@ -2568,7 +2574,13 @@ export default function DzisScreen() {
               </Text>
               {p.godzina ? `  ·  ${p.godzina}` : ''}
               {/* ⭐ WT-17 — POZYCJA, KTÓRA SIĘ ODBYŁA, DOSTAJE PLAKIETKĘ.
-                  Cztery stany i cztery plakietki biorą się z JEDNEJ tabeli
+                  ⚠️ PLAN-D-K1 16.08.2026 — stanów jest PIĘĆ, nie cztery
+                  (doszło `odwolane` → „Odwołane"). Ten odczyt jest indeksem
+                  po `Record<StanWykonania, string>`, więc piąta wartość
+                  rysuje się tu SAMA i `tsc` pilnuje kompletności tabeli —
+                  dlatego ta gałąź nie potrzebowała zmiany kodu, tylko tego
+                  zdania (D7).
+                  Pięć stanów i pięć plakietek bierze się z JEDNEJ tabeli
                   (`PLAKIETKI_STANU_PRZESZLEGO` = `PLAKIETKI_WYKONANIA`),
                   tej samej, z której czyta Kalendarz. ⛔ Druga kopia tej
                   tabeli znaczyłaby, że jeden ekran mówi „Zrobione", a drugi
@@ -2677,6 +2689,13 @@ export default function DzisScreen() {
               {/* ⭐ ZDANIE PYTAJĄCE — jedyne nowe brzmienie tego pasa.
                   Rozstrzyga je `lib/pytanieOWystapienie.ts`, nie ten plik. */}
               <Text style={styles.licznikLiczba}>{p.zdanie}</Text>
+              {/* ⛔ PLAN-D-K1 — TA LISTA MA ZOSTAĆ DWUELEMENTOWA I TO JEST
+                  JAWNA DECYZJA, NIE PRZEOCZONA GAŁĄŹ (D7). To są wartości
+                  `WartoscWerdyktu` — tego, co ZAWODNIK może o sobie
+                  powiedzieć — a nie `StanWykonania`. Piąta wartość stanu
+                  (`odwolane`) jest FAKTEM O PLANIE i ⛔ NIE WOLNO jej tu
+                  dokładać: przycisk „Odwołane" prosiłby zawodnika, żeby
+                  oświadczył coś, czego nie zrobił i czego nie wie. */}
               <View style={styles.pytanieOdpowiedzi}>
                 {(['odbylo_sie', 'nie_odbylo_sie'] as const).map((w) => (
                   <TouchableOpacity

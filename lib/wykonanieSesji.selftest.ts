@@ -32,7 +32,7 @@
 // — obietnica jest spełniona wtedy, gdy ekran ją rysuje (O58).
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -103,34 +103,40 @@ function stan(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GRUPA 1 — CZTERY STANY SĄ CZTEREMA RÓŻNYMI WARTOŚCIAMI
+// GRUPA 1 — PIĘĆ STANÓW TO PIĘĆ RÓŻNYCH WARTOŚCI
 // ═══════════════════════════════════════════════════════════════════════════
 function grupa1(zasady: ZasadyWykonania): void {
-  console.log('\n1. CZTERY STANY, NIE DWA POD CZTEREMA NAZWAMI');
+  console.log('\n1. PIĘĆ STANÓW, NIE DWA POD PIĘCIOMA NAZWAMI');
 
   const odbyte = stan({ wpisyDziennika: new Set([1]) }, zasady);
-  const nieodbyte = stan({ status: 'cancelled' }, zasady);
+  // ⭐ PLAN-D-K1 — „nie odbyło się" ma dziś DOKŁADNIE JEDNO źródło: werdykt
+  // zawodnika. Do 16.08.2026 dawało je też odwołanie — i to był cały defekt.
+  const nieodbyte = stan({ idWydarzenia: 9, dzien: '2026-08-11',
+    werdykty: jest(w(9, '2026-08-11', 'nie_odbylo_sie')) }, zasady);
+  const odwolane = stan({ status: 'cancelled' }, zasady);
   const bez = stan({}, zasady);
   const nieodczytane = stan({ wpisyDziennika: null }, zasady);
 
-  check('stan 1/4 — „odbyło się" (wpis w dzienniku wskazuje tę pozycję)',
+  check('stan 1/5 — „odbyło się" (wpis w dzienniku wskazuje tę pozycję)',
     odbyte === 'odbylo_sie', String(odbyte));
-  check('stan 2/4 — „nie odbyło się" (pozycja odwołana)',
+  check('stan 2/5 — „nie odbyło się" (WERDYKT ZAWODNIKA — jedyne źródło)',
     nieodbyte === 'nie_odbylo_sie', String(nieodbyte));
-  check('stan 3/4 — „brak wpisu"',
+  check('⭐ stan 3/5 — POZYCJA ODWOŁANA to `odwolane`, a NIE „nie odbyło się"',
+    odwolane === 'odwolane', String(odwolane));
+  check('stan 4/5 — „brak wpisu"',
     bez === 'brak_wpisu', String(bez));
-  check('⛔ stan 4/4 — NIEUDANY ODCZYT dziennika ≠ „brak wpisu"',
+  check('⛔ stan 5/5 — NIEUDANY ODCZYT dziennika ≠ „brak wpisu"',
     nieodczytane === 'nie_odczytano', String(nieodczytane));
 
-  const wszystkie = [odbyte, nieodbyte, bez, nieodczytane];
-  check('⭐ cztery stany są CZTEREMA RÓŻNYMI wartościami',
-    new Set(wszystkie).size === 4, JSON.stringify(wszystkie));
+  const wszystkie = [odbyte, nieodbyte, odwolane, bez, nieodczytane];
+  check('⭐ pięć stanów to PIĘĆ RÓŻNYCH wartości',
+    new Set(wszystkie).size === 5, JSON.stringify(wszystkie));
 
   check('wystąpienie przed nami nie ma stanu (nie ma o czym orzekać)',
     stan({ przeszle: false }, zasady) === null, String(stan({ przeszle: false }, zasady)));
 
-  check('każdy z czterech stanów ma własną plakietkę, żadne dwie nie są tym samym napisem',
-    new Set(Object.values(PLAKIETKI_WYKONANIA)).size === 4,
+  check('każdy z pięciu stanów ma własną plakietkę, żadne dwie nie są tym samym napisem',
+    new Set(Object.values(PLAKIETKI_WYKONANIA)).size === 5,
     JSON.stringify(PLAKIETKI_WYKONANIA));
   check('⛔ w plakietkach nie ma „Nie wykonano" — to było oskarżenie z braku danych',
     !Object.values(PLAKIETKI_WYKONANIA).includes('Nie wykonano'),
@@ -206,7 +212,10 @@ function grupa3(zasady: ZasadyWykonania): void {
   check('licznik się policzył', l.rodzaj === 'policzony', JSON.stringify(l));
   if (l.rodzaj === 'policzony') {
     check('odbyte = 2 (dwa wpisy w dzienniku)', l.odbyte === 2, String(l.odbyte));
-    check('nieodbyte = 2 (jedno odwołanie + jeden werdykt zawodnika)',
+    // ⛔ PLAN-D-K1 — ODWOŁANIE NADAL WCHODZI DO `nieodbyte`. Plakietka
+    // zmieniła się na „Odwołane", licznik pracy NIE ZMIENIŁ SIĘ ANI O JEDEN
+    // (D6). Ta liczba jest przypięta z pomiaru sprzed pasa K1.
+    check('nieodbyte = 2 (jedno ODWOŁANIE + jeden werdykt zawodnika) — D6',
       l.nieodbyte === 2, String(l.nieodbyte));
     check('bez wpisu = 1 (piąte wystąpienie)', l.bezWpisu === 1, String(l.bezWpisu));
     check('⭐ MIANOWNIK = 4, a NIE 5 — „bez wpisu" jest poza nim',
@@ -434,7 +443,8 @@ function grupa5(zasady: ZasadyWykonania): void {
     zWerdyktuTak === 'odbylo_sie', String(zWerdyktuTak));
   check('⭐ wpis w dzienniku DAJE `odbylo_sie`', zDziennika === 'odbylo_sie', String(zDziennika));
   check('⭐ znacznik `completed` DAJE `odbylo_sie`', zeZnacznika === 'odbylo_sie', String(zeZnacznika));
-  check('⭐ odwołanie DAJE `nie_odbylo_sie`', zOdwolania === 'nie_odbylo_sie', String(zOdwolania));
+  check('⭐ odwołanie DAJE `odwolane` (a NIE „nie odbyło się") — PLAN-D-K1',
+    zOdwolania === 'odwolane', String(zOdwolania));
   check('⭐ przy komplecie danych ŻADEN z pięciu wyników nie jest `brak_wpisu`',
     ![zWerdyktuNie, zWerdyktuTak, zDziennika, zeZnacznika, zOdwolania].includes('brak_wpisu'),
     JSON.stringify([zWerdyktuNie, zWerdyktuTak, zDziennika, zeZnacznika, zOdwolania]));
@@ -570,6 +580,389 @@ console.log('\n6. EKRAN — reguła, która żyje tylko w lib/, nie jest obietni
   check('⛔ nigdzie w appce nie ma czwartego statusu `missed` w `calendar_events`',
     !/'missed'/.test(kalendarz) && !/'missed'/.test(tydzien),
     'wrócił czwarty status — patrz odrzucony projekt 1');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-K1 08.2026 (16.08.2026) — PLAKIETKA, KTÓRA OBWINIAŁA ZAWODNIKA
+//    ZA SESJĘ ZDJĘTĄ Z PLANU PRZEZ PRODUKT
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ── CO BYŁO ZMIERZONE ───────────────────────────────────────────────────────
+// 16.08.2026, produkcja `kqrbztsvepjtggjmmcdx`:
+//   • 24 z 24 wydarzeń w bazie ma `source='system'`;
+//   • 12 z 24 ma `status='cancelled'` — wszystkie odwołane przez
+//     `gamechange-app/lib/focus-block-adaptation.js :: adaptFocusBlock`;
+//   • z tych 12 na dzień 16.08 DWA wystąpienia były już przeszłe (12.08, 14.08)
+//     u JEDNEGO zawodnika — czyli dwie plakietki „Nie odbyło się" postawione
+//     przy sesjach, których produkt sam nie dał wykonać. Pozostałe dziesięć
+//     (17.08–07.09) zapaliłoby się samo z upływem dat.
+//
+// ── DLACZEGO TE ASERCJE, A NIE INNE ─────────────────────────────────────────
+// Grupy 8–11 są napisane pod błędy, które POPEŁNIŁY POPRZEDNIE PASY:
+//   (8)  D6 — plakietka to NIE licznik. Zmiana stanu nie ma prawa ruszyć ani
+//        jednej liczby licznika pracy. Liczby są PRZYPIĘTE z pomiaru sprzed
+//        pasa K1, nie policzone z bieżącego kodu (inaczej asercja mierzyłaby
+//        kod samym sobą).
+//   (9)  KOLEJNOŚĆ REGUŁ — wycinamy CIAŁO funkcji, nie szukamy w całym pliku
+//        (O71): wzorzec `werdyktLiczySie` stoi w tym pliku pięć razy.
+//   (10) EKRAN — asercje czytają PLIK EKRANU, nie ten moduł (O75). Brak pliku
+//        to FAIL z nazwą, nigdy `POMINIETE` (O76).
+//   (11) JEDNO SŁOWO NA JEDEN FAKT — przemiatamy CAŁE repozytorium, nie listę
+//        plików (O69), i zapadka stoi na RÓWNOŚCI (O73).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ⚠️ TO SŁOWO JEST TU SKLEJONE Z DWÓCH KAWAŁKÓW CELOWO I NIE JEST OZDOBĄ.
+// Grupa 11 przemiata CAŁE repozytorium w poszukiwaniu tego napisu. Gdyby stał
+// tu w całości, strażnik znalazłby sam siebie i zapalałby się zawsze — czyli
+// byłby albo wyłączony, albo obudowany wyjątkiem na własną nazwę, a wyjątek
+// na własną nazwę to pierwszy krok do wyjątku na cudzą.
+const SLOWO_PORZUCONE = 'Anul' + 'owane';
+
+/** Czyta plik repozytorium. ⛔ O75/O76 — brak pliku NIE JEST pominięciem. */
+function czytajPlikRepo(...czesci: string[]): string | null {
+  try {
+    return readFileSync(join(root, ...czesci), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** Usuwa komentarze — asercja ma pytać o KOD, nie o zdanie o kodzie. */
+function zywyKod(s: string): string {
+  return s
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+/**
+ * Wycina ciało funkcji od jej nagłówka do `koniec`. ⛔ O71 — asercja szukająca
+ * wzorca w CAŁYM pliku nie pilnuje jednej instrukcji.
+ */
+function wytnij(zrodlo: string, od: string, do_: string): string | null {
+  const i = zrodlo.indexOf(od);
+  if (i < 0) return null;
+  const j = zrodlo.indexOf(do_, i + od.length);
+  if (j < 0) return null;
+  return zrodlo.slice(i, j);
+}
+
+/**
+ * Wpis katalogu w kształcie, którego ten strażnik używa.
+ * ⚠️ Opisany TU, a nie zaimportowany jako `import('node:fs').Dirent` — bo tamten
+ * zapis dokłada jeden błąd `TS2591` w środowisku bez `@types/node`, a strażnik
+ * nie ma prawa dokładać szumu do pomiaru, którym sam się mierzy.
+ */
+type WpisKatalogu = { name: string; isDirectory(): boolean; isFile(): boolean };
+
+/** Przemiata katalog po plikach `.ts`/`.tsx`. ⛔ O69 — zero list na sztywno. */
+function przemiec(katalog: string, akumulator: string[] = []): string[] {
+  let wpisy: WpisKatalogu[];
+  try {
+    wpisy = readdirSync(katalog, { withFileTypes: true });
+  } catch {
+    return akumulator;
+  }
+  for (const e of wpisy) {
+    const p = join(katalog, e.name);
+    if (e.isDirectory()) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === '_diag_backup'
+        || e.name === '.expo' || e.name === 'assets') continue;
+      przemiec(p, akumulator);
+    } else if (e.isFile() && (e.name.endsWith('.ts') || e.name.endsWith('.tsx'))) {
+      akumulator.push(p);
+    }
+  }
+  return akumulator;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GRUPA 8 — ⛔ D6: PLAKIETKA TO NIE LICZNIK. ANI JEDNA LICZBA SIĘ NIE RUSZA
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n8. ⛔ PLAN-D-K1 / D6 — ZMIANA PLAKIETKI NIE RUSZA LICZNIKA PRACY');
+{
+  // ⭐ WEJŚCIE I WYNIK ZMIERZONE NA KODZIE SPRZED PASA K1 (`origin/main`
+  // = e34a523, 16.08.2026) i PRZYPIĘTE TU JAKO LICZBY. ⛔ Gdyby asercja
+  // liczyła oczekiwanie z bieżącego kodu, mierzyłaby kod samym sobą i przeszła
+  // przy każdej zmianie — dokładnie tak, jak przechodzi test, który sprawdza,
+  // że `f(x) === f(x)`.
+  const WEJSCIE: WystapienieDoLicznika[] = [
+    { idWydarzenia: 1, dzien: '2026-08-12', status: 'scheduled', zRegulyCyklicznej: false },
+    { idWydarzenia: 2, dzien: '2026-08-11', status: 'cancelled', zRegulyCyklicznej: false },
+    { idWydarzenia: 3, dzien: '2026-08-10', status: 'cancelled', zRegulyCyklicznej: false },
+    { idWydarzenia: 4, dzien: '2026-08-09', status: 'completed', zRegulyCyklicznej: false },
+    { idWydarzenia: 5, dzien: '2026-08-08', status: 'scheduled', zRegulyCyklicznej: false },
+  ];
+  const PRZED_K1 = { odbyte: 2, nieodbyte: 2, bezWpisu: 1, nieodczytane: 0, mianownik: 4 };
+
+  const po = policzWykonanaPrace({
+    dzis: DZIS, oknoDni: 14, wystapienia: WEJSCIE,
+    wpisyDziennika: new Set([1]), werdykty: BRAK,
+  });
+
+  check('⭐ D6 — licznik na tym samym wejściu nadal się LICZY, nie „brak podstawy"',
+    po.rodzaj === 'policzony', JSON.stringify(po));
+  if (po.rodzaj === 'policzony') {
+    check('⭐ D6 — WSZYSTKIE PIĘĆ LICZB licznika jest CO DO JEDNEGO takich, jak przed pasem K1',
+      po.odbyte === PRZED_K1.odbyte && po.nieodbyte === PRZED_K1.nieodbyte
+      && po.bezWpisu === PRZED_K1.bezWpisu && po.nieodczytane === PRZED_K1.nieodczytane
+      && po.mianownik === PRZED_K1.mianownik,
+      `${JSON.stringify(po)} ≠ ${JSON.stringify(PRZED_K1)}`);
+    check('⛔ D6 — DWIE ODWOŁANE SESJE SIEDZĄ W `nieodbyte`, a NIE w „bez wpisu"',
+      po.nieodbyte === 2 && po.bezWpisu === 1,
+      `nieodbyte=${po.nieodbyte} bezWpisu=${po.bezWpisu} — odwołane wpadły do „bez wpisu", `
+      + 'czyli mianownik zmalał i zawodnik z 12 odwołaniami dostanie „brak podstawy"');
+    check('⛔ D6 — MIANOWNIK nie zmalał: odwołana sesja to nadal PRACA NIEWYKONANA',
+      po.mianownik === po.odbyte + po.nieodbyte && po.mianownik === 4, String(po.mianownik));
+  }
+
+  // ⭐ TA SAMA LICZBA Z DWÓCH RÓŻNYCH DRÓG: odwołanie i werdykt zawodnika
+  // „nie odbyłem" mają dla LICZNIKA znaczyć dokładnie to samo, choć dla
+  // ZAWODNIKA znaczą co innego. To jest cała treść rozdzielenia z pasa K1.
+  const przezWerdykt = policzWykonanaPrace({
+    dzis: DZIS, oknoDni: 14,
+    wystapienia: WEJSCIE.map((x) => (x.status === 'cancelled' ? { ...x, status: 'scheduled' } : x)),
+    wpisyDziennika: new Set([1]),
+    werdykty: jest(w(2, '2026-08-11', 'nie_odbylo_sie'), w(3, '2026-08-10', 'nie_odbylo_sie')),
+  });
+  check('⭐ D6 — ODWOŁANIE i WERDYKT „nie odbyłem" dają licznikowi TĘ SAMĄ liczbę',
+    przezWerdykt.rodzaj === 'policzony' && po.rodzaj === 'policzony'
+    && przezWerdykt.odbyte === po.odbyte && przezWerdykt.nieodbyte === po.nieodbyte
+    && przezWerdykt.mianownik === po.mianownik && przezWerdykt.bezWpisu === po.bezWpisu,
+    `${JSON.stringify(przezWerdykt)} vs ${JSON.stringify(po)}`);
+
+  // …a dla ZAWODNIKA nie znaczą tego samego — i to też ma być asercją, bo bez
+  // niej powyższa równość byłaby spełniona także przez sklejenie obu stanów.
+  check('⭐ …ale ZAWODNIK czyta przy nich DWA RÓŻNE zdania — licznik zrównał, ekran nie',
+    PLAKIETKI_WYKONANIA.odwolane !== PLAKIETKI_WYKONANIA.nie_odbylo_sie,
+    `${PLAKIETKI_WYKONANIA.odwolane} / ${PLAKIETKI_WYKONANIA.nie_odbylo_sie}`);
+
+  // ── ZAPADKA NA KOMPLETNOŚĆ TABELI PLAKIETEK ──────────────────────────
+  const klucze = Object.keys(PLAKIETKI_WYKONANIA);
+  const zdania = Object.values(PLAKIETKI_WYKONANIA);
+  check('⭐ zapadka na RÓWNOŚĆ — `PLAKIETKI_WYKONANIA` ma DOKŁADNIE 5 kluczy (O73)',
+    klucze.length === 5, `${klucze.length}: ${klucze.join(', ')}`);
+  check('⛔ KAŻDA z pięciu plakietek ma NIEPUSTE zdanie',
+    zdania.every((z) => typeof z === 'string' && z.trim().length > 0), JSON.stringify(zdania));
+  check('⛔ ŻADNE DWIE plakietki nie są tym samym napisem',
+    new Set(zdania).size === 5, JSON.stringify(zdania));
+  check('⛔ plakietka `odwolane` NIE JEST tym samym zdaniem, co `nie_odbylo_sie` ani co `brak_wpisu`',
+    PLAKIETKI_WYKONANIA.odwolane !== PLAKIETKI_WYKONANIA.nie_odbylo_sie
+    && PLAKIETKI_WYKONANIA.odwolane !== PLAKIETKI_WYKONANIA.brak_wpisu,
+    JSON.stringify(PLAKIETKI_WYKONANIA));
+  check('⛔ plakietka `odwolane` NIE ZAWIERA słowa oskarżającego („nie odbył", „opuść", „pominął")',
+    !/(nie odby|opuszcz|opuść|pominą|pominię|zawiod|zaniedb)/i.test(PLAKIETKI_WYKONANIA.odwolane),
+    PLAKIETKI_WYKONANIA.odwolane);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GRUPA 9 — ⭐ REGUŁA URUCHOMIONA, NIE PRZECZYTANA. I KOLEJNOŚĆ REGUŁ (D2)
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n9. ⭐ PLAN-D-K1 — REGUŁA ODPALONA NA WEJŚCIU, NIE WYSZUKANA W TEKŚCIE');
+{
+  // ⭐ ASERCJA URUCHOMIENIOWA. Asercja tekstowa („czy w pliku stoi `odwolane`")
+  // przepuściłaby dowolną INNĄ gałąź zwracającą tę wartość — na przykład taką,
+  // która oddaje `odwolane` dla `completed`, a dla `cancelled` nadal
+  // `nie_odbylo_sie`.
+  const odwolanePrzeszle = rozstrzygnijWykonanie({
+    idWydarzenia: 100, dzien: '2026-08-11', przeszle: true, status: 'cancelled',
+    zRegulyCyklicznej: false, wpisyDziennika: new Set<number>(), werdykty: BRAK,
+  });
+  check('⭐ ODPALONA reguła na `{status:cancelled, przeszłe:true}` oddaje `odwolane`',
+    odwolanePrzeszle === 'odwolane', String(odwolanePrzeszle));
+  check('⛔ …i NIE oddaje `nie_odbylo_sie` — to była plakietka obwiniająca zawodnika',
+    odwolanePrzeszle !== 'nie_odbylo_sie', String(odwolanePrzeszle));
+  check('⛔ …i NIE oddaje `brak_wpisu` — odwołanie JEST wiedzą, nie jej brakiem',
+    odwolanePrzeszle !== 'brak_wpisu', String(odwolanePrzeszle));
+
+  // ⭐ ASERCJA ODWROTNA — WERDYKT ZAWODNIKA NADAL WYGRYWA (reguła 2 przed 3).
+  const werdyktNaOdwolanym = rozstrzygnijWykonanie({
+    idWydarzenia: 101, dzien: '2026-08-11', przeszle: true, status: 'cancelled',
+    zRegulyCyklicznej: false, wpisyDziennika: new Set<number>(),
+    werdykty: jest(w(101, '2026-08-11', 'nie_odbylo_sie')),
+  });
+  const werdyktTakNaOdwolanym = rozstrzygnijWykonanie({
+    idWydarzenia: 102, dzien: '2026-08-11', przeszle: true, status: 'cancelled',
+    zRegulyCyklicznej: false, wpisyDziennika: new Set<number>(),
+    werdykty: jest(w(102, '2026-08-11', 'odbylo_sie')),
+  });
+  check('⭐ WERDYKT ZAWODNIKA „nie odbyłem" WYGRYWA z odwołaniem (reguła 2 przed 3)',
+    werdyktNaOdwolanym === 'nie_odbylo_sie', String(werdyktNaOdwolanym));
+  check('⭐ WERDYKT „odbyłem" też wygrywa — zawodnik mógł zrobić sesję zdjętą z planu',
+    werdyktTakNaOdwolanym === 'odbylo_sie', String(werdyktTakNaOdwolanym));
+
+  check('⛔ odwołanie w PRZYSZŁOŚCI nadal nie ma stanu — nie ma o czym orzekać',
+    rozstrzygnijWykonanie({
+      idWydarzenia: 103, dzien: '2026-08-30', przeszle: false, status: 'cancelled',
+      zRegulyCyklicznej: false, wpisyDziennika: new Set<number>(), werdykty: BRAK,
+    }) === null);
+
+  check('⛔ odwołana REGUŁA CYKLICZNA też daje `odwolane` — reguła 3 stoi przed regułą 4',
+    rozstrzygnijWykonanie({
+      idWydarzenia: 104, dzien: '2026-08-11', przeszle: true, status: 'cancelled',
+      zRegulyCyklicznej: true, wpisyDziennika: new Set<number>(), werdykty: BRAK,
+    }) === 'odwolane');
+
+  // ── O71 — KOLEJNOŚĆ REGUŁ Z CIAŁA FUNKCJI, NIE Z CAŁEGO PLIKU ────────
+  const modul = czytajPlikRepo('lib', 'wykonanieSesji.ts');
+  check('⛔ O75 — `lib/wykonanieSesji.ts` DA SIĘ ODCZYTAĆ (brak pliku to FAIL, nie pominięcie)',
+    modul !== null, 'nie udało się odczytać lib/wykonanieSesji.ts');
+  if (modul !== null) {
+    const cialo = wytnij(zywyKod(modul), 'export function rozstrzygnijWykonanie', 'function brakAlboNieodczytano');
+    check('⛔ O71 — ciało `rozstrzygnijWykonanie` da się wyciąć (asercja pyta o JEDNĄ funkcję)',
+      cialo !== null && cialo.length > 100, `cialo=${cialo === null ? 'BRAK' : cialo.length + 'B'}`);
+    if (cialo !== null) {
+      const iWerdykt = cialo.indexOf('werdyktLiczySie');
+      const iOdwolanie = cialo.indexOf("we.status === 'cancelled'");
+      const iCykl = cialo.indexOf('zRegulyCyklicznej');
+      check('⛔ D2 — w CIELE reguły gałąź `cancelled` w ogóle jest',
+        iOdwolanie > 0, String(iOdwolanie));
+      check('⭐ D2 — WERDYKT ZAWODNIKA stoi w ciele PRZED gałęzią `cancelled` (reguła 2 przed 3)',
+        iWerdykt > 0 && iOdwolanie > iWerdykt, `werdykt@${iWerdykt} cancelled@${iOdwolanie}`);
+      check('⭐ D2 — gałąź `cancelled` stoi PRZED gałęzią reguły cyklicznej (reguła 3 przed 4)',
+        iCykl > 0 && iCykl > iOdwolanie, `cancelled@${iOdwolanie} cykliczna@${iCykl}`);
+      check('⛔ gałąź `cancelled` zwraca `odwolane`, a NIE `nie_odbylo_sie`',
+        /we\.status === 'cancelled'\)\s*return 'odwolane'/.test(cialo),
+        'gałąź odwołania nie zwraca piątej wartości');
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GRUPA 10 — ⭐ EKRAN. O75: ASERCJA CZYTA PLIK EKRANU, NIE WŁASNY MODUŁ
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n10. ⭐ PLAN-D-K1 — EKRAN MÓWI JEDNO SŁOWO I BIERZE JE ZE STAŁEJ');
+{
+  const surowy = czytajPlikRepo('app', '(tabs)', 'kalendarz.tsx');
+  check('⛔ O75/O76 — `app/(tabs)/kalendarz.tsx` DA SIĘ ODCZYTAĆ (brak pliku = FAIL z nazwą)',
+    surowy !== null, 'nie udało się odczytać app/(tabs)/kalendarz.tsx');
+  if (surowy !== null) {
+    const ekran = zywyKod(surowy);
+
+    check('⭐ ekran BIERZE brzmienie odwołania ZE STAŁEJ, a nie wpisuje go wprost',
+      /PLAKIETKI_STANU_PRZESZLEGO\.odwolane/.test(ekran),
+      'ekran nie sięga po `PLAKIETKI_STANU_PRZESZLEGO.odwolane`');
+
+    // ⛔ O71 — pytamy o CIAŁO `renderEventCard`, nie o cały plik: w pliku
+    // o 1000+ liniach wzorzec „gdzieś jest" nie pilnuje TEJ jednej gałęzi.
+    const karta = wytnij(ekran, 'function renderEventCard', 'function renderPozycja');
+    check('⛔ O71 — ciało `renderEventCard` da się wyciąć',
+      karta !== null && karta.length > 200, `karta=${karta === null ? 'BRAK' : karta.length + 'B'}`);
+    if (karta !== null) {
+      check('⭐ gałąź `status === cancelled` NA KARCIE stawia plakietkę ZE STAŁEJ',
+        /status === 'cancelled'\) badges\.push\(PLAKIETKI_STANU_PRZESZLEGO\.odwolane\)/.test(karta),
+        'karta wpisuje brzmienie odwołania wprost albo zgubiła gałąź');
+      check(`⛔ ciało karty NIE ZAWIERA napisu „${SLOWO_PORZUCONE}" wpisanego wprost`,
+        !new RegExp(SLOWO_PORZUCONE).test(karta), 'wróciła druga nazwa tego samego faktu');
+    }
+
+    const wiersz = wytnij(ekran, 'function renderPozycja', 'const styles');
+    check('⛔ O71 — ciało `renderPozycja` da się wyciąć',
+      wiersz !== null && wiersz.length > 200, `wiersz=${wiersz === null ? 'BRAK' : wiersz.length + 'B'}`);
+    if (wiersz !== null) {
+      check('⭐ D7 — wiersz dnia ma JAWNĄ gałąź dla piątej wartości (`odwolane`)',
+        /'odwolane'/.test(wiersz),
+        'wiersz dnia przemilczał piątą wartość — przekreślenie zniknęłoby po cichu');
+    }
+
+    check('⭐ ekran ma czasownik „odwołaj" ZE STAŁEJ (`AKCJA_ODWOLAJ`), nie wpisany wprost',
+      /AKCJA_ODWOLAJ/.test(ekran), 'przycisk odwołania nie bierze brzmienia ze stałej');
+    check('⛔ ekran NIE STAWIA „Nie odbyło się" wpisanego wprost',
+      !/'Nie odbyło się'/.test(ekran), 'wróciła kopia napisu na ekranie');
+  }
+
+  // ⭐ TA SAMA REGUŁA MUSI DOJŚĆ DO POZYCJI NA EKRANIE, a nie tylko dać się
+  // zawołać osobno (O58) — przez `zbudujTydzien`, czyli tak, jak woła ją ekran.
+  const t = zbudujTydzien({
+    poniedzialek: '2026-08-10',
+    dzisiaj: DZIS,
+    wydarzenia: [
+      { id: 71, title: 'Sesja Bloku (zdjęta z planu przez produkt)', event_type: 'micro_session',
+        status: 'cancelled', scheduled_date: '2026-08-11', scheduled_time: null,
+        recurrence_rule: null, source: 'system' },
+    ],
+    planLekcji: null,
+    wpisyDziennika: new Set<number>(),
+    werdykty: BRAK,
+  });
+  const odwolanaPozycja = t.dni.flatMap((d) => d.pozycje).find((p) => p.id === 71) ?? null;
+  check('⭐ TYDZIEŃ NIESIE `odwolane` do pozycji dnia — reguła dochodzi na ekran (O58)',
+    odwolanaPozycja?.stanPrzeszly === 'odwolane', String(odwolanaPozycja?.stanPrzeszly));
+  check('⛔ …i pozycja odwołana NADAL nie liczy się do wagi dnia',
+    odwolanaPozycja?.liczonaDoWagi === false, String(odwolanaPozycja?.liczonaDoWagi));
+  check('⛔ …i NADAL nie ma nad nią przycisku werdyktu — dowód już jest',
+    odwolanaPozycja?.akcja.rodzaj === 'brak', String(odwolanaPozycja?.akcja.rodzaj));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GRUPA 11 — ⭐ JEDNO SŁOWO NA JEDEN FAKT. PRZEMIATANIE, NIE LISTA (O69/O73)
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n11. ⭐ PLAN-D-K1 — JEDEN FAKT MA W PRODUKCIE JEDNĄ NAZWĘ');
+{
+  const wszystkie = przemiec(root);
+  check('⛔ O69 — przemiatanie repozytorium w ogóle coś znalazło',
+    wszystkie.length > 50, `plików .ts/.tsx: ${wszystkie.length}`);
+
+  // ── ZAPADKA NA JEDNO SŁOWO ───────────────────────────────────────────
+  // ⚠️ Pytamy o ŻYWY KOD, nie o komentarze: zdanie „do 16.08 nazywało się tak"
+  // jest ZAPISEM HISTORII i ma prawo zostać (O67 chce komentarzy, które mówią
+  // prawdę, a nie komentarzy skasowanych). Zakazany jest NAPIS, który zawodnik
+  // może zobaczyć na ekranie.
+  const zNapisem = wszystkie.filter((p) => {
+    const t = zywyKod(readFileSync(p, 'utf8'));
+    return new RegExp(`['"\`]${SLOWO_PORZUCONE}['"\`]`).test(t)
+      || new RegExp(`>\\s*${SLOWO_PORZUCONE}\\s*<`).test(t)
+      || new RegExp(`\\}\\s*${SLOWO_PORZUCONE}`).test(t);
+  }).map((p) => p.slice(root.length + 1));
+  check(`⛔ ZAPADKA NA JEDNO SŁOWO — w CAŁYM repozytorium ZERO wystąpień napisu „${SLOWO_PORZUCONE}"`,
+    zNapisem.length === 0,
+    `znaleziono w: ${zNapisem.join(', ')} — ten sam fakt znów ma dwie nazwy`);
+
+  // ── ZAPADKA NA LICZBĘ KONSUMENTÓW (O69 + O73) ────────────────────────
+  //
+  // ⛔ TA LICZBA NIE JEST OZDOBĄ. `Record<StanWykonania, …>` wywali się na
+  // `tsc`, ale `if/else` i `switch` bez `default` NIE WYWALĄ SIĘ i przemilczą
+  // piątą wartość — dokładnie tak, jak przemilczałby ją licznik pracy bez
+  // gałęzi dodanej w tym pasie. Nowy konsument ma ZAPALIĆ tę asercję, żeby
+  // CZŁOWIEK spojrzał, czy ma jawną gałąź. ⛔ NIE PODNOŚ tej liczby bez
+  // dopisania gałęzi w nowym pliku.
+  const WZORZEC_KONSUMENTA =
+    /nie_odbylo_sie|odbylo_sie|brak_wpisu|nie_odczytano|PLAKIETKI_WYKONANIA|PLAKIETKI_STANU_PRZESZLEGO|rozstrzygnijWykonanie|StanWykonania|StanPozycjiPrzeszlej/;
+  const konsumenci = wszystkie
+    .filter((p) => WZORZEC_KONSUMENTA.test(readFileSync(p, 'utf8')))
+    .map((p) => p.slice(root.length + 1))
+    .sort();
+  const KONSUMENTOW_16_08_2026 = 11;
+  check(`⭐ O73 — konsumentów \`StanWykonania\` jest DOKŁADNIE ${KONSUMENTOW_16_08_2026} (zapadka na RÓWNOŚĆ, nie na „≥1")`,
+    konsumenci.length === KONSUMENTOW_16_08_2026,
+    `${konsumenci.length}: ${konsumenci.join(', ')}`);
+  check('⛔ na liście konsumentów są OBA ekrany, które rysują plakietkę',
+    konsumenci.includes('app/(tabs)/kalendarz.tsx') && konsumenci.includes('app/(tabs)/dzis.tsx'),
+    konsumenci.join(', '));
+  check('⛔ i oba moduły, które regułę wołają',
+    konsumenci.includes('lib/widokTygodnia.ts') && konsumenci.includes('lib/pytanieOWystapienie.ts'),
+    konsumenci.join(', '));
+
+  // ── D7 — KAŻDY KONSUMENT Z GAŁĘZIAMI MA GAŁĄŹ PIĄTĄ ──────────────────
+  //
+  // Konsument, który rozgałęzia się PO WARTOŚCI stanu (a nie indeksuje po
+  // `Record`), musi wymienić `odwolane` z nazwy. Wypisujemy takich po TREŚCI
+  // (O88), a nie po nazwie pliku.
+  const rozgalezieni = konsumenci.filter((rel) => {
+    if (rel.endsWith('.selftest.ts')) return false;
+    const t = zywyKod(readFileSync(join(root, rel), 'utf8'));
+    return /=== 'nie_odbylo_sie'|=== 'brak_wpisu'|stan === 'odbylo_sie'/.test(t);
+  });
+  const bezPiatej = rozgalezieni.filter((rel) => {
+    const t = zywyKod(readFileSync(join(root, rel), 'utf8'));
+    return !/'odwolane'/.test(t);
+  });
+  check('⭐ D7 — KAŻDY konsument rozgałęziający się PO WARTOŚCI stanu wymienia `odwolane` z nazwy',
+    bezPiatej.length === 0,
+    `bez jawnej gałęzi: ${bezPiatej.join(', ')} (z ${rozgalezieni.length} rozgałęziających się)`);
+  check('⛔ …i takich konsumentów w ogóle jest więcej niż zero (inaczej asercja wyżej jest pusta)',
+    rozgalezieni.length >= 2, `${rozgalezieni.length}: ${rozgalezieni.join(', ')}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

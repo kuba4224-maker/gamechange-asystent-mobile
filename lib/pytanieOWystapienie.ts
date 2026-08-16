@@ -354,6 +354,14 @@ export function zbudujPytaniaOWystapienia(
     // gdzie zapisać, czy zawodnik już odpowiedział i czy dowód już istnieje.
     // ⛔ Drugi silnik tej reguły rozjechałby się z pierwszym przy pierwszej
     // poprawce, a oba wyglądałyby poprawnie z osobna.
+    //
+    // ⚠️ PLAN-D-K1 16.08.2026 — PIĄTA WARTOŚĆ `StanWykonania` (`odwolane`)
+    // NIE ZMIENIA TU NICZEGO I JEST TO SPRAWDZONE, NIE ZAŁOŻONE (D7).
+    // Ten moduł nie czyta `StanWykonania` w ogóle: pyta `akcjaDlaWystapienia`,
+    // a ta zwraca `brak` dla wszystkiego, co nie jest `brak_wpisu` — więc
+    // sesja odwołana nie była pytana przed pasem K1 i nie jest po nim.
+    // Asercja `(3) ⛔ sesja ODWOŁANA nie jest pytana` w strażniku tego pliku
+    // trzyma to zdanie prawdziwym.
     const werdykt = znajdzWerdykt(we.werdykty, w.idWydarzenia, dzien, zasady);
     const akcja = akcjaDlaWystapienia(weWykonania);
 

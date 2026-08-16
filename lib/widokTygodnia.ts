@@ -257,14 +257,19 @@ export type KlasaKropki = 'blok' | 'klub' | 'mecz' | 'zadanie' | 'nieznana';
  * ⚠️ PLAN-D-D1 14.08.2026 — DEFINICJA WYPROWADZIŁA SIĘ DO `lib/wykonanieSesji.ts`.
  * Tu zostaje wyłącznie NAZWA, pod którą znają ją istniejące ekrany, żeby
  * przeprowadzka nie kosztowała ani jednej zmiany u wołających.
- * ⛔ NIE DOPISUJ TU PIĄTEGO STANU ANI DRUGIEJ TABELI PLAKIETEK — jedno miejsce.
+ * ⛔ NIE DOPISUJ TU KOLEJNEGO STANU ANI DRUGIEJ TABELI PLAKIETEK — jedno
+ * miejsce, i jest nim `lib/wykonanieSesji.ts`. ⚠️ PLAN-D-K1 16.08.2026 —
+ * piąty stan (`odwolane`) POWSTAŁ WŁAŚNIE TAM i przyszedł tu re-eksportem,
+ * bez ani jednej linii zmiany u wołających. O to w tym zdaniu chodziło.
  */
 export type StanPozycjiPrzeszlej = StanWykonania;
 
 /**
- * Plakietki czterech stanów. ⚠️ PLAN-D-D1 — re-eksport, jedno źródło.
+ * Plakietki pięciu stanów. ⚠️ PLAN-D-D1 — re-eksport, jedno źródło.
  * ⛔ Nie ma tu „Nie wykonano" i nie będzie: to zdanie było oskarżeniem
  * postawionym na podstawie braku danych.
+ * ⚠️ PLAN-D-K1 — od 16.08.2026 stanów jest PIĘĆ, nie cztery; piąty to
+ * `odwolane` („Odwołane"), czyli pozycja zdjęta z planu.
  */
 export const PLAKIETKI_STANU_PRZESZLEGO = PLAKIETKI_WYKONANIA;
 
@@ -291,7 +296,12 @@ export type PozycjaDnia = {
   stanPrzeszly: StanPozycjiPrzeszlej | null;
   /** Pozycja rozwinięta z reguły cyklicznej, a nie z własnej daty. */
   zRegulyCyklicznej: boolean;
-  /** Czy pozycja liczy się do wagi dnia. Anulowana — nie. */
+  /**
+   * Czy pozycja liczy się do wagi dnia. Odwołana — nie.
+   * ⚠️ PLAN-D-K1 — liczone Z `status === 'cancelled'`, NIE ze `stanPrzeszly`,
+   * więc piąta wartość stanu tego pola nie dotyka: pozycja odwołana W PRZYSZŁYM
+   * dniu też nie ma ciążyć na wadze, a stanu przeszłego wtedy nie ma (D7).
+   */
   liczonaDoWagi: boolean;
   /**
    * ⭐ PLAN-D-D1 — CO ZAWODNIK MOŻE Z TYM WYSTĄPIENIEM ZROBIĆ: oznaczyć jako

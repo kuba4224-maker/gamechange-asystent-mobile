@@ -608,11 +608,12 @@ function check(label: string, cond: boolean, detail: string) {
     && !('odbyte' in brak) && !('mianownik' in brak),
     JSON.stringify(Object.keys(brak)));
 
-  // Cztery plakietki są CZTEREMA różnymi napisami — inaczej WT-17 pokazuje
-  // ten sam tekst dla „Zrobione" i dla „Bez wpisu".
+  // Plakietki są RÓŻNYMI napisami — inaczej WT-17 pokazuje ten sam tekst
+  // dla „Zrobione" i dla „Bez wpisu".
+  // ⚠️ PLAN-D-K1 16.08.2026 — stanów jest PIĘĆ (doszło `odwolane`).
   const napisy = Object.values(PLAKIETKI_WYKONANIA);
-  check('WT-17 — cztery stany mają CZTERY różne plakietki',
-    new Set(napisy).size === 4,
+  check('WT-17 — pięć stanów ma PIĘĆ różnych plakietek',
+    new Set(napisy).size === 5,
     JSON.stringify(napisy));
 }
 

@@ -10,6 +10,10 @@
 //   • `calendar_events.status='completed'` — od pasa A1 zapisywane, ale opisuje
 //     WIERSZ (regułę albo pojedynczą pozycję), nie WYSTĄPIENIE;
 //   • `status='cancelled'` — „odwołana", czyli zdjęta z planu. NIE „opuszczona";
+//     ⭐ PLAN-D-K1 16.08.2026 — TO ZDANIE STAŁO TU OD 14.08 I BYŁO NIEPRAWDĄ
+//     O WŁASNYM PLIKU: reguła 3, 300 linii niżej, robiła z odwołania dokładnie
+//     „opuszczoną" (`return 'nie_odbylo_sie'`). Od pasa K1 odwołanie ma własny,
+//     PIĄTY stan `odwolane` i komentarz wreszcie opisuje kod (O67);
 //   • `daily_logs.calendar_event_id` — „ta sesja MA wpis". Brak wpisu NIE ZNACZY
 //     „nie odbyła się"; wskazuje też na wiersz reguły, nie na wystąpienie.
 // Skutek policzalny: licznik pracy umiał powiedzieć wyłącznie „ile sesji ma
@@ -39,30 +43,67 @@
 // ═══════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════
-// 1. CZTERY STANY — I DLACZEGO CZTERY, A NIE DWA
+// 1. PIĘĆ STANÓW — I DLACZEGO PIĘĆ, A NIE DWA
 // ═══════════════════════════════════════════════════════════════════
 
 /**
  *   `odbylo_sie`     — MAMY DOWÓD, że tak.
- *   `nie_odbylo_sie` — MAMY DOWÓD, że nie (werdykt zawodnika albo odwołanie).
+ *   `nie_odbylo_sie` — MAMY DOWÓD, że nie: WERDYKT ZAWODNIKA. ⚠️ I NIC POZA NIM.
+ *   `odwolane`       — pozycja została ZDJĘTA Z PLANU. ⛔ TO NIE JEST ZARZUT
+ *                      i ⛔ TO NIE JEST BRAK DOWODU. To jest FAKT O PLANIE,
+ *                      nie o zawodniku — patrz akapit niżej.
  *   `brak_wpisu`     — nie mamy dowodu w żadną stronę. ⛔ TO NIE JEST ZARZUT.
  *   `nie_odczytano`  — odczyt się nie udał. ⛔ TO NIE JEST „brak wpisu" (R5).
  *
- * ⚠️ Trzeci i czwarty wyglądają na to samo i nie są tym samym. `brak_wpisu`
+ * ⚠️ Czwarty i piąty wyglądają na to samo i nie są tym samym. `brak_wpisu`
  * znaczy „sprawdziłem i nic nie ma". `nie_odczytano` znaczy „nie wiem, bo nie
  * sprawdziłem". Sklejenie ich zamienia awarię w twierdzenie o zawodniku.
+ *
+ * ── ⭐ PLAN-D-K1 16.08.2026 — DLACZEGO `odwolane` MUSIAŁO POWSTAĆ ────
+ *
+ * Do 16.08.2026 odwołanie wpadało do `nie_odbylo_sie`, czyli do plakietki
+ * „Nie odbyło się". Zmierzone tego dnia na produkcji (`kqrbztsvepjtggjmmcdx`):
+ * WSZYSTKIE 24 wydarzenia w bazie mają `source='system'`, a 12 z nich ma
+ * `status='cancelled'` — i te 12 odwołał SAM PRODUKT
+ * (`gamechange-app/lib/focus-block-adaptation.js :: adaptFocusBlock`,
+ * `update({status:'cancelled'}).eq('focus_block_id', …).eq('status','scheduled')`).
+ * Zawodnik czytał więc przy sesji, której produkt nie dał mu wykonać, zdanie
+ * brzmiące jak zarzut wobec niego. To jest złamanie N1 („nagradzamy wykonaną
+ * pracę, nigdy obecność" — i tym bardziej nie karcimy za pracę, której produkt
+ * sam nie dał wykonać) oraz Z0 (zdanie o PLANIE podane jako zdanie O ZAWODNIKU).
+ *
+ * ⛔ I DLACZEGO NIE ROZRÓŻNIAMY, KTO ODWOŁAŁ. `app/(tabs)/kalendarz.tsx`
+ * pozwala odwołać pozycję także ZAWODNIKOWI (`update({status:'cancelled'})`),
+ * a `calendar_events` NIE MA kolumny mówiącej, kto to zrobił. Dwa różne
+ * podmioty piszą dziś tę samą wartość i są NIEROZRÓŻNIALNE. Przy
+ * nierozróżnialnych podmiotach jedyne prawdziwe zdanie to zdanie O POZYCJI,
+ * nie o osobie: „Odwołane" jest prawdziwe w OBU przypadkach, „Nie odbyło się"
+ * nie jest prawdziwe w ŻADNYM. Kolumna `cancelled_by` jest propozycją POZA
+ * TYM PASEM — bez niej i tak nie wolno pisać zdania o osobie.
  */
-export type StanWykonania = 'odbylo_sie' | 'nie_odbylo_sie' | 'brak_wpisu' | 'nie_odczytano';
+export type StanWykonania =
+  | 'odbylo_sie'
+  | 'nie_odbylo_sie'
+  | 'odwolane'
+  | 'brak_wpisu'
+  | 'nie_odczytano';
 
 /**
- * Plakietki czterech stanów. Przeniesione z `lib/widokTygodnia.ts` co do znaku
- * (pas C1) — ten plik jest teraz ich jedynym domem, tamten je re-eksportuje.
+ * Plakietki pięciu stanów. Cztery przeniesione z `lib/widokTygodnia.ts` co do
+ * znaku (pas C1) — ten plik jest teraz ich jedynym domem, tamten je
+ * re-eksportuje.
  * ⛔ Nie ma tu „Nie wykonano" i nie będzie.
  * ⚠️ BRZMIENIA — DO PRZEJRZENIA PRZEZ KUBĘ (te cztery są w produkcie od pasa C1).
  */
 export const PLAKIETKI_WYKONANIA: Record<StanWykonania, string> = {
   odbylo_sie: 'Zrobione',
   nie_odbylo_sie: 'Nie odbyło się',
+  // ⚠️ DO PRZEJRZENIA — K1. Brzmienie NIE JEST nowe: `app/(tabs)/kalendarz.tsx`
+  // miał od pasa A `badges.push('Anulowane')` przy tym samym fakcie. Pas K1
+  // bierze wariant „Odwołane" i UJEDNOLICA kalendarz do niego, bo ten sam fakt
+  // miał w produkcie dwie nazwy („Anulowane" na karcie, „Nie odbyło się"
+  // w wierszu dnia) — a to jest ta sama choroba, którą pas G2 usuwał z obszarów.
+  odwolane: 'Odwołane',
   brak_wpisu: 'Bez wpisu',
   nie_odczytano: 'Nie wiemy',
 };
@@ -84,6 +125,19 @@ export const PLAKIETKI_WYKONANIA: Record<StanWykonania, string> = {
  */
 export const AKCJA_NIE_ODBYLEM = 'Nie odbyłem';
 export const AKCJA_COFNIJ = 'Cofnij';
+
+/**
+ * ⚠️ DO PRZEJRZENIA — K1. Czasownik, którym zawodnik zdejmuje pozycję z planu.
+ * Do 16.08.2026 przycisk w `app/(tabs)/kalendarz.tsx` brzmiał „Anuluj", a stan,
+ * który z niego powstawał, nazywał się na jednym ekranie „Anulowane", a na
+ * drugim „Nie odbyło się". Jedna rzecz — jedna nazwa: czynność „Odwołaj",
+ * skutek „Odwołane".
+ * ⛔ TO NIE JEST to samo słowo, co „Anuluj" w oknach dialogowych
+ * (`components/FocusBlockPlanner.tsx`, `components/RecommendationCard.tsx`,
+ * `lib/biometric-auth.ts`) — tam „Anuluj" znaczy „porzuć ten formularz",
+ * czyli INNY FAKT, i pas K1 świadomie go nie rusza.
+ */
+export const AKCJA_ODWOLAJ = 'Odwołaj';
 
 // ═══════════════════════════════════════════════════════════════════
 // 2. WERDYKT — FAKT O WYSTĄPIENIU, NIE O WIERSZU
@@ -290,8 +344,15 @@ export const ZASADY_PRAWDZIWE: ZasadyWykonania = {
  *     wystawionym ŚWIADOMIE i O KONKRETNYM WYSTĄPIENIU; reszta to poszlaki
  *     o wierszu. Zawodnik, który mówi „nie odbyłem", ma być usłyszany także
  *     wtedy, gdy ktoś wcześniej postawił na tym wierszu `completed`.
- *  3. odwołanie (`cancelled`) → `nie_odbylo_sie`. To jest DOWÓD: pozycja
- *     została zdjęta z planu, więc brak wykonania jest faktem, nie domysłem.
+ *  3. ⭐ odwołanie (`cancelled`) → `odwolane`. ZMIENIONE 16.08.2026 (pas K1):
+ *     do tego dnia stało tu `nie_odbylo_sie`, czyli plakietka „Nie odbyło się"
+ *     przy sesji, którą PRODUKT SAM zdjął z planu (12 z 12 odwołań na
+ *     produkcji pochodziło z `adaptFocusBlock`). Pozycja zdjęta z planu to
+ *     nadal DOWÓD i nadal nie jest domysłem — ale dowód O PLANIE, nie
+ *     o zawodniku, więc dostaje własną wartość.
+ *     ⛔ REGUŁA ZOSTAJE TRZECIA, nie druga: werdykt zawodnika (reguła 2) ma
+ *     nadal wygrywać ze wszystkim. Kto sam powiedział „nie odbyłem" o dniu,
+ *     w którym pozycję potem odwołano, ma być usłyszany.
  *  4. reguła cykliczna bez werdyktu → `brak_wpisu`. `daily_logs` wskazuje
  *     WIERSZ REGUŁY, więc jeden wpis o wtorkowym treningu oznaczałby „odbyło
  *     się" dla KAŻDEGO wtorku w historii — produkt policzyłby zawodnikowi
@@ -317,7 +378,8 @@ export function rozstrzygnijWykonanie(
     if (w !== null) return w.werdykt;
   }
 
-  if (we.status === 'cancelled') return 'nie_odbylo_sie';
+  // ⭐ PLAN-D-K1 — WŁASNA WARTOŚĆ, NIE „nie odbyło się". Patrz reguła 3 wyżej.
+  if (we.status === 'cancelled') return 'odwolane';
 
   if (we.zRegulyCyklicznej && !zasady.regulaBierzeWpisReguly) {
     return brakAlboNieodczytano(we, zasady);
@@ -364,9 +426,13 @@ export function akcjaDlaWystapienia(we: WejscieWykonania): AkcjaWystapienia {
   if (w !== null) return { rodzaj: 'cofnij', etykieta: AKCJA_COFNIJ };
 
   // ⭐ AKCJA STOI DOKŁADNIE TAM, GDZIE JEST DZIURA — przy wystąpieniu, o którym
-  // produkt nie wie NIC. Nie stawiamy jej przy „Zrobione" ani przy „Nie odbyło
-  // się" z odwołania: tam dowód już jest, a przycisk obok dowodu zaprasza do
-  // zaprzeczenia własnemu wpisowi z Dziennika jednym przypadkowym dotknięciem.
+  // produkt nie wie NIC. Nie stawiamy jej przy „Zrobione" ani przy „Odwołane":
+  // tam dowód już jest, a przycisk obok dowodu zaprasza do zaprzeczenia
+  // własnemu wpisowi z Dziennika jednym przypadkowym dotknięciem.
+  // ⚠️ PLAN-D-K1 — warunek `s !== 'brak_wpisu'` obejmuje PIĄTĄ wartość bez
+  // zmiany: `odwolane` nie jest „brak wpisu", więc przycisku nadal nie ma.
+  // To jest jedyny konsument, u którego piąta wartość NIC nie zmienia, i jest
+  // to napisane wprost, żeby nie wyglądało na przeoczenie (D7).
   // ⛔ I nie stawiamy jej przy „Nie wiemy": dokładanie werdyktu do stanu, który
   // jest awarią odczytu, zapisałoby zdanie o dniu, którego nie znamy.
   const s = rozstrzygnijWykonanie(we);
@@ -487,8 +553,18 @@ export function policzWykonanaPrace(
       werdykty: args.werdykty,
     }, zasady);
 
+    // ⛔ PLAN-D-K1 16.08.2026 — GAŁĄŹ, BEZ KTÓREJ PIĄTY STAN ZEPSUŁBY LICZNIK
+    // PO CICHU. Ten `if/else` nie ma `default`, więc `tsc` NIE POWIEDZIAŁBY
+    // ani słowa: `odwolane` wpadłoby do ostatniego `else`, czyli do „bez
+    // wpisu" — a wtedy mianownik zmalałby o wszystkie odwołane sesje i
+    // zawodnik z 12 odwołaniami dostałby „brak podstawy" zamiast „0 z 12".
+    // Odwołana sesja to nadal PRACA NIEWYKONANA i licznik ma ją tak widzieć.
+    // Plakietka jest o tym, CO PRODUKT MÓWI ZAWODNIKOWI; licznik jest o tym,
+    // ILE PRACY POWSTAŁO. Zmiana pierwszego nie ma prawa ruszyć drugiego —
+    // pilnuje tego grupa 8 strażnika, na przypiętych liczbach sprzed pasa K1.
     if (stan === 'odbylo_sie') odbyte += 1;
     else if (stan === 'nie_odbylo_sie') nieodbyte += 1;
+    else if (stan === 'odwolane') nieodbyte += 1;
     else if (stan === 'nie_odczytano') nieodczytane += 1;
     else bezWpisu += 1;
   }

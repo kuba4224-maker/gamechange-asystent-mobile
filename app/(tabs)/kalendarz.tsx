@@ -115,7 +115,9 @@ import {
 //
 // ── CO TU BYŁO DO 14.08.2026 WIECZOREM ──────────────────────────────
 // Ten ekran grupował wiersze PO STATUSIE: Cykliczne · Nadchodzące · Minione ·
-// Anulowane. Makieta `claude/MAKIETA_WIDOK_TYGODNIA.html` pokazuje coś zupełnie
+// Odwołane (do 16.08.2026 sekcja nosiła nazwę „Anulowane" — pas K1 ujednolicił
+// ją do jednego słowa dla jednego faktu).
+// Makieta `claude/MAKIETA_WIDOK_TYGODNIA.html` pokazuje coś zupełnie
 // innego: SIEDEM WIERSZY DNI, cały tydzień naraz, z wagą każdego dnia widoczną
 // bez czytania legendy. To nie jest ten sam ekran w innej kolejności — to jest
 // inny sposób patrzenia na te same wiersze.
@@ -191,6 +193,7 @@ import {
   czytajWerdykty,
   kluczWystapienia,
   WERDYKTY_NIEPODANE,
+  AKCJA_ODWOLAJ,
   type WejscieWerdyktow,
 } from '../../lib/wykonanieSesji';
 
@@ -642,7 +645,15 @@ export default function KalendarzScreen() {
       werdykty,
     });
     if (stanPrzeszly) badges.push(PLAKIETKI_STANU_PRZESZLEGO[stanPrzeszly]);
-    else if (e.status === 'cancelled') badges.push('Anulowane');
+    // ⭐ PLAN-D-K1 16.08.2026 — TEN SAM FAKT, TA SAMA NAZWA.
+    // Do 16.08 stało tu WPISANE WPROST `'Anulowane'`, a wiersz dnia mówił
+    // o tej samej pozycji „Nie odbyło się" (bo reguła zwracała wtedy
+    // `nie_odbylo_sie`). Jeden fakt miał w produkcie dwie nazwy, i to gorszą
+    // z nich — zdanie o zawodniku — przy sesji, którą produkt zdjął sam.
+    // ⛔ Brzmienie BIERZE SIĘ ZE STAŁEJ, nie jest tu wpisane: druga kopia
+    // napisu rozjeżdża się przy pierwszej poprawce i nikt tego nie widzi,
+    // bo nikt nie ogląda obu ekranów naraz.
+    else if (e.status === 'cancelled') badges.push(PLAKIETKI_STANU_PRZESZLEGO.odwolane);
     else if (e.status === 'completed') badges.push(PLAKIETKI_STANU_PRZESZLEGO.odbylo_sie);
 
     const meta: string[] = [];
@@ -677,8 +688,12 @@ export default function KalendarzScreen() {
         <Text style={styles.cardMeta}>{meta.join(' · ')}</Text>
         {e.status === 'scheduled' && (
           <View style={styles.actionsRow}>
+            {/* ⭐ PLAN-D-K1 — CZASOWNIK ZGODNY ZE SKUTKIEM: „Odwołaj" → „Odwołane".
+                Do 16.08 przycisk brzmiał „Anuluj", a skutek nazywał się na
+                jednym ekranie „Anulowane", a na drugim „Nie odbyło się".
+                ⚠️ DO PRZEJRZENIA — K1. Brzmienie ze stałej `AKCJA_ODWOLAJ`. */}
             <TouchableOpacity style={styles.secondaryBtn} onPress={() => cancelEvent(e.id)}>
-              <Text style={styles.secondaryBtnText}>Anuluj</Text>
+              <Text style={styles.secondaryBtnText}>{AKCJA_ODWOLAJ}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -691,7 +706,11 @@ export default function KalendarzScreen() {
   // ═══════════════════════════════════════════════════════════════════
   function renderPozycja(p: PozycjaDnia) {
     const nazwaRodzaju = p.rodzaj.znany ? EVENT_TYPE_LABELS[p.rodzaj.id] : p.rodzaj.komunikat;
-    const przekreslone = p.stanPrzeszly === 'nie_odbylo_sie';
+    // ⭐ PLAN-D-K1 — PIĄTA WARTOŚĆ MA TU JAWNĄ GAŁĄŹ (D7). Bez niej pozycja
+    // odwołana przestałaby być przekreślona, bo do 16.08 wpadała w
+    // `nie_odbylo_sie`. Przekreślenie mówi „tego nie ma w planie do zrobienia"
+    // — i to jest prawda o odwołaniu tak samo jak o werdykcie zawodnika.
+    const przekreslone = p.stanPrzeszly === 'nie_odbylo_sie' || p.stanPrzeszly === 'odwolane';
     const zapisujeTo = zapisWerdyktu === kluczWystapienia(p.id, p.dzien);
     return (
       <View key={`${p.id}-${p.zRegulyCyklicznej ? 'c' : 'j'}`} style={styles.it}>
@@ -703,6 +722,10 @@ export default function KalendarzScreen() {
             `p.godzina` jest `null`, a nie `''` ani `'—'`, właśnie po to, żeby
             nie dało się przypadkiem narysować pustego tagu wyglądającego na daną. */}
         {p.godzina ? <Text style={styles.tag}>{p.godzina}</Text> : null}
+        {/* ⚠️ PLAN-D-K1 — `tagOk` (wyróżnienie) należy WYŁĄCZNIE do `odbylo_sie`.
+            Piąta wartość `odwolane` świadomie go NIE dostaje i świadomie nie
+            dostaje żadnego wyróżnienia negatywnego: odwołanie nie jest ani
+            zasługą, ani przewiną zawodnika (D4, D7). */}
         {p.stanPrzeszly ? (
           <Text style={[styles.tag, p.stanPrzeszly === 'odbylo_sie' && styles.tagOk]}>
             {PLAKIETKI_STANU_PRZESZLEGO[p.stanPrzeszly]}
@@ -1044,11 +1067,14 @@ export default function KalendarzScreen() {
 
         <View style={{ marginTop: 20 }}>
           <TouchableOpacity onPress={() => setShowCancelled((v) => !v)}>
-            <Text style={styles.sectionLabel}>{showCancelled ? '▾' : '▸'} Anulowane</Text>
+            {/* ⭐ PLAN-D-K1 — nagłówek sekcji bierze TĘ SAMĄ stałą, co plakietka.
+                Sekcja „Anulowane" z kartami opisanymi „Odwołane" byłaby tą samą
+                chorobą dwóch nazw, tylko przesuniętą o jeden element wyżej. */}
+            <Text style={styles.sectionLabel}>{showCancelled ? '▾' : '▸'} {PLAKIETKI_STANU_PRZESZLEGO.odwolane}</Text>
           </TouchableOpacity>
           {showCancelled && (
             cancelled.length === 0
-              ? <Text style={styles.empty}>Brak anulowanych wpisów.</Text>
+              ? <Text style={styles.empty}>Brak odwołanych wpisów.</Text>
               : cancelled.map(renderEventCard)
           )}
         </View>
