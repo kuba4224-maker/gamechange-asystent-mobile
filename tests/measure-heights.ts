@@ -33,6 +33,12 @@ import { HINT_EYEBROW, HINT_TABLE_MISSING_TEXT } from '../lib/componentHints';
 // modułu, którym rysuje je dziennik (zero przepisywania co do znaku ręcznie).
 import { blockSessionQuestion } from '../lib/focusBlockJournalLink';
 
+import { join as joinPath, dirname as dirName } from 'node:path';
+import { fileURLToPath as fileUrl } from 'node:url';
+
+/** Korzeń repozytorium — ten plik leży w `tests/`. */
+const KORZEN = dirName(dirName(fileUrl(import.meta.url)));
+
 const lh = (fs: number, given?: number) => given ?? Math.round(fs * 1.25 * 10) / 10;
 const lines = (text: string, availDp: number, fs: number, em = 0.5) =>
   Math.max(1, Math.ceil((text.length * fs * em) / availDp));
@@ -54,6 +60,14 @@ const matTextWidth = (w: number) => w - 40 - 32 - 2;
 // ═══════════════════════════════════════════════════════════
 // EKRAN DZIŚ
 // ═══════════════════════════════════════════════════════════
+// ⚠️⚠️ MODEL RĘCZNY — STAN EKRANU Z 08.08.2026, NIE POMIAR DZISIEJSZEGO EKRANU.
+// Ta lista pięciu bloków została wpisana ręcznie 08.08.2026 i od tamtej pory
+// NIE ZMIENIŁA SIĘ ANI RAZU, choć `dzis.tsx` urósł z 40 439 B do 213 914 B
+// i doszły do niego m.in. kolejka podania i karta głosu. ZOSTAJE WYŁĄCZNIE
+// PO TO, żeby dało się porównać dzisiejszy ekran ze zdobyczą rundy 3.
+// ⛔ NIE DOPISUJ TU NICZEGO. Prawdziwy pomiar stoi na końcu tego pliku
+// (`lib/wysokoscEkranu.ts`) i przemiata drzewo komponentów z pliku ekranu.
+// Długość tej listy jest przybita zapadką w `lib/wysokoscEkranu.selftest.ts`.
 const DZIS_DO_PRZYCISKOW: [string, number][] = [
   ['padding górny', 20],
   ['data + „Dziś"', 83],
@@ -87,7 +101,7 @@ const HINTS: [string, string][] = [
 ];
 
 console.log('══════════════════════════════════════════════════════════════');
-console.log('EKRAN DZIŚ — czy zdobycz rundy 3 przetrwała');
+console.log('EKRAN DZIŚ — MODEL RĘCZNY Z 08.08.2026 (nie jest pomiarem dzisiejszego ekranu)');
 console.log('══════════════════════════════════════════════════════════════\n');
 let acc = 0;
 for (const [n, v] of DZIS_DO_PRZYCISKOW) { acc += v; console.log(`  ${String(acc).padStart(4)} dp  ${n}`); }
@@ -287,7 +301,8 @@ console.log(`    Dziś: ${jaWorstScroll.toFixed(2)} ekranu na najmniejszym telef
 console.log(`\n  Sanity: ${MATERIALS.length} materiałów w katalogu, nadtytuł podpowiedzi = „${HINT_EYEBROW}".`);
 // `throw` zamiast `process.exit` — patrz komentarz w lib/*.selftest.ts.
 if (regres) throw new Error('REGRESJA: przyciski feedbacku zeszły pod zgięcie.');
-console.log('\n✅ Przyciski feedbacku NADAL nad zgięciem na wszystkich trzech telefonach.');
+console.log('\n✅ [MODEL RĘCZNY 08.08.2026] Przyciski feedbacku nad zgięciem na wszystkich trzech telefonach.');
+console.log('   ⚠️ To zdanie mówi o ekranie z 08.08.2026, nie o dzisiejszym. Pomiar dzisiejszego ekranu — na końcu pliku.');
 if (jaWorstScroll > JA_SCROLL_LIMIT) {
   throw new Error(`REGRESJA: ekran „Ja" ma ${jaWorstScroll.toFixed(2)} ekranu scrolla `
     + `(próg ${JA_SCROLL_LIMIT}) — coś do niego wróciło.`);
@@ -398,38 +413,91 @@ if (doseLineRegres) {
   throw new Error('REGRESJA: z linią „Nowa porcja w Twoim Bloku →" przyciski feedbacku '
     + 'zeszły pod zgięcie. Skróć hero albo przenieś linię, nie każ scrollować do przycisków.');
 }
-console.log(`✅ Z linią „Nowa porcja w Twoim Bloku →" przyciski feedbacku nadal nad zgięciem `
+console.log(`✅ [MODEL RĘCZNY 08.08.2026] Z linią „Nowa porcja w Twoim Bloku →" przyciski feedbacku nadal nad zgięciem `
   + `(góra: ${BUTTONS_TOP_Z_LINIA} dp na najmniejszym ekranie 598 dp).`);
 
-// BUDZET R8 08.08.2026 — SZÓSTY PRÓG: OBJĘTOŚĆ dzis.tsx (przegląd całości,
-// sekcja 6: „rósł 3 rundy z rzędu, wysokość ekranu jest pilnowana, objętość
-// pliku nie"). To nie jest miara dla zawodnika, tylko dla utrzymania: Dziś
-// jest ekranem domowym i każda runda coś na nim dokłada. Stan: runda 5
-// ~36,2 kB → runda 7 40,4 kB (~+2 kB/rundę). Próg 48 kB ≈ jeszcze 3–4 rundy
-// wzrostu — po przekroczeniu WYDZIEL sekcje do components/ (jak
-// RecommendationCard), nie podnoś progu.
-import { statSync } from 'node:fs';
-import { join as joinPath, dirname as dirName } from 'node:path';
-import { fileURLToPath as fileUrl } from 'node:url';
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-M1 08.2026 (17.08.2026) — TU KOŃCZY SIĘ MODEL RĘCZNY,
+//    A ZACZYNA POMIAR Z EKRANU
+// ═════════════════════════════════════════════════════════════════════
+// CO TU BYŁO DO 17.08.2026 I DLACZEGO ZNIKŁO.
+//
+// Stał tu „SZÓSTY PRÓG REGRESJI": `statSync('app/(tabs)/dzis.tsx').size > 48 000`
+// → `throw`. Ten próg:
+//   • ⛔ NIE BYŁ MIARĄ WYSOKOŚCI. Mierzył objętość PLIKU, a 63 % tego pliku to
+//     komentarze. Karał dokumentowanie decyzji tak samo jak dokładanie kart.
+//   • ⛔ URODZIŁ SIĘ CZERWONY. Wszedł commitem `e3cce2b` (12.08.2026), który
+//     TYM SAMYM commitem podniósł `dzis.tsx` z 40 439 B do 55 170 B. Nie
+//     przeszedł ANI RAZU w całej historii repozytorium.
+//   • ⛔ NIKT TEGO NIE ZOBACZYŁ, bo ten plik nie jest odkrywany przez
+//     `tests/run-selftests.mjs` (runner bierze wyłącznie `lib/*.selftest.ts`).
+//     Od `e3cce2b` weszły 32 commity, z czego 15 dotykało `dzis.tsx`.
+//
+// CO STOI TU TERAZ. Prawdziwy pomiar, przemiatający drzewo komponentów
+// z pliku ekranu (`lib/wysokoscEkranu.ts`), odpowiadający na pytanie:
+//
+//   ⭐ „Ile rzeczy zawodnik zobaczy, zanim cokolwiek przewinie — i które to są?"
+//
+// ⛔ D4: PRZEKROCZENIE PROGU NIE JEST TU AWARIĄ. Ekran „Dziś" przekracza go
+// dziś wielokrotnie; strażnik czerwony od pierwszego dnia zostaje wyciszony
+// w tydzień — co ten plik właśnie udowodnił własną historią. Dlatego pomiar
+// PODAJE LICZBĘ I LISTĘ i przechodzi, a pilnowaniem, żeby liczba nie rosła,
+// zajmuje się ZAPADKA NA RÓWNOŚĆ w `lib/wysokoscEkranu.selftest.ts`.
 
-const DZIS_MAX_BYTES = 48_000;
-const dzisPath = joinPath(dirName(dirName(fileUrl(import.meta.url))), 'app', '(tabs)', 'dzis.tsx');
-const dzisBytes = statSync(dzisPath).size;
-console.log(`\n  Objętość dzis.tsx: ${dzisBytes} B (próg ${DZIS_MAX_BYTES} B).`);
+import {
+  zmierzEkran, opiszPozycje, przeciete, WIDOCZNE_NAD_ZGIECIEM_DP, SZEROKOSC_ODNIESIENIA_DP,
+  type PomiarEkranu,
+} from '../lib/wysokoscEkranu';
 
-// PORZADEK R8 08.08.2026 — PIĄTY PRÓG REGRESJI.
-if (promptRegres) {
-  throw new Error('REGRESJA: pytanie o sesję Bloku w dzienniku nie mieści się w całości '
-    + 'nad zgięciem (pytanie + „Tak, to ten" + „Nie"). Skróć brzmienie pytania albo odchudź '
-    + 'formularz NAD pytaniem — pytanie, którego nie widać, to bierny mechanizm, '
-    + 'czyli dokładnie to, co runda 7 usuwała.');
+const kreska = (t: string) => console.log(`\n${'═'.repeat(66)}\n${t}\n${'═'.repeat(66)}`);
+
+kreska('⭐ CO ZAWODNIK WIDZI PRZED PRZEWINIĘCIEM — POMIAR Z EKRANU (M1)');
+console.log(`  Narzędzie: tests/measure-heights.ts · moduł: lib/wysokoscEkranu.ts`);
+console.log(`  Telefon odniesienia: ${SZEROKOSC_ODNIESIENIA_DP} dp szerokości, `
+  + `${WIDOCZNE_NAD_ZGIECIEM_DP} dp widoczne nad zgięciem (bez paska zakładek i obszarów bezpiecznych).`);
+
+const EKRANY_ZAKLADEK = ['dzis', 'ja', 'dziennik', 'mecz', 'kalendarz'] as const;
+const pomiary: Record<string, PomiarEkranu> = {};
+for (const e of EKRANY_ZAKLADEK) pomiary[e] = zmierzEkran(joinPath(KORZEN, 'app', '(tabs)', `${e}.tsx`));
+
+console.log('\n  ekran        rzeczy   widzi w całości   przecięte zgięciem   pod zgięciem   wysokość');
+console.log('  ' + '─'.repeat(84));
+for (const e of EKRANY_ZAKLADEK) {
+  const r = pomiary[e];
+  const pr = przeciete(r);
+  console.log(`  ${e.padEnd(11)}${String(r.pozycje.length).padStart(6)}`
+    + `${String(r.nadZgieciem).padStart(18)}${String(pr).padStart(21)}`
+    + `${String(r.podZgieciem - pr).padStart(15)}`
+    + `${String(Math.round(r.wysokoscRazemDp)).padStart(11)} dp `
+    + `(${(r.wysokoscRazemDp / WIDOCZNE_NAD_ZGIECIEM_DP).toFixed(2)} ekranu)`);
 }
-console.log('✅ Pytanie o sesję Bloku w całości nad zgięciem na wszystkich trzech telefonach.');
 
-// BUDZET R8 08.08.2026 — SZÓSTY PRÓG REGRESJI.
-if (dzisBytes > DZIS_MAX_BYTES) {
-  throw new Error(`REGRESJA: dzis.tsx ma ${dzisBytes} B (próg ${DZIS_MAX_BYTES}) — ekran domowy `
-    + 'urósł ponad miarę. Wydziel sekcję do components/ (wzorzec RecommendationCard), '
-    + 'zamiast podnosić próg.');
+const dzis = pomiary.dzis;
+kreska('⭐ EKRAN „DZIŚ" — LISTA RZECZY PO KOLEI OD GÓRY');
+console.log('  👁 = widoczne w całości bez przewijania · ✂ = przecięte zgięciem · ↓ = trzeba przewinąć\n');
+for (const p of dzis.pozycje) {
+  console.log(opiszPozycje(p));
+  for (const c of p.czesci) console.log(`    ${opiszPozycje(c)}`);
 }
-console.log(`✅ dzis.tsx mieści się w progu objętości (${dzisBytes} / ${DZIS_MAX_BYTES} B).`);
+
+const niewyprowadzalne = new Set<string>();
+for (const e of EKRANY_ZAKLADEK) pomiary[e].niewyprowadzalne.forEach((n) => niewyprowadzalne.add(n));
+console.log(`\n  Czego NIE DA SIĘ wyprowadzić z repozytorium (liczone szacunkiem, nie ciszą): `
+  + `${niewyprowadzalne.size ? [...niewyprowadzalne].sort().join(', ') : 'nic'}`);
+
+// ⛔ D4 — OSTRZEŻENIE Z LICZBĄ, NIE AWARIA.
+if (dzis.wysokoscRazemDp > WIDOCZNE_NAD_ZGIECIEM_DP) {
+  const pod = dzis.pozycje.filter((p) => !p.nadZgieciem);
+  console.log(`\n  ⚠️ OSTRZEŻENIE: ekran „Dziś" ma ${Math.round(dzis.wysokoscRazemDp)} dp przy `
+    + `${WIDOCZNE_NAD_ZGIECIEM_DP} dp widocznych — to ${(dzis.wysokoscRazemDp / WIDOCZNE_NAD_ZGIECIEM_DP).toFixed(2)} ekranu.`);
+  console.log(`  ⚠️ Zawodnik widzi w całości ${dzis.nadZgieciem} z ${dzis.pozycje.length} rzeczy. `
+    + `Bez przewinięcia NIE ZOBACZY:`);
+  for (const p of pod) console.log(`       • ${p.nazwa}  (${Math.round(p.wysokoscDp)} dp)`);
+  console.log('  ⚠️ To NIE jest awaria budowy (D4). Co z tego zdjąć, rozstrzyga faza hierarchii.');
+} else {
+  console.log(`\n  ✅ Cały ekran „Dziś" mieści się nad zgięciem (${Math.round(dzis.wysokoscRazemDp)} `
+    + `/ ${WIDOCZNE_NAD_ZGIECIEM_DP} dp).`);
+}
+
+console.log('\n  Zapadka na równość tych liczb stoi w lib/wysokoscEkranu.selftest.ts '
+  + 'i to ona zapala się na czerwono, gdy któraś urośnie.');
