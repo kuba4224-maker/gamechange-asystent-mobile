@@ -109,6 +109,59 @@ export const PLAKIETKI_WYKONANIA: Record<StanWykonania, string> = {
 };
 
 /**
+ * ⭐ PLAN-D-Q1 17.08.2026 — DRUGA, OSOBNA INFORMACJA: CZY POZYCJA OBOWIĄZUJE.
+ *
+ * ⛔ TO NIE JEST STAN WYKONANIA I NIE WOLNO TEGO SKLEIĆ. `rozstrzygnijWykonanie`
+ * odpowiada na pytanie „czy to się odbyło" i dla pozycji PRZYSZŁEJ oddaje
+ * `null` — bo o przyszłości nie ma czego orzekać i milczenie jest jedyną
+ * prawdą (reguła 1 tamtej funkcji, zmierzona pasem R3). ⛔ Ten pas jej NIE
+ * RUSZA. Odwołanie jest jednak faktem O POZYCJI, nie o wykonaniu, i jest
+ * prawdziwe także wtedy, gdy data jest w przyszłości.
+ *
+ * ⛔ CO BYŁO ZEPSUTE — ZMIERZONE 17.08.2026 NA PRODUKCJI (`kqrbztsvepjtggjmmcdx`).
+ * Plan tygodnia czytał wydarzenia BEZ filtra statusu i rysował plakietkę
+ * wyłącznie ze `stanPrzeszly`. Sesja odwołana z datą w przyszłości nie niosła
+ * więc ŻADNEJ plakietki i wyglądała dokładnie jak zaplanowana: 9 wydarzeń
+ * ze statusem `cancelled` i datą po dzisiejszej (plus 1 z datą dzisiejszą,
+ * bo „dziś" nie jest przeszłością), u 1 zawodnika, na 25 wydarzeń w bazie.
+ * Zawodnik widział w planie sesję, którą sam (albo produkt) zdjął z planu —
+ * czyli złamanie Z0: produkt pokazuje w planie rzecz, której tam nie ma.
+ *
+ * ⛔ ZERO NOWYCH SŁÓW. Brzmienie bierze się z `PLAKIETKI_WYKONANIA.odwolane`,
+ * ustalonego pasem K1 jako jedyne słowo produktu na ten fakt (O92).
+ */
+export type ObowiazywaniePozycji = 'obowiazuje' | 'odwolane';
+
+/**
+ * Czy TA pozycja jeszcze obowiązuje. ⛔ Bez pola „przeszłe" w wejściu — i to
+ * jest cała treść tej funkcji: data nie ma tu nic do rzeczy.
+ */
+export function rozstrzygnijObowiazywanie(we: { status: string }): ObowiazywaniePozycji {
+  return we.status === 'cancelled' ? 'odwolane' : 'obowiazuje';
+}
+
+/**
+ * ⭐ JEDYNY PRODUCENT PLAKIETKI POZYCJI — dla obu ekranów planu.
+ *
+ * ⛔ KOLEJNOŚĆ JEST TREŚCIĄ: stan wykonania, gdy istnieje, wygrywa. Pozycja
+ * odwołana i PRZESZŁA ma stan `odwolane`, więc dostanie to samo słowo z tej
+ * samej tabeli — gałąź niżej jej nie dotyczy. Gałąź niżej obsługuje wyłącznie
+ * pozycję, o której wykonaniu nie ma czego orzekać (dziś i w przyszłości),
+ * a która została zdjęta z planu.
+ * ⛔ Nie ma tu trzeciego wyjścia: pozycja obowiązująca i nieprzeszła nie niesie
+ * NIC. Plakietka „Zaplanowane" byłaby słowem dokładanym do rzeczy, która już
+ * to o sobie mówi samym staniem w planie.
+ */
+export function plakietkaPozycji(args: {
+  stanPrzeszly: StanWykonania | null;
+  obowiazywanie: ObowiazywaniePozycji;
+}): string | null {
+  if (args.stanPrzeszly !== null) return PLAKIETKI_WYKONANIA[args.stanPrzeszly];
+  if (args.obowiazywanie === 'odwolane') return PLAKIETKI_WYKONANIA.odwolane;
+  return null;
+}
+
+/**
  * ⚠️ BRZMIENIA NOWE W TYM PASIE — DO PRZEJRZENIA PRZEZ KUBĘ.
  *
  * Rozróżnienie osoby jest celowe i jest całą treścią tej pary:

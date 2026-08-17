@@ -69,6 +69,7 @@ import {
   CONTENT_DOSE_SOURCE_LABEL,
   isMissingContentDoseColumnError,
   normalizeDose,
+  odczytajEtap,
   parseContentDoses,
   contentDoseDateLabel,
   doseSourceLine,
@@ -578,6 +579,78 @@ check('SEEN: nazwa kolumny jest jedną stałą (żadnych literałów w widokach)
   CONTENT_DOSE_SEEN_COLUMN === 'content_dose_seen', CONTENT_DOSE_SEEN_COLUMN);
 // Pomiar osobnym logiem, wypisywany zawsze (zasada 14):
 console.log(`[pomiar] SEEN: limit ${CONTENT_DOSE_SEEN_LIMIT} kluczy = 2× limit dawek pasa A (12).`);
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-Q1 17.08.2026 — POLE `etap` BYŁO W APPCE ZAWSZE PUSTE
+// ═══════════════════════════════════════════════════════════════════
+//
+// ⛔ CO BYŁO ZEPSUTE. Do 17.08.2026 `normalizeDose` przyjmowało `etap`
+// WYŁĄCZNIE jako liczbę (`typeof raw.etap === 'number'`), a zapisujący —
+// `gamechange-app/lib/focus-block-content-store.js :: normalizeDose`, pole
+// `etap: stage == null ? null : stage` — wkłada tam wartość kolumny
+// `focus_blocks.stage`. Pole było więc `null` u każdego zawodnika i nikt tego
+// nie zauważył, bo ŻADEN ekran go nie rysuje (sprawdzone `grep`em 17.08.2026:
+// jedyne wystąpienie `.etap` poza tym plikiem to klucz dawki).
+//
+// ⚠️ POMIAR OBALIŁ CZĘŚĆ ZAŁOŻENIA I JEST TO ZAPISANE WPROST (O74).
+// Na produkcji (`kqrbztsvepjtggjmmcdx`, 17.08.2026) `focus_blocks.stage` jest
+// kolumną `text` i trzyma NAZWY etapów: jedyna dawka w bazie ma
+// `etap = "izolowany"`. Ten czytnik przyjmuje napis będący zapisem liczby
+// całkowitej — więc na dzisiejszych danych NIE odzyskuje ani jednego wiersza.
+// ⛔ I ma tak zostać: „izolowany" nie jest liczbą i zgadywanie jej byłoby
+// gorsze niż `null`. Prawdziwą naprawą jest zmiana TYPU pola i zapisującego —
+// praca dla osobnego pasa, nazwana w nocie Q1.
+console.log('\n⭐ PLAN-D-Q1 — `etap`: sześć wejść, każde z jawnym oczekiwaniem');
+{
+  // ⭐ ASERCJA URUCHOMIENIOWA. Sześć wejść, oczekiwanie wypisane przy każdym.
+  const PRZYPADKI: ReadonlyArray<{ wejscie: unknown; oczekiwane: number | null; czemu: string }> = [
+    { wejscie: 3, oczekiwane: 3, czemu: 'liczba całkowita — jedyna postać, którą appka przyjmowała do 17.08' },
+    { wejscie: '3', oczekiwane: 3, czemu: 'napis będący zapisem liczby całkowitej — TO JEST NAPRAWA' },
+    { wejscie: ' 3 ', oczekiwane: 3, czemu: 'ten sam zapis z białymi znakami — spacja nie jest treścią' },
+    { wejscie: 'trzeci', oczekiwane: null, czemu: 'słowo — ⛔ NIE ZGADUJEMY, że to 3' },
+    { wejscie: '3.5', oczekiwane: null, czemu: 'ułamek — dawka „etapu 3.5" nie istnieje, ⛔ bez zaokrąglania' },
+    { wejscie: null, oczekiwane: null, czemu: 'brak wartości — uczciwe „nie wiem"' },
+  ];
+  for (const { wejscie, oczekiwane, czemu } of PRZYPADKI) {
+    const wynik = odczytajEtap(wejscie);
+    check(`⭐ etap ${JSON.stringify(wejscie)} → ${JSON.stringify(oczekiwane)} (${czemu})`,
+      wynik === oczekiwane, `dostałem ${JSON.stringify(wynik)}`);
+  }
+
+  // ⛔ TA SAMA SZÓSTKA PRZEZ `normalizeDose`, czyli przez drogę, którą naprawdę
+  // idą dane. Asercja na samym czytniku nie pilnuje, czy ktoś go tam wpiął.
+  for (const { wejscie, oczekiwane } of PRZYPADKI) {
+    const dawka = normalizeDose({ krok_praktyczny: 'x', etap: wejscie });
+    check(`⛔ …i przez \`normalizeDose\`: etap ${JSON.stringify(wejscie)} → ${JSON.stringify(oczekiwane)}`,
+      dawka !== null && dawka.etap === oczekiwane,
+      `dostałem ${dawka === null ? 'null (dawka odrzucona!)' : JSON.stringify(dawka.etap)}`);
+  }
+
+  // ── ⛔ TRZY POSTACIE, KTÓRE NADAL MAJĄ BYĆ `null` ────────────────────
+  check('⛔ pusty napis to nie jest etap 0',
+    odczytajEtap('') === null && odczytajEtap('   ') === null, 'pusty napis przeszedł');
+  check('⛔ `true` to nie jest etap 1 — typ logiczny nie jest liczbą',
+    odczytajEtap(true) === null, 'boolean przeszedł');
+  check('⛔ `[3]` to nie jest etap 3 — tablica nie jest liczbą',
+    odczytajEtap([3]) === null, 'tablica przeszła');
+  check('⛔ `0x10`, `1e3` i `+3` NIE przechodzą — kształt musi być zapisem liczby całkowitej',
+    odczytajEtap('0x10') === null && odczytajEtap('1e3') === null && odczytajEtap('+3') === null,
+    'przeszedł zapis inny niż cyfry');
+  check('⭐ etap 0 przechodzi jako 0 — zero jest liczbą, nie brakiem',
+    odczytajEtap('0') === 0 && odczytajEtap(0) === 0, String(odczytajEtap('0')));
+  check('⛔ liczba niecałkowita podana JAKO LICZBA też zostaje `null`',
+    odczytajEtap(3.5) === null && odczytajEtap(Number.NaN) === null, String(odczytajEtap(3.5)));
+
+  // ── ⚠️ POMIAR Z PRODUKCJI — ZAPISANY, ŻEBY NIE UDAWAĆ NAPRAWY (O74) ──
+  check('⚠️ zmierzona 17.08.2026 wartość z produkcji („izolowany") NADAL daje `null`',
+    odczytajEtap('izolowany') === null,
+    '⛔ jeżeli to przeszło, ktoś dołożył zgadywanie nazw etapów');
+  console.log('[pomiar] Q1 17.08.2026 · focus_blocks: 2 wiersze, 1 z kolumną `content_doses`, '
+    + '1 dawka w kopercie, jej `etap` = "izolowany" (typ `string`). `focus_blocks.stage` jest '
+    + 'kolumną `text` i trzyma NAZWY etapów — naprawa czytelnika NIE odzyskuje dziś ani jednego '
+    + 'wiersza i tak ma być. Prawdziwa naprawa = TYP pola `ContentDose.etap` + zapisujący '
+    + '(`gamechange-app/lib/focus-block-content-store.js :: normalizeDose`), praca poza pasem Q1.');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 // Celowo `throw`, a nie `process.exit(1)`: `process` wymaga `@types/node`,

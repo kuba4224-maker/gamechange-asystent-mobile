@@ -161,6 +161,7 @@ import {
   opisTygodniaDoLogu,
   LEGENDA_KROPEK,
   PLAKIETKI_STANU_PRZESZLEGO,
+  plakietkaPozycji,
   NIE_UDALO_SIE_ODCZYTAC_TYGODNIA,
   type KlasaKropki,
   type PozycjaDnia,
@@ -710,7 +711,14 @@ export default function KalendarzScreen() {
     // odwołana przestałaby być przekreślona, bo do 16.08 wpadała w
     // `nie_odbylo_sie`. Przekreślenie mówi „tego nie ma w planie do zrobienia"
     // — i to jest prawda o odwołaniu tak samo jak o werdykcie zawodnika.
-    const przekreslone = p.stanPrzeszly === 'nie_odbylo_sie' || p.stanPrzeszly === 'odwolane';
+    // ⚠️ PLAN-D-Q1 — PRZEKREŚLENIE IDZIE ZA TYM SAMYM FAKTEM CO PLAKIETKA.
+    // Do 17.08 pozycja odwołana z datą w przyszłości nie była przekreślona
+    // (bo `stanPrzeszly` był `null`), choć KARTA tego samego wydarzenia
+    // i wiersz w `dzis.tsx` (styl `kartaPozycjaOdwolana`) już mówiły, że
+    // pozycji nie ma w planie. ⛔ To nie jest zmiana układu ani miejsca —
+    // ten sam wiersz w tym samym miejscu przestaje mówić dwóm ekranom
+    // dwie różne rzeczy o jednej pozycji.
+    const przekreslone = p.stanPrzeszly === 'nie_odbylo_sie' || p.obowiazywanie === 'odwolane';
     const zapisujeTo = zapisWerdyktu === kluczWystapienia(p.id, p.dzien);
     return (
       <View key={`${p.id}-${p.zRegulyCyklicznej ? 'c' : 'j'}`} style={styles.it}>
@@ -726,9 +734,17 @@ export default function KalendarzScreen() {
             Piąta wartość `odwolane` świadomie go NIE dostaje i świadomie nie
             dostaje żadnego wyróżnienia negatywnego: odwołanie nie jest ani
             zasługą, ani przewiną zawodnika (D4, D7). */}
-        {p.stanPrzeszly ? (
+        {/* ⭐ PLAN-D-Q1 17.08.2026 — PLAKIETKA Z JEDNEGO PRODUCENTA.
+            Do 17.08 warunkiem był sam `p.stanPrzeszly`, a ten jest `null` dla
+            pozycji nieprzeszłej. ⛔ Sesja ODWOŁANA z datą w przyszłości nie
+            niosła więc nic i wyglądała jak zaplanowana (9 takich wydarzeń
+            na produkcji u 1 zawodnika, pomiar 17.08.2026) — mimo że karta
+            tego samego wydarzenia wyżej „Odwołane" już pokazywała. Jeden fakt,
+            dwa ekrany, dwie odpowiedzi. `plakietkaPozycji` czyta OBIE
+            informacje: wykonanie i obowiązywanie. ⛔ Zero nowych słów. */}
+        {plakietkaPozycji(p) !== null ? (
           <Text style={[styles.tag, p.stanPrzeszly === 'odbylo_sie' && styles.tagOk]}>
-            {PLAKIETKI_STANU_PRZESZLEGO[p.stanPrzeszly]}
+            {plakietkaPozycji(p)}
           </Text>
         ) : null}
         {!p.rodzaj.znany ? <Text style={styles.tag}>{nazwaRodzaju}</Text> : null}

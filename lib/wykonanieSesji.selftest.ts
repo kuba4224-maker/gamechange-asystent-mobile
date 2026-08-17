@@ -38,6 +38,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   rozstrzygnijWykonanie,
+  rozstrzygnijObowiazywanie,
+  plakietkaPozycji,
   policzWykonanaPrace,
   akcjaDlaWystapienia,
   czytajWerdykty,
@@ -963,6 +965,126 @@ console.log('\n11. ⭐ PLAN-D-K1 — JEDEN FAKT MA W PRODUKCIE JEDNĄ NAZWĘ');
     `bez jawnej gałęzi: ${bezPiatej.join(', ')} (z ${rozgalezieni.length} rozgałęziających się)`);
   check('⛔ …i takich konsumentów w ogóle jest więcej niż zero (inaczej asercja wyżej jest pusta)',
     rozgalezieni.length >= 2, `${rozgalezieni.length}: ${rozgalezieni.join(', ')}`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GRUPA 12 — ⭐ PLAN-D-Q1: ODWOŁANIE WIDAĆ TAKŻE W PRZYSZŁOŚCI
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⛔ CO BYŁO ZEPSUTE I JAK TO ZMIERZONO (17.08.2026, `kqrbztsvepjtggjmmcdx`):
+// plan tygodnia czytał wydarzenia BEZ filtra statusu, a plakietkę brał
+// WYŁĄCZNIE ze `stanPrzeszly`. `rozstrzygnijWykonanie` oddaje dla przyszłości
+// `null` — i słusznie, bo o WYKONANIU przyszłości nie ma czego orzekać.
+// Skutek: sesja odwołana z datą w przyszłości rysowała się w planie identycznie
+// jak zaplanowana. W bazie było wtedy 9 takich wydarzeń u 1 zawodnika
+// (plus 1 z datą dzisiejszą, bo „dziś" też nie jest przeszłością), na 25
+// wydarzeń ogółem. Produkt pokazywał zawodnikowi w planie sesję, którą sam
+// zdjął z planu — złamanie Z0.
+console.log('\n12. ⭐ PLAN-D-Q1 — POZYCJA ODWOŁANA W PRZYSZŁOŚCI NIESIE „Odwołane"');
+{
+  // ⭐ ASERCJA URUCHOMIENIOWA — PRZEZ CAŁY PLAN TYGODNIA, nie przez samą regułę.
+  // ⛔ Asercja tekstowa („czy w ekranie stoi `plakietkaPozycji`") nic tu nie
+  // pilnuje: przepuściłaby producenta, który dla odwołania w przyszłości nadal
+  // oddaje `null`.
+  const PON = '2026-08-17';
+  const wiersz = (id: number, status: string, data: string): WierszWydarzenia => ({
+    id, title: `poz-${id}`, event_type: 'club_training', status,
+    scheduled_date: data, scheduled_time: '18:00', recurrence_rule: null, source: 'system',
+  });
+  const tydzien = zbudujTydzien({
+    poniedzialek: PON,
+    dzisiaj: PON,
+    wydarzenia: [
+      wiersz(900, 'cancelled', '2026-08-20'),  // przyszłość, odwołana
+      wiersz(901, 'scheduled', '2026-08-20'),  // przyszłość, obowiązuje
+      wiersz(902, 'cancelled', PON),           // DZIŚ — też nie jest przeszłością
+      wiersz(903, 'cancelled', '2026-08-17'),  // ten sam dzień, kontrola duplikatu id
+    ],
+    planLekcji: null,
+    wpisyDziennika: new Set<number>(),
+    werdykty: BRAK,
+  });
+  const wszystkiePozycje = tydzien.dni.flatMap((d) => d.pozycje);
+  const poz = (id: number) => wszystkiePozycje.find((x) => x.id === id) ?? null;
+
+  check('⛔ O76 — plan w ogóle zbudował te cztery pozycje (inaczej asercje niżej są puste)',
+    wszystkiePozycje.length === 4, `pozycji: ${wszystkiePozycje.length}`);
+
+  const odwolanaPrzyszla = poz(900);
+  const zaplanowanaPrzyszla = poz(901);
+  const odwolanaDzis = poz(902);
+
+  check('⭐ D1 URUCHOMIENIOWO — pozycja ODWOŁANA z datą w PRZYSZŁOŚCI niesie „Odwołane"',
+    odwolanaPrzyszla !== null && plakietkaPozycji(odwolanaPrzyszla) === PLAKIETKI_WYKONANIA.odwolane,
+    `plakietka=${odwolanaPrzyszla === null ? 'BRAK POZYCJI' : String(plakietkaPozycji(odwolanaPrzyszla))}`);
+  check('⛔ …i brzmienie jest DOKŁADNIE tym ze stałej pasa K1 — zero nowych słów (O92)',
+    odwolanaPrzyszla !== null && plakietkaPozycji(odwolanaPrzyszla) === 'Odwołane',
+    PLAKIETKI_WYKONANIA.odwolane);
+  check('⭐ D1 URUCHOMIENIOWO — pozycja ZAPLANOWANA z datą w przyszłości nie niesie NIC',
+    zaplanowanaPrzyszla !== null && plakietkaPozycji(zaplanowanaPrzyszla) === null,
+    `plakietka=${zaplanowanaPrzyszla === null ? 'BRAK POZYCJI' : String(plakietkaPozycji(zaplanowanaPrzyszla))}`);
+  check('⛔ …i „Zaplanowane" nie powstało jako nowe słowo dokładane do planu',
+    zaplanowanaPrzyszla !== null && plakietkaPozycji(zaplanowanaPrzyszla) !== 'Zaplanowane',
+    String(zaplanowanaPrzyszla === null ? 'BRAK' : plakietkaPozycji(zaplanowanaPrzyszla)));
+  check('⭐ pozycja odwołana z datą DZISIEJSZĄ też niesie „Odwołane" (dziś nie jest przeszłością)',
+    odwolanaDzis !== null && plakietkaPozycji(odwolanaDzis) === PLAKIETKI_WYKONANIA.odwolane,
+    `plakietka=${odwolanaDzis === null ? 'BRAK POZYCJI' : String(plakietkaPozycji(odwolanaDzis))}`);
+
+  // ⭐ ASERCJA ODWROTNA — TEN PAS NIE MA PRAWA RUSZYĆ `rozstrzygnijWykonanie`.
+  // Odwołanie jest drugą, OSOBNĄ informacją; gdyby ktoś „uprościł" to tak, że
+  // reguła wykonania zaczyna orzekać o przyszłości, produkt zacząłby mówić
+  // o dniu, który jeszcze nie nastał.
+  const wykonaniePrzyszle = rozstrzygnijWykonanie({
+    idWydarzenia: 900, dzien: '2026-08-20', przeszle: false, status: 'cancelled',
+    zRegulyCyklicznej: false, wpisyDziennika: new Set<number>(), werdykty: BRAK,
+  });
+  check('⭐ ASERCJA ODWROTNA — `rozstrzygnijWykonanie` dla PRZYSZŁOŚCI nadal oddaje `null`',
+    wykonaniePrzyszle === null, String(wykonaniePrzyszle));
+  check('⛔ …także dla pozycji ZAPLANOWANEJ w przyszłości',
+    rozstrzygnijWykonanie({
+      idWydarzenia: 901, dzien: '2026-08-20', przeszle: false, status: 'scheduled',
+      zRegulyCyklicznej: false, wpisyDziennika: new Set<number>(), werdykty: BRAK,
+    }) === null, 'reguła wykonania zaczęła orzekać o przyszłości');
+  check('⛔ …i pozycja odwołana PRZESZŁA nadal ma stan `odwolane` (nic się nie cofnęło)',
+    rozstrzygnijWykonanie({
+      idWydarzenia: 902, dzien: '2026-08-10', przeszle: true, status: 'cancelled',
+      zRegulyCyklicznej: false, wpisyDziennika: new Set<number>(), werdykty: BRAK,
+    }) === 'odwolane');
+
+  // ── OBOWIĄZYWANIE — REGUŁA BEZ DATY W WEJŚCIU ────────────────────────
+  check('⭐ `rozstrzygnijObowiazywanie` oddaje `odwolane` dla `cancelled`',
+    rozstrzygnijObowiazywanie({ status: 'cancelled' }) === 'odwolane');
+  check('⛔ …i `obowiazuje` dla `scheduled` oraz `completed`',
+    rozstrzygnijObowiazywanie({ status: 'scheduled' }) === 'obowiazuje'
+    && rozstrzygnijObowiazywanie({ status: 'completed' }) === 'obowiazuje');
+  check('⛔ …i `obowiazuje` dla statusu SPOZA znanych — nie zgadujemy odwołania',
+    rozstrzygnijObowiazywanie({ status: 'cokolwiek_nowego' }) === 'obowiazuje');
+
+  // ⛔ STAN WYKONANIA WYGRYWA, GDY ISTNIEJE — inaczej pozycja odwołana, którą
+  // zawodnik oświadczył jako odbytą („Zrobione"), dostałaby „Odwołane".
+  check('⭐ `plakietkaPozycji` przy istniejącym stanie wykonania oddaje TEN stan',
+    plakietkaPozycji({ stanPrzeszly: 'odbylo_sie', obowiazywanie: 'odwolane' })
+      === PLAKIETKI_WYKONANIA.odbylo_sie,
+    String(plakietkaPozycji({ stanPrzeszly: 'odbylo_sie', obowiazywanie: 'odwolane' })));
+  check('⛔ …i nic nie niesie, gdy nie ma ani stanu, ani odwołania',
+    plakietkaPozycji({ stanPrzeszly: null, obowiazywanie: 'obowiazuje' }) === null);
+
+  // ── O71 — EKRANY BIORĄ PLAKIETKĘ Z PRODUCENTA, NIE INDEKSUJĄ SAME ────
+  //
+  // ⛔ Ekran, który sam pisze `PLAKIETKI_…[p.stanPrzeszly]` pod warunkiem
+  // `p.stanPrzeszly !== null`, JEST tym defektem. Pytamy o żywy kod obu
+  // ekranów planu.
+  for (const ekran of ['app/(tabs)/dzis.tsx', 'app/(tabs)/kalendarz.tsx']) {
+    const tresc = czytajPlikRepo('app', ekran.slice('app/'.length));
+    check(`⛔ O75 — \`${ekran}\` da się odczytać`, tresc !== null, `brak pliku: ${ekran}`);
+    if (tresc === null) continue;
+    const zywy = zywyKod(tresc);
+    check(`⭐ \`${ekran}\` bierze plakietkę WIERSZA z \`plakietkaPozycji\``,
+      /plakietkaPozycji\(/.test(zywy), 'ekran nie woła jedynego producenta plakietki');
+    check(`⛔ …i NIE indeksuje tabeli po \`p.stanPrzeszly\` na własną rękę`,
+      !/PLAKIETKI_STANU_PRZESZLEGO\[\s*p\.stanPrzeszly\s*\]/.test(zywy),
+      'wróciło indeksowanie po samym stanie przeszłym — pozycja odwołana w przyszłości znów zniknie');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

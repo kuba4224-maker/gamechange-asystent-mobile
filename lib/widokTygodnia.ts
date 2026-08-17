@@ -70,10 +70,13 @@ import {
 // poprawce — każda z osobna wyglądając poprawnie.
 import {
   rozstrzygnijWykonanie,
+  rozstrzygnijObowiazywanie,
+  plakietkaPozycji,
   akcjaDlaWystapienia,
   PLAKIETKI_WYKONANIA,
   WERDYKTY_NIEPODANE,
   type StanWykonania,
+  type ObowiazywaniePozycji,
   type WejscieWerdyktow,
   type AkcjaWystapienia,
 } from './wykonanieSesji';
@@ -273,6 +276,15 @@ export type StanPozycjiPrzeszlej = StanWykonania;
  */
 export const PLAKIETKI_STANU_PRZESZLEGO = PLAKIETKI_WYKONANIA;
 
+/**
+ * ⭐ PLAN-D-Q1 — RE-EKSPORT PRODUCENTA PLAKIETKI POZYCJI, jedno źródło.
+ * Ekrany planu wołają TO, a nie indeksują tabelę same: indeksowanie tabeli
+ * po `stanPrzeszly` było właśnie tym, przez co pozycja odwołana z datą
+ * w przyszłości nie niosła NICZEGO (`stanPrzeszly === null`).
+ * ⛔ Ekran, który sam składa plakietkę z dwóch pól, jest drugą kopią reguły.
+ */
+export { plakietkaPozycji, rozstrzygnijObowiazywanie, type ObowiazywaniePozycji };
+
 export type PozycjaDnia = {
   id: number;
   /**
@@ -294,6 +306,19 @@ export type PozycjaDnia = {
   kropka: KlasaKropki;
   /** `null`, gdy dzień nie jest przeszły. Wtedy nie ma o czym rozstrzygać. */
   stanPrzeszly: StanPozycjiPrzeszlej | null;
+  /**
+   * ⭐ PLAN-D-Q1 17.08.2026 — CZY POZYCJA JESZCZE OBOWIĄZUJE. ⛔ DRUGA, OSOBNA
+   * informacja obok `stanPrzeszly` — nie jego wariant. `stanPrzeszly` mówi
+   * o WYKONANIU i dla przyszłości jest `null`; to pole mówi o POZYCJI
+   * i jest prawdziwe niezależnie od daty.
+   *
+   * ⛔ CZEGO BRAKOWAŁO. Do 17.08.2026 tego pola nie było, a jedyną plakietką
+   * pozycji był `stanPrzeszly`. Sesja odwołana z datą w przyszłości rysowała
+   * się więc w planie tygodnia jak każda inna zaplanowana — 9 takich wydarzeń
+   * na produkcji u 1 zawodnika (pomiar 17.08.2026). Zawodnik widział w planie
+   * pozycję, którą zdjęto z planu (Z0).
+   */
+  obowiazywanie: ObowiazywaniePozycji;
   /** Pozycja rozwinięta z reguły cyklicznej, a nie z własnej daty. */
   zRegulyCyklicznej: boolean;
   /**
@@ -301,6 +326,9 @@ export type PozycjaDnia = {
    * ⚠️ PLAN-D-K1 — liczone Z `status === 'cancelled'`, NIE ze `stanPrzeszly`,
    * więc piąta wartość stanu tego pola nie dotyka: pozycja odwołana W PRZYSZŁYM
    * dniu też nie ma ciążyć na wadze, a stanu przeszłego wtedy nie ma (D7).
+   * ⚠️ PLAN-D-Q1 — liczone teraz Z `obowiazywanie`, czyli z TEJ SAMEJ reguły,
+   * z której bierze się plakietka. Wartość jest ta sama co dotąd; znika za to
+   * drugie miejsce, w którym plik sam sprawdzał `status === 'cancelled'`.
    */
   liczonaDoWagi: boolean;
   /**
@@ -597,7 +625,10 @@ function zbudujPozycje(
 ): Zebrane {
   const rodzaj = opiszRodzaj(w.event_type);
   const zrodlo = opiszZrodlo(w.source);
-  const anulowane = w.status === 'cancelled';
+  // ⭐ PLAN-D-Q1 — JEDNA REGUŁA NA ODWOŁANIE, wołana o wiersz. Do 17.08.2026
+  // stało tu własne `w.status === 'cancelled'`, czyli druga kopia reguły
+  // z `lib/wykonanieSesji.ts` pod inną nazwą.
+  const obowiazywanie = rozstrzygnijObowiazywanie(w);
 
   // ⭐ PLAN-D-D1 — WSPÓLNA REGUŁA, WOŁANA O WYSTĄPIENIE `(id, dzien)`.
   const weWykonania = {
@@ -623,8 +654,9 @@ function zbudujPozycje(
       godzina: formatujGodzine(w.scheduled_time),
       kropka: klasaKropki(rodzaj, zrodlo),
       stanPrzeszly,
+      obowiazywanie,
       zRegulyCyklicznej: opcje.zRegulyCyklicznej,
-      liczonaDoWagi: !anulowane,
+      liczonaDoWagi: obowiazywanie === 'obowiazuje',
       akcja,
     },
   };

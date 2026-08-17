@@ -208,6 +208,41 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim().length > 0 ? v : null);
 
 /**
+ * ⭐ PLAN-D-Q1 17.08.2026 — CZYTNIK POLA `etap`. ⛔ PRZYJMUJE, ALE NIE ZGADUJE.
+ *
+ * ⛔ CO BYŁO ZEPSUTE. Do 17.08.2026 stało w `normalizeDose` wyłącznie
+ * `typeof raw.etap === 'number'`, a zapisujący
+ * (`gamechange-app/lib/focus-block-content-store.js :: normalizeDose`,
+ * pole `etap: stage == null ? null : stage`) wkłada tam wartość kolumny
+ * `focus_blocks.stage`. Appka odrzucała więc każdy zapis, który nie był liczbą,
+ * i pole było `null` u każdego zawodnika.
+ *
+ * ⚠️ ZMIERZONE NA PRODUKCJI 17.08.2026 (`kqrbztsvepjtggjmmcdx`) — i pomiar
+ * mówi więcej, niż zakładano. `focus_blocks.stage` jest kolumną typu `text`
+ * i trzyma NAZWY etapów, nie liczby: jedyna dawka w bazie ma
+ * `etap = "izolowany"`. Ten czytnik przyjmuje napis będący zapisem liczby
+ * całkowitej — więc na DZISIEJSZYCH danych nie odzyskuje ani jednego wiersza
+ * i „izolowany" nadal zostaje `null`. ⛔ I tak ma być: to jest uczciwe
+ * „nie wiem", a nie zgadywanie. Prawdziwą naprawą jest zmiana TYPU pola
+ * (`etap: number | null` nie umie unieść nazwy etapu) i to jest praca dla
+ * osobnego pasa — razem z zapisującym, którego ten pas nie rusza.
+ *
+ * ⛔ WSZYSTKO POZA ZAPISEM LICZBY CAŁKOWITEJ ZOSTAJE `null`: pusty napis,
+ * „trzeci", „3.5", `null`, `true`, tablica. Nie ma tu trzeciej wartości
+ * i nie ma zaokrąglania — dawka „etapu 3.5" nie istnieje.
+ */
+export function odczytajEtap(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isInteger(v) ? v : null;
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  // ⛔ Sam `Number(t)` przyjąłby `''`, `'0x10'`, `'1e3'` i `' '` — czyli
+  // zgadywanie. Kształt musi być JAWNIE zapisem liczby całkowitej.
+  if (!/^-?\d+$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
  * Jedna dawka z surowego JSON-a. Zwraca `null`, gdy brak treści głównej —
  * dawka bez `krok_praktyczny` nie ma czego pokazać, a pusty kafelek byłby
  * gorszy niż jego brak.
@@ -221,7 +256,7 @@ export function normalizeDose(raw: unknown): ContentDose | null {
   const krok = raw.krok_praktyczny;
   if (typeof krok !== 'string' || krok.trim().length === 0) return null;
   const klucz = str(raw.klucz);
-  const etap = typeof raw.etap === 'number' && Number.isFinite(raw.etap) ? raw.etap : null;
+  const etap = odczytajEtap(raw.etap);
   const at = str(raw.wygenerowano_at);
   return {
     wersja: typeof raw.wersja === 'number' ? raw.wersja : 1,

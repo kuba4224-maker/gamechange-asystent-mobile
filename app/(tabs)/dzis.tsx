@@ -425,6 +425,7 @@ import {
   zbudujTydzien,
   przesunTydzien,
   PLAKIETKI_STANU_PRZESZLEGO,
+  plakietkaPozycji,
   type Tydzien,
   type WierszWydarzenia,
   type WierszDnia,
@@ -2505,8 +2506,18 @@ export default function DzisScreen() {
                   tabeli znaczyłaby, że jeden ekran mówi „Zrobione", a drugi
                   „Bez wpisu" o tym samym wystąpieniu — i nikt tego nie
                   zauważy, bo nikt nie ogląda obu naraz. */}
-              {p.stanPrzeszly !== null
-                ? <Text style={styles.kartaPlakietka}>{'  ·  ' + PLAKIETKI_STANU_PRZESZLEGO[p.stanPrzeszly]}</Text>
+              {/* ⭐ PLAN-D-Q1 17.08.2026 — PLAKIETKA Z JEDNEGO PRODUCENTA.
+                  Do 17.08 stało tu `PLAKIETKI_STANU_PRZESZLEGO[p.stanPrzeszly]`
+                  pod warunkiem `p.stanPrzeszly !== null`. ⛔ Sesja ODWOŁANA
+                  z datą w przyszłości ma `stanPrzeszly === null` (bo o jej
+                  WYKONANIU nie ma czego orzekać) i nie niosła przez to ŻADNEJ
+                  plakietki — rysowała się identycznie jak zaplanowana.
+                  Zmierzone na produkcji 17.08.2026: 9 takich wydarzeń
+                  u 1 zawodnika. `plakietkaPozycji` bierze OBIE informacje:
+                  stan wykonania i to, czy pozycja jeszcze obowiązuje.
+                  ⛔ To ta sama tabela brzmień co dotąd — zero nowych słów. */}
+              {plakietkaPozycji(p) !== null
+                ? <Text style={styles.kartaPlakietka}>{'  ·  ' + plakietkaPozycji(p)}</Text>
                 : null}
             </Text>
           ))}

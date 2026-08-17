@@ -602,11 +602,64 @@ console.log('\n3. ⭐ TEST MUTACYJNY — liczba FAIL-i przy każdej mutacji');
    * KASUJE komentarze blokowe razem z ich znakami nowej linii (i słusznie —
    * tamtym asercjom numery linii są niepotrzebne, **O63**).
    * Tutaj komentarz zamieniany jest na spacje tej samej długości.
+   *
+   * ⛔ TA FUNKCJA MIAŁA DEFEKT KOLEJNOŚCI I ZMIERZONO GO 17.08.2026 (pas Q1).
+   * Do 17.08 wycinała najpierw bloki `/* … *\/`, a DOPIERO POTEM linie `//`.
+   * Blok był więc wycinany z tekstu, w którym komentarze `//` jeszcze były,
+   * a linia 15 tego pliku cytuje `app/**` — czyli otwiera „blok", który leci
+   * aż do następnego `*\/`. ⛔ ZMIERZONE: strażnik nie widział 3 778 znaków
+   * znaczących w 15 z zamiatanych plików (najwięcej `lib/wysokoscEkranu.ts`
+   * — 2 690, i 487 z tego pliku: własne `import`y i własną funkcję `check`).
+   * Asercje przechodziły, bo pytały o tekst, którego już nie było.
+   *
+   * ⛔ KOLEJNOŚCI NIE DA SIĘ USTAWIĆ DOBRZE — przy odwrotnej blok zawierający
+   * `//` gubi zamknięcie. Tekst przechodzimy RAZ, tak jak w
+   * `lib/wysokoscEkranu.selftest.ts` (pas M2) i `lib/ostatniCentymetr.selftest.ts`.
+   * ⚠️ Skaner zjada też `{/* … *\/}` (JSX), bo `{` zostaje, a `/* … *\/` w środku
+   * wpada w gałąź bloku — dawny pierwszy `replace` był tylko doprecyzowaniem.
    */
-  const bezKomentarzy = (s: string): string => s
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/^([ \t]*)\/\/.*$/gm, (_m, wciecie) => wciecie);
+  const bezKomentarzy = (s: string): string => {
+    let out = '';
+    const spacje = (t: string) => t.replace(/[^\n]/g, ' ');
+    for (let i = 0; i < s.length;) {
+      const c = s[i];
+      if (c === '/' && s[i + 1] === '/') {
+        const k = s.indexOf('\n', i);
+        out += spacje(k === -1 ? s.slice(i) : s.slice(i, k));
+        i = k === -1 ? s.length : k;
+        continue;
+      }
+      if (c === '/' && s[i + 1] === '*') {
+        const k = s.indexOf('*/', i + 2);
+        out += spacje(k === -1 ? s.slice(i) : s.slice(i, k + 2));
+        i = k === -1 ? s.length : k + 2;
+        continue;
+      }
+      // ⛔ NAPIS NIE JEST KOMENTARZEM — i bez tej gałęzi naprawa byłaby
+      // STRATĄ NETTO. Ten strażnik zamiata `app/` i `components/`, gdzie stoją
+      // stałe w rodzaju `'https://gamechange-diagnoza.vercel.app'`. Odcinanie
+      // od `//` do końca linii gubi 11 524 znaki znaczące w 17 plikach
+      // (zmierzone 17.08.2026) — czyli więcej, niż odzyskuje sama naprawa
+      // kolejności. Dawny `replace` z kotwicą `^[ \t]*` napisów nie ruszał
+      // i to trzeba było zachować.
+      if (c === '\'' || c === '"' || c === '`') {
+        const cudz = c;
+        out += c;
+        i++;
+        while (i < s.length) {
+          if (s[i] === '\\') { out += s[i] + (s[i + 1] ?? ''); i += 2; continue; }
+          if (s[i] === cudz) { out += s[i]; i++; break; }
+          if (cudz !== '`' && s[i] === '\n') break;
+          out += s[i];
+          i++;
+        }
+        continue;
+      }
+      out += c;
+      i++;
+    }
+    return out;
+  };
 
   // ── ⛔ BRAK PLIKU JEST FAIL-em Z NAZWĄ, nie wyjątkiem `ENOENT` (O76) ──
   // Strażnik, który pada przed pierwszą asercją, w CI wygląda jak awaria
