@@ -368,13 +368,32 @@ import {
   type WejsciaWgladow,
   type WynikiWgladow,
   type Wglad,
-  type WpisDziennikaWglad,
-  type WydarzenieWglad,
-  type PowiazanieWpisu,
-  type WpisBoluWglad,
-  type WpisMeczuWglad,
-  type ProfilWglad,
 } from '../../lib/wgladyZAlgorytmu';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-A2 08.2026 (16.08.2026), decyzja D4 — WEJŚCIA WGLĄDÓW
+// WYPROWADZONE Z TEGO PLIKU DO `lib/`.
+//
+// Do dziś sześć wejść `policzWglady()` powstawało WYŁĄCZNIE tutaj, w środku
+// `load()`. Ekran „Moje zadania" woła TEGO SAMEGO rankera — i nie miał jak
+// dostać wglądów, bo cała droga ich budowania mieszkała w cudzym pliku.
+//
+// ⛔ SKOPIOWANIE TEJ SEKCJI DO `components/ListaZadan.tsx` BYŁO ROZWAŻONE
+// I ODRZUCONE: dwa czytniki tej samej rzeczy rozjeżdżają się przy pierwszej
+// zmianie i robią to po cichu (O92). Zostaje JEDEN — `zbudujWejsciaWgladow`.
+//
+// ⚠️ ZERO ZMIANY ZACHOWANIA TEGO EKRANU. Mapowania, gałęzie `nie_wiem`,
+// listy kolumn i kolejność wejść przeniesione CO DO ZNAKU; ten plik oddaje
+// te same odpowiedzi bazy, które i tak już pobierał, w tej samej paczce
+// `Promise.all`. Koszt: zero nowych rund sieci.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  zbudujWejsciaWgladow,
+  rocznikZOdpowiedzi,
+  TABELA_MECZOW, SELECT_MECZOW,
+  TABELA_PROFILU, SELECT_PROFILU,
+  TABELA_KATALOGU, SELECT_KATALOGU, KOLUMNA_ODBIORCY, ODBIORCY_KATALOGU,
+  TABELA_ODCINKOW, SELECT_ODCINKOW,
+} from '../../lib/wejsciaWgladow';
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-B5 08.2026 (15.08.2026), zadania B5.2 i B5.3 — PĘTLA SIĘ ZAMYKA.
 //
@@ -622,21 +641,10 @@ type WierszBolu = {
   created_at: string;
 };
 
-/**
- * ⭐ PLAN-D-B4 — wiersz kaskady meczowej (WG-30, WG-34).
- * ⚠️ ZMIERZONE 14.08.2026: `match_contexts` ma 2 wiersze, OBA z 29.07.2026.
- * Próg osi to trzy mecze, więc dziś ten wgląd odda `brak_danych` z powodem.
- * To jest oczekiwane — wiersza „na próbę" nikt nie dokłada (Z0).
- */
-type WierszMeczu = {
-  id: number;
-  created_at: string;
-  match_rpe: number | null;
-  entered_recovery_state: string | null;
-};
-
-/** ⭐ PLAN-D-B4 — jedyna kolumna katalogu podpowiedzi, jakiej WT-26 potrzebuje. */
-type WierszKatalogu = { min_age: number | null };
+// ⭐ PLAN-D-A2 (16.08.2026), D4 — `WierszMeczu` (kaskada meczowa) i
+// `WierszKatalogu` (katalog podpowiedzi) MIESZKAJĄ TERAZ w `lib/wejsciaWgladow.ts`
+// jako `WierszMeczuWgl` i `WierszKataloguWgl`. Ten ekran nie jest jedynym,
+// który je czyta, więc przestały być jego typami prywatnymi.
 
 // ═══════════════════════════════════════════════════════════════════
 // PLAN-D-B2 — TRZY STANY KAŻDEGO WEJŚCIA. ⛔ TU MIESZKA ZAKAZ `data ?? []`.
@@ -694,77 +702,21 @@ function wpisBoluDlaKolejki(w: WierszBolu): WpisBolu {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ⭐ PLAN-D-B4 — MAPOWANIE WIERSZ BAZY → WEJŚCIE PRODUCENTA WGLĄDÓW.
+// ⭐ PLAN-D-A2 (16.08.2026), D4 — PIĘĆ FUNKCJI MAPUJĄCYCH WIERSZ BAZY
+// NA WEJŚCIE PRODUCENTA WGLĄDÓW WYPROWADZONYCH DO `lib/wejsciaWgladow.ts`.
 //
-// Osobne funkcje od tych wyżej, choć czytają TE SAME odpowiedzi bazy. Powód
-// jest twardy: ranker i producent wglądów potrzebują RÓŻNYCH pól z tych samych
-// wierszy (ranker chce energii, wgląd chce identyfikatora wiersza i miejsca
-// bólu). Jedna wspólna funkcja musiałaby oddawać sumę obu kształtów, więc
-// każde nowe pole jednego z nich lądowałoby po cichu w drugim.
+// Stały tu do 16.08.2026: `wpisDziennikaDlaWgladu`, `powiazanieDlaWgladu`,
+// `wydarzenieDlaWgladu`, `wpisBoluDlaWgladu`, `meczDlaWgladu`. Powód
+// przeniesienia jest jeden i policzalny: `components/ListaZadan.tsx` woła
+// TEGO SAMEGO rankera, a tych pięciu funkcji nie miał jak zawołać — więc
+// lista „Moje zadania" nie pokazywała ANI JEDNEGO wglądu.
 //
-// ⚠️ ŻADNA Z NICH NIE POTRZEBUJE NOWEGO ZAPYTANIA. Cztery z sześciu wejść
-// wglądów jadą z odpowiedzi, które ten ekran i tak już pobiera.
+// ⚠️ Funkcje mapujące wiersz bazy na wejście RANKERA (`wpisDziennikaDlaKolejki`,
+// `wpisBoluDlaKolejki`) ZOSTAJĄ tutaj — one karmią wejścia, które ten ekran
+// buduje inaczej niż lista (osiem wejść, `jednaOdpowiedz`, dwaj producenci
+// lokalni). Rozdział między nimi jest ten sam co przed pasem: ranker i wgląd
+// biorą RÓŻNE pola z tych samych wierszy.
 // ═══════════════════════════════════════════════════════════════════
-function wpisDziennikaDlaWgladu(w: WierszDziennika): WpisDziennikaWglad {
-  const p: Record<string, unknown> = w.payload && typeof w.payload === 'object' ? w.payload : {};
-  return {
-    idWiersza: String(w.id),
-    dzien: toLocalDateStr(new Date(w.created_at)),
-    // ⚠️ Wiersz `morning` niesie `sleep_hours`, wiersz `post_training` niesie
-    // `rpe` — NIGDY oba naraz. `null` w jednym z tych pól nie jest brakiem
-    // danych, tylko informacją, o czym ten wiersz jest.
-    senGodziny: liczbaAlboNull(p.sleep_hours),
-    rpe: liczbaAlboNull(p.rpe),
-  };
-}
-
-/**
- * ⛔ `mood_motivation` NIE PRZECHODZI TĘDY I PRZECHODZIĆ NIE MA. Decyzja B3-b
- * (nota B3 §4.1): granica B1 biegnie po SKUTKU, a zdanie zbudowane na tym
- * kluczu jest o jedną zmianę nazwy zmiennej od zdania o nastroju. Producent
- * wglądów nie ma dla niego pola i to jest jedyna wersja tej granicy, której
- * nie da się przekroczyć przez przypadek.
- */
-function powiazanieDlaWgladu(w: WierszDziennika): PowiazanieWpisu {
-  return {
-    idWpisu: String(w.id),
-    // ⚠️ `null` znaczy „ten wpis nie wskazuje żadnego wydarzenia" i JEST DZIŚ
-    // stanem 10 z 10 (zmierzone 14.08.2026). Producent policzy z tego
-    // `brak_danych`, a nie licznik „0 z 6" — bo to byłaby nieprawda o zawodniku.
-    idWydarzenia: w.calendar_event_id === null ? null : String(w.calendar_event_id),
-  };
-}
-
-function wydarzenieDlaWgladu(e: CalEvent): WydarzenieWglad {
-  return {
-    id: String(e.id),
-    dzien: e.scheduled_date,
-    rodzaj: e.event_type,
-    status: e.status,
-    tytul: e.title,
-  };
-}
-
-function wpisBoluDlaWgladu(w: WierszBolu): WpisBoluWglad {
-  return {
-    idWiersza: String(w.id),
-    dzien: toLocalDateStr(new Date(w.created_at)),
-    // ⚠️ KLUCZ MASZYNOWY, nie brzmienie. Nazwę miejsca dobiera producent
-    // z istniejącej mapy `lib/labels.ts`, a klucza spoza mapy NIE ZGADUJE.
-    miejsce: w.body_location,
-    intensywnosc: liczbaAlboNull(w.intensity) ?? 0,
-    wykluczaZTreningu: w.excludes_from_training === true,
-  };
-}
-
-function meczDlaWgladu(w: WierszMeczu): WpisMeczuWglad {
-  return {
-    idWiersza: String(w.id),
-    dzien: toLocalDateStr(new Date(w.created_at)),
-    ciezkosc: liczbaAlboNull(w.match_rpe),
-    stanWejscia: typeof w.entered_recovery_state === 'string' ? w.entered_recovery_state : null,
-  };
-}
 
 /**
  * Dokąd prowadzi dotknięcie pozycji — WYNIKA ZE ŚLADU, nie z osobnej decyzji
@@ -1286,7 +1238,9 @@ export default function DzisScreen() {
       // WIEDZA B4 08.08.2026 — rocznik. JEDYNE źródło wieku, jakie appka ma
       // (`app/(tabs)/profil.tsx`, etap 0 kreatora). Karmi wyłącznie bramkę
       // wiekową A9 i nie jest nigdzie pokazywany.
-      supabase.from('users').select('birth_year').eq('id', currentUser.id).limit(1),
+      // ⭐ PLAN-D-A2 D4 — nazwa tabeli i lista kolumn z `lib/wejsciaWgladow.ts`,
+      // czyli z tego samego miejsca, z którego bierze je „Moje zadania".
+      supabase.from(TABELA_PROFILU).select(SELECT_PROFILU).eq('id', currentUser.id).limit(1),
       // PIERWSZE URUCHOMIENIE 10.08.2026 — samo ISTNIENIE diagnozy, nic więcej.
       // `head: true` + `count: 'exact'` nie ściąga ani jednego wiersza, więc
       // dokładamy do tej paczki zapytanie o zerowym koszcie transferu.
@@ -1313,7 +1267,7 @@ export default function DzisScreen() {
       // ⚠️ ZMIERZONE 14.08.2026: `match_contexts` ma 2 wiersze, oba z 29.07,
       // a próg osi to trzy mecze. Dziś ten wgląd ODDA `brak_danych` z powodem
       // i tak ma być — oś trzech punktów narysowana z dwóch byłaby zmyśleniem.
-      supabase.from('match_contexts').select('id,created_at,match_rpe,entered_recovery_state')
+      supabase.from(TABELA_MECZOW).select(SELECT_MECZOW)
         .eq('user_id', currentUser.id).order('created_at', { ascending: false }),
       // ⭐ PLAN-D-B4, NOWE ZAPYTANIE nr 2 — KATALOG PODPOWIEDZI (WT-26).
       //
@@ -1327,14 +1281,14 @@ export default function DzisScreen() {
       // ⚠️ JEDNO ZAPYTANIE NA DWIE LICZBY Z TRZECH: `podpowiedziRazem` to
       // długość odpowiedzi, `podpowiedziZaBramkaWieku` to wiersze z `min_age`.
       // Dwa osobne `count` byłyby dwoma zapytaniami po tę samą tabelę.
-      supabase.from('component_hints').select('min_age').in('odbiorca', ['zawodnik', 'oba']),
+      supabase.from(TABELA_KATALOGU).select(SELECT_KATALOGU).in(KOLUMNA_ODBIORCY, [...ODBIORCY_KATALOGU]),
       // ⭐ PLAN-D-B4, NOWE ZAPYTANIE nr 3 — ODCINKI MAPY DROGI (WT-26).
       // ⚠️ `count: 'exact'` + `head: true` NIE ŚCIĄGA ANI JEDNEGO WIERSZA.
       // Trzeciej liczby katalogu NIE DA SIĘ dołożyć do zapytania wyżej:
       // `road_segments` nie ma relacji z `component_hints`, a PostgREST nie
       // łączy tabel, między którymi relacji nie ma. Trzy liczby katalogu
       // kosztują więc DWA zapytania — nie trzy i nie jedno.
-      supabase.from('road_segments').select('id', { count: 'exact', head: true }),
+      supabase.from(TABELA_ODCINKOW).select(SELECT_ODCINKOW, { count: 'exact', head: true }),
       // ⭐ PLAN-D-B5, NOWE ZAPYTANIE nr 1 — WYDARZENIA BEZ FILTRA STATUSU.
       //
       // ⚠️ TO NIE JEST DUBLET ZAPYTANIA `eventsRes` I POWÓD JEST POLICZALNY.
@@ -1574,7 +1528,12 @@ export default function DzisScreen() {
     const blockForGoal = goal
       ? activeBlocks.find((b) => b.segment_id === goal.segment_id) ?? null
       : null;
-    const birthYear = (userRes.data?.[0] as { birth_year: number | null } | undefined)?.birth_year ?? null;
+    // ⭐ PLAN-D-A2 D4 — rocznik przez `rocznikZOdpowiedzi` z `lib/wejsciaWgladow.ts`.
+    // ⚠️ TO SAMO WYRAŻENIE, KTÓRYM WGLĄD WT-26 liczy `rokUrodzenia`: bramka
+    // wiekowa A9 i wgląd o roczniku czytają odpowiedź `users` JEDNĄ regułą,
+    // więc nie mogą się rozjechać. Błąd odczytu daje `null`, czyli „appka nie
+    // zna wieku", czyli bramka zamknięta — bez cichego „załóżmy, że dorosły".
+    const birthYear = rocznikZOdpowiedzi(userRes);
     loadHint({
       segmentId: goal?.segment_id ?? null,
       componentId: blockForGoal?.component_id ?? null,
@@ -1641,69 +1600,36 @@ export default function DzisScreen() {
     console.log(`dzis: ${opisOdczytuDoLogu(weZadania)}`);
 
     // ═══════════════════════════════════════════════════════════════
-    // ⬇⬇⬇ WEJŚCIA WGLĄDÓW — POCZĄTEK ⬇⬇⬇   (PLAN-D-B4, zadanie B4.2)
+    // ⬇⬇⬇ WEJŚCIA WGLĄDÓW — POCZĄTEK ⬇⬇⬇   (PLAN-D-B4 · PLAN-D-A2 D4)
     //
-    // ⛔ W TEJ SEKCJI TAKŻE NIE MA PRAWA PAŚĆ ANI JEDNO `?? []` ANI `|| []`.
-    // Producent wglądów rozróżnia `brak_danych` („odczytałem, nie ma z czego
-    // policzyć — oto próg i oto liczba") od `nie_wiem` („nie odczytałem, wgląd
-    // MÓGŁBY istnieć"). To rozróżnienie ginie w całości, jeżeli wołający sklei
-    // je tutaj — i ginie CICHO, bo obie gałęzie wyglądają na ekranie tak samo.
-    // Pilnuje tego asercja nr 3 w `lib/wgladyNaDzis.selftest.ts`.
+    // ⭐ JEDNO WYWOŁANIE. Do 16.08.2026 stało tu SZEŚĆ deklaracji, pięć wywołań
+    // `wejscieZOdpowiedzi` i wyrażenie budujące `profil` — razem 65 linii,
+    // WYŁĄCZNIE w tym pliku. `components/ListaZadan.tsx` woła TEGO SAMEGO
+    // rankera i nie miał jak tego zawołać, więc lista „Moje zadania" nie
+    // pokazywała ANI JEDNEGO wglądu (pomiar A2.1: 1 pozycja zamiast 3).
     //
-    // ⚠️ CZTERY Z SZEŚCIU WEJŚĆ NIE KOSZTUJĄ NOWEGO ZAPYTANIA: `dziennik`
+    // ⛔ W `zbudujWejsciaWgladow` NIE MA PRAWA PAŚĆ ANI JEDNO `?? []` ANI
+    // `|| []` — i nadal nie pada. Producent wglądów rozróżnia `brak_danych`
+    // („odczytałem, nie ma z czego policzyć — oto próg i oto liczba") od
+    // `nie_wiem` („nie odczytałem, wgląd MÓGŁBY istnieć"). To rozróżnienie
+    // ginie w całości, jeżeli wołający sklei je u siebie — i ginie CICHO,
+    // bo obie gałęzie wyglądają na ekranie tak samo.
+    // Pilnuje tego asercja nr 3 w `lib/wgladyNaDzis.selftest.ts`, która czyta
+    // teraz `lib/wejsciaWgladow.ts` — czyli plik, w którym ta reguła MIESZKA.
+    //
+    // ⚠️ CZTERY Z SIEDMIU ODPOWIEDZI NIE KOSZTUJĄ NOWEGO ZAPYTANIA: `dziennik`
     // i `powiazania` jadą z `dziennikRes`, `kalendarz` z `eventsRes`, `bol`
-    // z `bolRes` (doszła jedna KOLUMNA). Nowe są dwa: `mecze` i `profil`.
+    // z `bolRes`. Wszystkie siedem jest już w paczce `Promise.all` wyżej.
     // ═══════════════════════════════════════════════════════════════
-    const wgDziennik: Wejscie<WpisDziennikaWglad[]> =
-      wejscieZOdpowiedzi<WierszDziennika, WpisDziennikaWglad>(dziennikRes, 'dziennik (wglądy)', wpisDziennikaDlaWgladu);
-
-    const wgPowiazania: Wejscie<PowiazanieWpisu[]> =
-      wejscieZOdpowiedzi<WierszDziennika, PowiazanieWpisu>(dziennikRes, 'powiązania wpisów', powiazanieDlaWgladu);
-
-    const wgKalendarz: Wejscie<WydarzenieWglad[]> =
-      wejscieZOdpowiedzi<CalEvent, WydarzenieWglad>(eventsRes, 'kalendarz (wglądy)', wydarzenieDlaWgladu);
-
-    const wgBol: Wejscie<WpisBoluWglad[]> =
-      wejscieZOdpowiedzi<WierszBolu, WpisBoluWglad>(bolRes, 'ból (wglądy)', wpisBoluDlaWgladu);
-
-    const wgMecze: Wejscie<WpisMeczuWglad[]> =
-      wejscieZOdpowiedzi<WierszMeczu, WpisMeczuWglad>(meczeRes, 'mecze', meczDlaWgladu);
-
-    // PROFIL — TRZY ODPOWIEDZI, JEDNO WEJŚCIE, TRZY STANY.
-    // ⚠️ Błąd KTÓREJKOLWIEK z nich znaczy „nie wiem, ile Cię kosztuje brak
-    // rocznika", a NIE „nic Cię nie kosztuje". Różnica jest cała: przy zerowym
-    // skutku wgląd świadomie NIE POWSTAJE (nota B3 §3, wgląd 6), więc sklejenie
-    // błędu z zerem uciszyłoby go tak samo skutecznie — tylko po cichu.
-    const wgProfil: Wejscie<ProfilWglad> = (() => {
-      if (userRes.error) return { rodzaj: 'nie_wiem', powod: `profil: ${powodBledu(userRes.error)}` };
-      if (katalogRes.error) {
-        return { rodzaj: 'nie_wiem', powod: `katalog podpowiedzi: ${powodBledu(katalogRes.error)}` };
-      }
-      if (odcinkiRes.error) {
-        return { rodzaj: 'nie_wiem', powod: `odcinki Mapy drogi: ${powodBledu(odcinkiRes.error)}` };
-      }
-      if (!Array.isArray(katalogRes.data)) {
-        return { rodzaj: 'nie_wiem', powod: 'katalog podpowiedzi: odpowiedź bazy nie jest listą' };
-      }
-      // ⚠️ `count` z `head: true` bywa `null`, gdy PostgREST nie odda nagłówka.
-      // `null` to „nie policzyłem", a nie „zero odcinków" — a te dwie rzeczy
-      // dają PRZECIWNE wglądy (przy zerze odcinków rocznik nie zmienia nic).
-      if (typeof odcinkiRes.count !== 'number') {
-        return { rodzaj: 'nie_wiem', powod: 'odcinki Mapy drogi: baza nie oddała licznika' };
-      }
-      const katalog = katalogRes.data as unknown as WierszKatalogu[];
-      return {
-        rodzaj: 'jest',
-        dane: {
-          // Ten sam `birthYear`, którym karmimy bramkę wiekową wyżej — jedno
-          // źródło rocznika, więc bramka i wgląd nie mogą się rozjechać.
-          rokUrodzenia: userRes.error ? null : birthYear,
-          podpowiedziZaBramkaWieku: katalog.filter((r) => r.min_age !== null).length,
-          podpowiedziRazem: katalog.length,
-          odcinkowMapyDrogi: odcinkiRes.count,
-        },
-      };
-    })();
+    const wejsciaWgladowEkranu = zbudujWejsciaWgladow({
+      dziennikRes,
+      wydarzeniaRes: eventsRes,
+      bolRes,
+      meczeRes,
+      profilRes: userRes,
+      katalogRes,
+      odcinkiRes,
+    });
     // ⬆⬆⬆ WEJŚCIA WGLĄDÓW — KONIEC ⬆⬆⬆
 
     // ═══════════════════════════════════════════════════════════════
@@ -1939,14 +1865,7 @@ export default function DzisScreen() {
       /** ⭐ PLAN-D-F1 — czy odczyt, z którego wzięła się lista wyżej, PRZESZEDŁ. */
       odczytWydarzenUdanySie: events !== null,
       // ⭐ PLAN-D-B4 — sześć wejść producenta wglądów, każde w trzech stanach.
-      wejsciaWgladow: {
-        dziennik: wgDziennik,
-        kalendarz: wgKalendarz,
-        powiazania: wgPowiazania,
-        bol: wgBol,
-        mecze: wgMecze,
-        profil: wgProfil,
-      },
+      wejsciaWgladow: wejsciaWgladowEkranu,
       // ⭐ PLAN-D-B5 — trzy wejścia tygodnia i licznika pracy.
       wydarzeniaTygodnia,
       wpisyDziennika: wpisyDziennikaIds,

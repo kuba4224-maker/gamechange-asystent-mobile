@@ -141,6 +141,8 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
   };
 
   const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
+  /** ⭐ PLAN-D-A2 — DRUGI KONSUMENT wglądów, od 17.08.2026. */
+  const PLIK_LISTA = 'components/ListaZadan.tsx';
   /** Wgląd wychodzi do zawodnika jako POZYCJA KOLEJKI — rysuje ją ta karta. */
   const PLIK_KARTA = 'components/PozycjaKolejkiCard.tsx';
   const dzis = bezKomentarzy(surowe(PLIK_DZIS));
@@ -200,10 +202,20 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
   // ⚠️ ZMIERZONE 16.08.2026 na `main` = `123e09c`, nie przepisane z pamięci.
   // RÓWNOŚĆ, nie „≥ 1" (O73): „co najmniej jeden konsument" przeszłoby także
   // wtedy, gdyby „Dziś" przestało rysować wglądy, a zaczął je rysować ktoś inny.
-  const KONSUMENCI = [PLIK_DZIS];
+  // ⭐ PLAN-D-A2 17.08.2026 — ZAPADKA PRZESTAWIONA Z JEDNEGO EKRANU NA DWA.
+  // ⚠️ POPRAWIONA ZOSTAŁA ASERCJA, NIE KOD. Do 16.08.2026 stało tu
+  // `[PLIK_DZIS]` i to była prawda: wglądy rysował DOKŁADNIE JEDEN ekran,
+  // a `components/ListaZadan.tsx` — który woła TEGO SAMEGO rankera — nie
+  // pokazywał ani jednego (zmierzone 17.08 na żywych danych: 1 pozycja
+  // zamiast 3). Pas A2 dołożył drugiego KONSUMENTA, nie drugiego producenta:
+  // `policzWglady` jest czystą funkcją z jednym argumentem i nadal ma w całym
+  // produkcie JEDNĄ definicję.
+  // ⛔ ZAPADKA ZOSTAJE NA RÓWNOŚĆ (O73): „co najmniej dwa" przepuściłoby
+  // trzeci ekran, który zacznie rysować wglądy obok rankera.
+  const KONSUMENCI = [PLIK_DZIS, PLIK_LISTA].sort();
   const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
   const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
-  check('⭐ (I2-0) wglądy rysuje DOKŁADNIE ten jeden ekran, co 16.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
+  check('⭐ (A2-0) wglądy rysują DOKŁADNIE te dwa ekrany, co 17.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
     brakujacy.length === 0 && nadmiarowi.length === 0,
     `BRAKUJE: ${brakujacy.join(', ') || '—'} · NADMIAROWI: ${nadmiarowi.join(', ') || '—'} `
     + '→ ubył: producent wrócił do stanu z 15.08, w którym liczył sześć wglądów dla nikogo '

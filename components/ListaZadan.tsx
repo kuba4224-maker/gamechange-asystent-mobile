@@ -57,20 +57,44 @@
 // z `lib/zadania.ts`, a wstawia backend na `service_role` (kontrakt: nota T1 §7).
 //
 // ── CZEGO TEN EKRAN ŚWIADOMIE NIE BUDUJE — i co z tego wynika ────────
-// `jednaOdpowiedz` = `null`, `dodatkowi` = brak. Powód nie jest lenistwem:
-// obie te rzeczy są dziś PRODUKOWANE WEWNĄTRZ `app/(tabs)/dzis.tsx`
-// (`zbudujJednaOdpowiedz` z ośmioma wejściami ekranu; kandydat rekomendacji
-// i kandydat wpisu Dziennika budowane lokalnie w `useMemo`). Odtworzenie ich
-// tutaj znaczyłoby DRUGIEGO PRODUCENTA tych samych pozycji — czyli dokładnie
-// defekt, którego ten etap się pozbywa; a odtworzenie ich niedokładnie
-// (bez `hintState`, bez dawki treści) dałoby zawodnikowi DWIE RÓŻNE „jedne
-// odpowiedzi" na dwóch ekranach. `null` jest w kontrakcie B1 opisane wprost
-// jako „ekran jej nie policzył" i jest stanem uczciwym.
-// ⚠️ SKUTEK, NAZWANY: ta lista NIE POKAZUJE pozycji nr 1 z „Dziś" ani wpisu
-// Dziennika. Kontrakt „wyprowadzić budowanie wejść kolejki i producentów
-// z `dzis.tsx` do `lib/`" stoi w nocie przekazania C2.
+// `jednaOdpowiedz` = `null`. Powód nie jest lenistwem: jest dziś PRODUKOWANA
+// WEWNĄTRZ `app/(tabs)/dzis.tsx` (`zbudujJednaOdpowiedz` z ośmioma wejściami
+// tamtego ekranu). Odtworzenie jej tutaj znaczyłoby DRUGIEGO PRODUCENTA tej
+// samej pozycji — czyli dokładnie defekt, którego ten etap się pozbywa;
+// a odtworzenie jej niedokładnie (bez `hintState`, bez dawki treści) dałoby
+// zawodnikowi DWIE RÓŻNE „jedne odpowiedzi" na dwóch ekranach. `null` jest
+// w kontrakcie B1 opisane wprost jako „ekran jej nie policzył" i jest stanem
+// uczciwym.
+// ⚠️ TO SAMO DOTYCZY DWÓCH KANDYDATÓW BUDOWANYCH LOKALNIE NA „DZIŚ":
+// kandydata REKOMENDACJI (`decision_recommendations` + `odpowiedz.dlaczego`)
+// i kandydata WPISU DZIENNIKA (`daily_logs`, „czy jest dzisiejszy wpis").
+// Oba powstają z ośmiu wejść tamtego ekranu i tutaj ICH NIE MA — odtworzone
+// byłyby drugim producentem. ⚠️ SKUTEK, NAZWANY: ta lista NIE POKAZUJE
+// pozycji nr 1 z „Dziś" ani zaproszenia do wpisu w Dzienniku.
+//
+// ── ⭐ PLAN-D-A2 08.2026 (16.08.2026) — CO SIĘ ZMIENIŁO: `dodatkowi` ──
+// Do 16.08.2026 stało tu także „`dodatkowi` = brak", z tym samym uzasadnieniem.
+// ⛔ DLA WGLĄDÓW BYŁO ONO NIESŁUSZNE i to jest cała treść pasa A2:
+// `policzWglady` (`lib/wgladyZAlgorytmu.ts`, pas B3) JEST JUŻ JEDYNYM
+// PRODUCENTEM WGLĄDÓW — czystą funkcją z jednym argumentem, bez bazy, bez
+// zegara, bez pamięci. Zawołanie jej stąd nie tworzy drugiego producenta,
+// tylko drugiego KONSUMENTA.
+// ZMIERZONE 17.08.2026 na zawodniku 8d7e1ebb… (żywe dane, `select`):
+//   • „Dziś"  →  5 pozycji, w tym 2 wglądy;
+//   • ta lista →  1 pozycja,  w tym 0 wglądów.
+// Wgląd „Nie znamy Twojego rocznika…" stał na PIĄTYM miejscu kolejki, czyli
+// poza prefiksem „Dziś" (4 pozycje) — i był policzony, poprawny, przechodził
+// bramkę rankera, a NIE MIAŁ ŻADNEGO WIDOKU, KTÓRY BY GO WYDAŁ. Po tym pasie
+// stoi na tej liście na miejscu 3, w kubełku „Kiedyś".
+// ⚠️ KUBEŁEK WYZNACZA RANKER, NIE TEN EKRAN — pozycja i waga wglądu to wynik
+// `lib/kolejkaPodania.ts` i ten plik ich nie dotyka.
+// ⚠️ CZEGO TA LISTA NADAL NIE RYSUJE: TRZECIEJ CZĘŚCI wglądu („jedna rzecz
+// do zrobienia", `wgladDlaPozycji`). Rysuje ją komponent `WgladPozycji`, który
+// mieszka DZIŚ WEWNĄTRZ `app/(tabs)/dzis.tsx` — przepisanie go tutaj byłoby
+// drugą kopią rysowania (zakaz 2 wyżej). Domknięcie: wyprowadzić `WgladPozycji`
+// do `components/` i podpiąć oba ekrany. Nazwane, nie przemilczane.
 // ═════════════════════════════════════════════════════════════════════
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator,
 } from 'react-native';
@@ -88,6 +112,7 @@ import PozycjaKolejkiCard, {
 import {
   ulozKolejke,
   wezKubelek,
+  type Kandydat,
   type Kolejka,
   type Kubelek,
   type PozycjaKolejki,
@@ -153,6 +178,27 @@ import {
   BLAD_DODANIA,
   zdanieOdmowyDodania,
 } from '../lib/listaZadan';
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-A2 08.2026 (16.08.2026) — TA LISTA WIDZI WGLĄDY.
+//
+// `policzWglady` jest JEDYNYM producentem wglądów i jest CZYSTĄ FUNKCJĄ
+// z jednym argumentem: nie czyta bazy, nie czyta zegara, nie ma pamięci.
+// Zawołanie jej stąd NIE TWORZY drugiego producenta — tworzy drugiego
+// KONSUMENTA. Wejścia buduje `zbudujWejsciaWgladow` z `lib/wejsciaWgladow.ts`,
+// czyli TA SAMA funkcja, którą woła `app/(tabs)/dzis.tsx` (decyzja A2 D4).
+// ═════════════════════════════════════════════════════════════════════
+import {
+  policzWglady,
+  type WejsciaWgladow,
+  type WynikiWgladow,
+} from '../lib/wgladyZAlgorytmu';
+import {
+  zbudujWejsciaWgladow,
+  TABELA_MECZOW, SELECT_MECZOW,
+  TABELA_PROFILU, SELECT_PROFILU,
+  TABELA_KATALOGU, SELECT_KATALOGU, KOLUMNA_ODBIORCY, ODBIORCY_KATALOGU,
+  TABELA_ODCINKOW, SELECT_ODCINKOW,
+} from '../lib/wejsciaWgladow';
 
 // Kształty wierszy, dokładnie takie, w jakich wracają z bazy. ⚠️ Te same
 // kolumny co w `app/(tabs)/dzis.tsx` — kontrakt rankera §3 wymaga kompletu.
@@ -176,6 +222,16 @@ type DaneListy = {
   wejscia: WejsciaKolejki;
   /** ⚠️ Trzymany osobno, bo cztery stany R5 mają dać CZTERY RÓŻNE ZDANIA. */
   odczyt: OdczytZadan;
+  /**
+   * ⭐ PLAN-D-A2 — SZEŚĆ WEJŚĆ PRODUCENTA WGLĄDÓW. `dzis` tu nie stoi: bierze
+   * się z `wejscia.dzis`, żeby ranker i producent wglądów nie mogły dostać
+   * DWÓCH RÓŻNYCH dni. Jeden napis, jedno źródło — tak samo jak na „Dziś".
+   *
+   * ⛔ TU NIE MA POLICZONYCH WGLĄDÓW I TO JEST DECYZJA. `policzWglady` jest
+   * czystą funkcją, więc jej wynik liczy `useMemo` przy renderze; wynik
+   * przechowany w stanie byłby drugą kopią prawdy, którą da się nie odświeżyć.
+   */
+  wejsciaWgladow: Omit<WejsciaWgladow, 'dzis'>;
 };
 
 function liczbaAlboNull(x: unknown): number | null {
@@ -232,7 +288,8 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
     setLaduje(true);
     const dzisStr = toLocalDateStr(new Date());
 
-    const [goalsRes, blocksRes, eventsRes, dziennikRes, bolRes, zadaniaRes, glosRes] =
+    const [goalsRes, blocksRes, eventsRes, dziennikRes, bolRes, zadaniaRes, glosRes,
+      meczeRes, profilRes, katalogRes, odcinkiRes] =
       await Promise.all([
         supabase.from('goals').select('id,segment_id,is_priority')
           .eq('user_id', userId).eq('status', 'active'),
@@ -241,9 +298,18 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
         supabase.from('calendar_events')
           .select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,focus_block_id')
           .eq('user_id', userId).in('status', ['scheduled', 'completed']),
-        supabase.from('daily_logs').select('id,entry_type,payload,created_at')
+        // ⭐ PLAN-D-A2 16.08.2026 — DOSZŁA JEDNA KOLUMNA: `calendar_event_id`.
+        // ⚠️ TO JEST ROZSZERZENIE ISTNIEJĄCEGO ZAPYTANIA, NIE NOWE ZAPYTANIE —
+        // ten sam ruch i to samo uzasadnienie, którym B4 dołożył `body_location`
+        // do `pain_entries` na „Dziś". Bez niej wgląd o wpisach bez powiązania
+        // z sesją policzyłby na tym ekranie CO INNEGO niż na „Dziś" — a zawodnik
+        // nie ma prawa dostać dwóch różnych zdań o tej samej rzeczy (A2 D5).
+        supabase.from('daily_logs').select('id,entry_type,payload,created_at,calendar_event_id')
           .eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('pain_entries').select('id,intensity,excludes_from_training,created_at')
+        // ⭐ PLAN-D-A2 — DOSZŁA JEDNA KOLUMNA: `body_location`. Wgląd WT-25
+        // („ten sam ból trzeci raz") grupuje zgłoszenia po miejscu; bez tej
+        // kolumny musiałby zgadywać, czy trzy zgłoszenia to trzy razy to samo.
+        supabase.from('pain_entries').select('id,body_location,intensity,excludes_from_training,created_at')
           .eq('user_id', userId).order('created_at', { ascending: false }).limit(20),
         // ⭐ WEJŚCIE, O KTÓRE CHODZI W CAŁYM TYM PASIE.
         // ⚠️ PLAN-D-T1 16.08.2026 — POPRAWKA KOMENTARZA, KTÓRY STARZAŁ SIĘ CICHO
@@ -258,6 +324,25 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
         supabase.from('weekly_voice')
           .select(`week_start, voice, reason, spoke_at, ${KOLUMNA_OGRANICZEN}`)
           .eq('user_id', userId).eq('week_start', poniedzialekGlosu(new Date())).limit(1),
+        // ═══════════════════════════════════════════════════════════
+        // ⭐ PLAN-D-A2 16.08.2026 — CZTERY ZAPYTANIA, KTÓRYCH TEN EKRAN
+        // NIE MIAŁ, DOŁOŻONE DO TEJ SAMEJ PACZKI `Promise.all`.
+        //
+        // Koszt: ZERO dodatkowych rund sieci. Trzy pozostałe odpowiedzi,
+        // których producent wglądów potrzebuje (Dziennik, kalendarz, ból),
+        // ten ekran i tak już pobiera — dlatego wglądy kosztują tu cztery
+        // zapytania, a nie siedem.
+        //
+        // ⛔ NAZWY TABEL I LISTY KOLUMN POCHODZĄ Z `lib/wejsciaWgladow.ts`,
+        // czyli z tego samego miejsca, z którego bierze je „Dziś". Własny
+        // napis `'match_contexts'` w tym pliku byłby drugą listą kolumn,
+        // która rozjedzie się z tamtą przy pierwszej zmianie (O92).
+        // ═══════════════════════════════════════════════════════════
+        supabase.from(TABELA_MECZOW).select(SELECT_MECZOW)
+          .eq('user_id', userId).order('created_at', { ascending: false }),
+        supabase.from(TABELA_PROFILU).select(SELECT_PROFILU).eq('id', userId).limit(1),
+        supabase.from(TABELA_KATALOGU).select(SELECT_KATALOGU).in(KOLUMNA_ODBIORCY, [...ODBIORCY_KATALOGU]),
+        supabase.from(TABELA_ODCINKOW).select(SELECT_ODCINKOW, { count: 'exact', head: true }),
       ]);
 
     // ── GŁOS I OGRANICZENIA ────────────────────────────────────────
@@ -350,8 +435,30 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
     const weZadania = odczytZadan({ data: zadaniaRes.data, error: zadaniaRes.error });
     console.log(`lista zadań: ${opisOdczytuDoLogu(weZadania)}`);
 
+    // ═══════════════════════════════════════════════════════════════
+    // ⬇⬇⬇ WEJŚCIA WGLĄDÓW — POCZĄTEK ⬇⬇⬇   (PLAN-D-A2, decyzja D1 i D4)
+    //
+    // ⭐ JEDNO WYWOŁANIE, TA SAMA FUNKCJA, KTÓRĄ WOŁA „DZIŚ". Nie powstaje tu
+    // drugi producent wglądów: `zbudujWejsciaWgladow` mieszka w `lib/` i ma
+    // w całym produkcie DWÓCH konsumentów i ZERO kopii.
+    //
+    // ⛔ ANI JEDNO `?? []`, ANI JEDNO `|| []` — trzy stany każdego wejścia
+    // rozstrzyga `wejscieZOdpowiedzi` wewnątrz tamtej funkcji, a nie ten plik.
+    // ═══════════════════════════════════════════════════════════════
+    const wejsciaWgladow = zbudujWejsciaWgladow({
+      dziennikRes,
+      wydarzeniaRes: eventsRes,
+      bolRes,
+      meczeRes,
+      profilRes,
+      katalogRes,
+      odcinkiRes,
+    });
+    // ⬆⬆⬆ WEJŚCIA WGLĄDÓW — KONIEC ⬆⬆⬆
+
     setDane({
       odczyt: weZadania,
+      wejsciaWgladow,
       wejscia: {
         dzis: dzisStr,
         glos: stanTygodnia,
@@ -416,12 +523,43 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
   }, [userId, nowyTytul, load]);
 
   // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-A2 (16.08.2026), decyzja D1 — WGLĄDY WCHODZĄ NA TĘ LISTĘ.
+  //
+  // ⛔ JEDEN ARGUMENT. Drugi (`ZasadyWgladow`) istnieje WYŁĄCZNIE dla strażnika
+  // mutacyjnego pasa B3 — podany stąd znaczyłby, że ten ekran ma własną,
+  // schowaną kopię reguł liczenia wglądów.
+  //
+  // `policzWglady` jest CZYSTĄ FUNKCJĄ: nie czyta bazy, nie czyta zegara,
+  // nie ma pamięci. Zawołanie jej z drugiego ekranu NIE TWORZY drugiego
+  // producenta — tworzy drugiego KONSUMENTA, czyli dokładnie to, czego
+  // brakowało: wgląd był policzony, poprawny, przechodził bramkę rankera
+  // i NIE MIAŁ WIDOKU, KTÓRY BY GO WYDAŁ.
+  // ═══════════════════════════════════════════════════════════════════
+  const wglady = useMemo<WynikiWgladow | null>(() => {
+    if (dane === null) return null;
+    return policzWglady({ dzis: dane.wejscia.dzis, ...dane.wejsciaWgladow });
+  }, [dane]);
+
+  // ═══════════════════════════════════════════════════════════════════
   // ⛔ JEDEN ARGUMENT. Drugi (`Zasady`) jest wyłącznie dla strażnika
   // mutacyjnego rankera i dla pasa B3 — kontrakt B1 §8.1. Podany stąd
   // znaczyłby, że ekran ma własną kopię reguł, tylko schowaną głębiej.
+  //
+  // ⛔ ZERO FILTROWANIA KANDYDATÓW PRZED RANKEREM (WG-32). Wgląd, który ranker
+  // wyciszy, ma zostać WIDOCZNY z powodem milczenia; `.filter()` w tym miejscu
+  // skasowałby go po cichu — i zrobiłby to niewidocznie dla testów, bo lista
+  // byłaby po prostu krótsza.
+  // ⛔ ZERO SORTOWANIA. Kolejność należy do `lib/kolejkaPodania.ts` (zakaz 1
+  // z nagłówka tego pliku) — także kolejność wglądów.
   // ═══════════════════════════════════════════════════════════════════
-  const kolejka: Kolejka | null = dane === null ? null : ulozKolejke(dane.wejscia);
+  const kolejka: Kolejka | null = useMemo(() => {
+    if (dane === null) return null;
+    const dodatkowi: Kandydat[] = [];
+    if (wglady !== null) dodatkowi.push(...wglady.kandydaci);
+    return ulozKolejke({ ...dane.wejscia, dodatkowi });
+  }, [dane, wglady]);
   if (kolejka !== null) console.log(`lista zadań: ${kolejka.powod}`);
+  if (wglady !== null) console.log(`lista zadań: wglądy — ${wglady.powod}`);
 
   // ── ZAPISY: ODHACZENIE (WT-23) I PODNIESIENIE (WT-28) ──────────────
   // ⛔ Błąd zapisu ma WŁASNE ZDANIE, nie ciszę (R5). Wiersz nie znika z listy

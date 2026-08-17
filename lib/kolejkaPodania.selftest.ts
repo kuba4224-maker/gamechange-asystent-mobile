@@ -320,19 +320,45 @@ console.log('kolejkaPodania.selftest.ts — strażnik rankera (pas B1)\n');
   // byłby gorszy), kontrakt naprawy — w nocie przekazania C2.
   // Ta asercja PILNUJE STANU, nie go poprawia: dzień, w którym `dodatkowi`
   // dojdzie do listy, ZAPALA ją z poleceniem skreślenia tego długu.
-  const listaMaDodatkowych = /\bdodatkowi\b/.test(lista);
+  // ⭐ PLAN-D-A2 16.08.2026 — DŁUG SKREŚLONY, ASERCJA ODWRÓCONA.
+  //
+  // Do 16.08.2026 stała tu asercja PILNUJĄCA DŁUGU: „lista zadań nadal woła
+  // rankera BEZ `dodatkowi`", z poleceniem skreślenia jej w dniu, w którym
+  // `dodatkowi` dojdzie. Ten dzień nastał — pas A2 wpiął wglądy w listę.
+  // ⚠️ POPRAWIONA ZOSTAŁA ASERCJA, NIE KOD: stary warunek opisywał stan
+  // sprzed pasa i był PRAWDZIWY dokładnie tak długo, jak długo zawodnik nie
+  // widział na tej liście ani jednego wglądu.
+  //
+  // ⛔ NOWA ASERCJA PILNUJE CZEGOŚ MOCNIEJSZEGO NIŻ SAMO SŁOWO `dodatkowi`:
+  // że kandydaci idą DO RANKERA, a nie obok niego. Asercja na sam napis
+  // przepuściłaby `dodatkowi: []` — czyli pole, które jest, i wglądy, których
+  // nadal nie ma (dokładnie ten defekt nazwany w poleceniu A2 §A2.3).
+  const listaPodajeKandydatow = /dodatkowi\.push\(\s*\.\.\.\s*wglady\.kandydaci\s*\)/.test(lista);
   const listaMaJednaOdpowiedz = !/jednaOdpowiedz:\s*null/.test(lista);
-  console.log('[pomiar] 16.08.2026, main=123e09c — components/ListaZadan.tsx: '
-    + `dodatkowi (wglądy) = ${listaMaDodatkowych ? 'SĄ' : 'BRAK'} · `
+  console.log('[pomiar] 17.08.2026, po pasie A2 — components/ListaZadan.tsx: '
+    + `kandydaci wglądów → dodatkowi = ${listaPodajeKandydatow ? 'TAK' : 'NIE'} · `
     + `jednaOdpowiedz = ${listaMaJednaOdpowiedz ? 'JEST' : 'null'} · `
     + `producenci kolejki w repo = ${producenci.length} [${producenci.join(', ')}]`);
-  check('⭐ (I2-0) ZNANY DŁUG: lista zadań nadal woła rankera BEZ `dodatkowi` i bez „jednej odpowiedzi"',
-    !listaMaDodatkowych && !listaMaJednaOdpowiedz,
-    'stan się ZMIENIŁ i to jest wynik, nie awaria. Jeżeli `dodatkowi` DOSZŁO — dobrze: '
-    + 'lista zadań widzi wreszcie wglądy; skreśl ten dług tutaj i dołóż asercję, że kandydaci '
-    + 'idą do rankera, a nie obok niego (wzorzec: `lib/wgladyNaDzis.selftest.ts`, B4-1). '
-    + 'Jeżeli pojawił się DRUGI PRODUCENT tych pozycji na tym ekranie zamiast wspólnego '
-    + 'przez `dodatkowi` — to jest dokładnie ten kolaż, który etap B wyciął, i trzeba go cofnąć.');
+
+  check('⭐ (A2-0) lista zadań PODAJE kandydatów wglądów RANKEROWI, przez `dodatkowi`',
+    listaPodajeKandydatow,
+    'ubyło wpięcie wglądów w listę „Moje zadania" — wgląd znów jest policzony, poprawny, '
+    + 'przechodzi bramkę rankera i NIE MA WIDOKU, KTÓRY BY GO WYDAŁ. ⚠️ Sam napis `dodatkowi` '
+    + 'to za mało: `dodatkowi: []` wygląda tak samo i nie pokazuje niczego.');
+
+  check('⭐ (A2-0) lista NIE FILTRUJE i NIE TNIE kandydatów przed rankerem (WG-32)',
+    !/wglady\.kandydaci\s*\.\s*(filter|slice|sort|reverse)\s*\(/.test(lista),
+    'ekran wybiera, który wgląd wpuścić do kolejki — wyciszony wgląd znika wtedy bez powodu '
+    + 'milczenia, czyli dokładnie tak, jak zakazuje WG-32, i znika NIEWIDOCZNIE dla testów');
+
+  // ⛔ D2 pasa A2: `jednaOdpowiedz` na tej liście ZOSTAJE `null`. To nie jest
+  // dług — to jest stan uczciwy, opisany w kontrakcie B1 jako „ekran jej nie
+  // policzył". Odtworzenie jej tutaj byłoby drugim producentem pozycji nr 1.
+  check('⛔ (A2-0) `jednaOdpowiedz` na liście zadań nadal `null` — bez drugiego producenta pozycji nr 1',
+    !listaMaJednaOdpowiedz,
+    'ktoś zaczął budować „jedną odpowiedź" także tutaj — a buduje ją `zbudujJednaOdpowiedz` '
+    + 'z ośmiu wejść ekranu „Dziś". Druga, niedokładna kopia daje zawodnikowi DWIE RÓŻNE '
+    + 'odpowiedzi na to samo pytanie, na dwóch ekranach.');
 }
 
 // ═════════════════════════════════════════════════════════════════════

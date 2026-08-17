@@ -55,7 +55,7 @@
 // więc `tsc` pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
 // ═════════════════════════════════════════════════════════════════════
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,9 +78,29 @@ const bezKomentarzy = (s: string): string => s
   .join('\n');
 
 const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
+/**
+ * ⭐ PLAN-D-A2 17.08.2026 — SZEŚĆ WEJŚĆ WGLĄDÓW WYPROWADZONYCH Z EKRANU DO `lib/`.
+ *
+ * Do 16.08.2026 budowały się WYŁĄCZNIE w `load()` w `dzis.tsx` i tam ich
+ * szukały asercje (B4-3). Ekran „Moje zadania" woła TEGO SAMEGO rankera
+ * i nie miał jak ich zbudować — więc nie pokazywał ani jednego wglądu.
+ * Od pasa A2 mieszkają tutaj i mają DWÓCH konsumentów.
+ *
+ * ⛔ PLIK, KTÓREGO NIE MA, TO FAIL Z NAZWĄ, nie wyjątek `ENOENT` (O76).
+ */
+const PLIK_WEJSC = 'lib/wejsciaWgladow.ts';
 
-const dzisSurowe = readFileSync(join(root, PLIK_DZIS), 'utf8');
+const BRAK_PLIKOW: string[] = [];
+function surowe(wzgledna: string): string {
+  const p = join(root, wzgledna);
+  if (!existsSync(p)) { BRAK_PLIKOW.push(wzgledna); return ''; }
+  return readFileSync(p, 'utf8');
+}
+
+const dzisSurowe = surowe(PLIK_DZIS);
 const dzis = bezKomentarzy(dzisSurowe);
+const wejsciaSurowe = surowe(PLIK_WEJSC);
+const wejscia = bezKomentarzy(wejsciaSurowe);
 
 /**
  * Sekcja budowania SZEŚCIU WEJŚĆ WGLĄDÓW, wycięta z SUROWEGO źródła (znaczniki
@@ -205,6 +225,12 @@ function check(label: string, cond: boolean, detail: string) {
 {
   const sekcja = sekcjaWejscWgladow();
 
+  check('⛔ (B4-3) każdy plik z listy strażnika istnieje i daje się odczytać (O76)',
+    BRAK_PLIKOW.length === 0,
+    `NIE MA TYCH PLIKÓW: ${BRAK_PLIKOW.join(', ')} — zmieniła się nazwa albo miejsce. `
+    + 'Popraw listę w tym pliku ALBO przywróć plik; do tego czasu asercje niżej '
+    + 'czytają PUSTY tekst i nie znaczą nic.');
+
   check('(B4-3) sekcja „WEJŚCIA WGLĄDÓW" istnieje i da się ją wskazać znacznikami',
     sekcja !== null && sekcja.length > 200,
     'znaczników POCZĄTEK/KONIEC nie ma — nie da się powiedzieć, gdzie powstają wejścia wglądów');
@@ -213,24 +239,43 @@ function check(label: string, cond: boolean, detail: string) {
     sekcja !== null && !/\?\?\s*\[\s*\]/.test(sekcja) && !/\|\|\s*\[\s*\]/.test(sekcja),
     'wejście wglądu skleja „nie udało się odczytać" z „nic nie masz" — producent traci rozróżnienie R5');
 
+  // ⭐ PLAN-D-A2 17.08.2026 — TRZY ASERCJE NIŻEJ CZYTAJĄ TERAZ `lib/wejsciaWgladow.ts`.
+  //
+  // ⚠️ POPRAWIONE ZOSTAŁY ASERCJE, NIE KOD, i powód jest jeden: reguła się nie
+  // zmieniła, ZMIENIŁO SIĘ MIEJSCE, W KTÓRYM MIESZKA. Do 16.08 pięć wywołań
+  // `wejscieZOdpowiedzi` i trzy gałęzie `nie_wiem` profilu stały w środku
+  // `load()` w `dzis.tsx`; asercja szukała ich tam i miała rację. Po pasie A2
+  // stoją w `lib/`, bo woła je także ekran „Moje zadania". Asercja szukająca
+  // ich dalej w `dzis.tsx` pilnowałaby MIEJSCA, a nie reguły — i zapaliłaby
+  // się na zmianie, która tę regułę wzmacnia (jedna kopia zamiast dwóch).
+  //
+  // ⛔ ZERO `?? []` OBOWIĄZUJE TERAZ CAŁY TAMTEN PLIK, nie tylko sekcję.
+  check('(B4-3) ⭐ w `lib/wejsciaWgladow.ts` nie ma ani jednego `?? []` / `|| []`',
+    wejscia.length > 0 && !/\?\?\s*\[\s*\]/.test(wejscia) && !/\|\|\s*\[\s*\]/.test(wejscia),
+    'wejście wglądu skleja „nie udało się odczytać" z „nic nie masz" — producent traci rozróżnienie R5');
+
   check('(B4-3) pięć wejść listowych powstaje JEDYNĄ drogą — przez `wejscieZOdpowiedzi`, które widzi `error`',
-    sekcja !== null && (sekcja.match(/wejscieZOdpowiedzi</g) || []).length >= 5,
+    (wejscia.match(/wejscieZOdpowiedzi</g) || []).length >= 5,
     'ktoś zbudował wejście z samej `data`, z pominięciem błędu odczytu');
 
   // PROFIL nie jest listą, więc nie przechodzi przez `wejscieZOdpowiedzi` —
   // i właśnie dlatego jest jedynym miejscem, w którym trzeba sprawdzić `error`
   // ręcznie. Trzy odpowiedzi, trzy jawne gałęzie `nie_wiem`.
   check('(B4-3) wejście `profil` sprawdza błąd KAŻDEJ z trzech odpowiedzi, z których powstaje',
-    sekcja !== null
-    && /userRes\.error/.test(sekcja) && /katalogRes\.error/.test(sekcja) && /odcinkiRes\.error/.test(sekcja),
+    /profilRes\.error/.test(wejscia) && /katalogRes\.error/.test(wejscia) && /odcinkiRes\.error/.test(wejscia),
     'błąd jednej z trzech odpowiedzi zamienia się w „nic Cię nie kosztuje brak rocznika" (Z0)');
 
   // ⛔ ZNALEZISKO 10.9 NOTY B3, ZŁAPANE NA WŁASNYM BRZMIENIU. Bez filtru
   // odbiorcy zdanie mówi zawodnikowi, że traci 18 podpowiedzi — a wszystkie 18
   // bramkowanych wiekiem ma `odbiorca='rodzic'` i nigdy by ich nie zobaczył.
   // To jest nieprawda o zawodniku PRZY ZIELONYCH TESTACH.
+  // ⚠️ Filtr JEST TERAZ STAŁĄ w `lib/wejsciaWgladow.ts` i oba ekrany biorą go
+  // stamtąd — asercja sprawdza JEGO TREŚĆ, nie napis w jednym ekranie (O88).
   check('(B4-3) ⭐ liczby katalogu liczone Z FILTREM ODBIORCY — inaczej zdanie skłamie zawodnikowi',
-    /from\('component_hints'\)[\s\S]{0,200}?\.in\('odbiorca',\s*\['zawodnik',\s*'oba'\]\)/.test(dzis),
+    /TABELA_KATALOGU\s*=\s*'component_hints'/.test(wejscia)
+    && /KOLUMNA_ODBIORCY\s*=\s*'odbiorca'/.test(wejscia)
+    && /ODBIORCY_KATALOGU[^=]*=\s*\[\s*'zawodnik',\s*'oba'\s*\]/.test(wejscia)
+    && /\.in\(KOLUMNA_ODBIORCY,\s*\[\s*\.\.\.\s*ODBIORCY_KATALOGU\s*\]\)/.test(dzis),
     'katalog podpowiedzi liczony bez `odbiorca in (zawodnik, oba)` — wgląd WT-26 poda liczbę, '
     + 'której zawodnik i tak nigdy by nie zobaczył');
 }
