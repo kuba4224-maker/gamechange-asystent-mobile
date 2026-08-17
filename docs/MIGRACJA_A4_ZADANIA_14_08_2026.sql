@@ -40,7 +40,16 @@ create table if not exists public.player_tasks (
   reason_key       text,
   origin           text not null,
   source_table     text,
-  source_row_id    uuid,
+  -- ⭐ PLAN-D-S1 16.08.2026 — DEKLARACJA POPRAWIONA, BO OD DZIŚ KŁAMAŁA.
+  -- BYŁO: `source_row_id uuid`. Migracja `player_tasks_source_row_id_na_text`
+  -- (wykonana na produkcji 16.08.2026) zmieniła typ na `text`, bo wszystkie
+  -- cztery tabele źródłowe wglądów — `pain_entries`, `daily_logs`,
+  -- `calendar_events`, `match_contexts` — mają `id` typu `bigint`, a
+  -- `select '12'::uuid` kończy się `22P02`. Przy `uuid` ślad PIĘCIU z sześciu
+  -- wglądów nie mieścił się w kolumnie i zadanie systemowe nie mogło zapisać
+  -- wskazania na rekord, z którego powstało (WG-17 „skąd to wiemy").
+  -- ⛔ TEN PLIK JEST OPISEM STANU, NIE SKRYPTEM DO PONOWNEGO URUCHOMIENIA.
+  source_row_id    text,
   effort_seconds   integer,
   due_on           date,
   state            text not null default 'open',
@@ -76,6 +85,23 @@ alter table public.player_tasks
 alter table public.player_tasks
   add constraint player_tasks_zrodlo_calosc
   check ((source_table is null) = (source_row_id is null));
+
+-- ⭐ PLAN-D-S1 16.08.2026 — CHECK DOŁOŻONY RAZEM ZE ZMIANĄ TYPU NA `text`.
+-- ⛔ CELOWO NIE WALIDUJE „per tabela źródłowa". Lista „które źródła mają
+-- `bigint`, a które `uuid`" starzałaby się po cichu przy pierwszym nowym
+-- źródle danych (O67, O89) — a starzejąca się lista w bazie jest gorsza niż
+-- brak listy, bo wygląda na regułę. Kolumna pilnuje KSZTAŁTU, nie pochodzenia:
+-- ślad ma być niepusty, przycięty i mieścić się w 64 znakach.
+-- ⚠️ Granica 64 stoi też w `lib/zadania.ts` jako `MAKS_DLUGOSC_SLADU` i jest
+-- przypięta zapadką na RÓWNOŚĆ w `lib/zadania.selftest.ts`.
+alter table public.player_tasks
+  add constraint player_tasks_source_row_id_ksztalt
+  check (
+    source_row_id is null
+    or (btrim(source_row_id) = source_row_id
+        and char_length(source_row_id) >= 1
+        and char_length(source_row_id) <= 64)
+  );
 
 -- WG-17 / Z0: powód bez rejestru nie wychodzi w ogóle.
 alter table public.player_tasks

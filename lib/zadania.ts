@@ -697,14 +697,29 @@ export function zbudujZadanieWlasne(wejscie: {
 // udający zadanie produktu — migracja A4 zabroniła tego celowo.
 //
 // ── DWIE RZECZY, KTÓRE POMIAR PRODUKCJI ZMIENIŁ W TEJ FUNKCJI ───────
-// 1. ⛔ `player_tasks.source_row_id` jest typu **uuid**, a `pain_entries.id`,
-//    `daily_logs.id`, `calendar_events.id` i `match_contexts.id` są **bigint**
-//    (zmierzone 16.08.2026, `information_schema.columns`; `select '12'::uuid`
-//    kończy się `22P02 invalid input syntax for type uuid`). Ślad źródłowy
-//    PIĘCIU z sześciu wglądów NIE MIEŚCI SIĘ w tej kolumnie. Funkcja NIE
-//    UDAJE, że się mieści: odkłada ślad i NAZYWA to w `sladPominiety`.
-//    ⚠️ Cichy `null` byłby tu dokładnie tym „cichym brakiem", którego cały
-//    ten produkt się pozbywa — dlatego powód wychodzi wartością, nie do logu.
+// 1. ⭐ PLAN-D-S1 16.08.2026 — TEN PUNKT ZMIENIŁ SIĘ CO DO SEDNA, ZOSTAWIAM
+//    OBIE WERSJE, ŻEBY NIKT NIE MUSIAŁ ZGADYWAĆ, CZEMU LICZBY W STRAŻNIKU
+//    SIĘ ODWRÓCIŁY (O67).
+//    ⛔ BYŁO (T1, 16.08 rano): `player_tasks.source_row_id` był typu **uuid**,
+//       a `pain_entries.id`, `daily_logs.id`, `calendar_events.id`
+//       i `match_contexts.id` są **bigint** (`select '12'::uuid` kończy się
+//       `22P02 invalid input syntax for type uuid`). Ślad źródłowy PIĘCIU
+//       z sześciu wglądów NIE MIEŚCIŁ SIĘ w tej kolumnie, więc funkcja go
+//       odkładała z kodem `id_nie_jest_uuid`.
+//    ⭐ JEST (S1, 16.08 wieczorem): migracja `player_tasks_source_row_id_na_text`
+//       zmieniła typ kolumny na **text** i dołożyła CHECK
+//       `player_tasks_source_row_id_ksztalt`:
+//         `source_row_id is null OR (btrim(...) = ... AND char_length in 1..64)`.
+//       ⛔ BRAMKA `uuid` ZNIKA — powód, dla którego istniała, przestał istnieć.
+//       Ślad wchodzi do wiersza JAKO TEKST, bez zgadywania typu: kolumna jest
+//       `text` właśnie po to, żeby producent NIE MUSIAŁ WIEDZIEĆ, która tabela
+//       źródłowa ma `id` typu `bigint`, a która `uuid`. Nowe źródło danych nie
+//       wymaga tu ani jednej linii zmiany (O67, O89).
+//    ⚠️ `sladPominiety` NIE ZNIKA i nie może zniknąć: wgląd nadal może NIE
+//       WSKAZYWAĆ REKORDU (`brak_roku_urodzenia` opisuje BRAK wartości, a nie
+//       wiersz). Cichy `null` byłby tu dokładnie tym „cichym brakiem", którego
+//       cały ten produkt się pozbywa (R5) — dlatego powód wychodzi WARTOŚCIĄ,
+//       nie do logu.
 // 2. ⛔ `reason_register` opisuje `reason_fact`, czyli CZĘŚĆ 1 wglądu (liczbę),
 //    a ta jest ZAWSZE `fakt_o_tobie`. `Wglad.rejestrZnaczenia` opisuje CZĘŚĆ 2
 //    i tabela NIE MA NA NIEGO KOLUMNY. Wpisanie tu `rejestrZnaczenia`
@@ -729,10 +744,22 @@ export type SladWgladu = {
 export type PowodPominietegoSladu =
   /** Wgląd podał ślad bez nazwy tabeli. */
   | 'brak_tabeli'
-  /** Ślad opisuje BRAK wartości, nie konkretny rekord (np. `brak_roku_urodzenia`). */
+  /**
+   * ⭐ Ślad opisuje BRAK wartości, nie konkretny rekord (np. `brak_roku_urodzenia`
+   * mówi „nie ma roku urodzenia", a nie „patrz w wiersz nr 7").
+   * ⛔ PLAN-D-S1: po zmianie typu kolumny na `text` to jest JEDYNY zwyczajny
+   * powód, dla którego zadanie systemowe nie ma śladu. Kod `id_nie_jest_uuid`
+   * ZNIKNĄŁ razem z bramką, która go produkowała.
+   */
   | 'brak_wiersza'
-  /** ⛔ Identyfikator nie jest `uuid`, a taka jest kolumna `source_row_id`. */
-  | 'id_nie_jest_uuid';
+  /**
+   * ⛔ Identyfikator jest DŁUŻSZY, niż kolumna przyjmie. CHECK
+   * `player_tasks_source_row_id_ksztalt` dopuszcza 1–64 znaki — dłuższy ślad
+   * skończyłby się `23514 check_violation` u pierwszego prawdziwego `insert`,
+   * czyli cicho i po stronie backendu. ⚠️ TO NIE JEST BRAMKA NA TYP: nie pytamy,
+   * czy id „wygląda na bigint" — pytamy o to samo, o co pyta CHECK, i o nic więcej.
+   */
+  | 'id_dluzszy_niz_kolumna';
 
 export type SladPominiety = { powod: PowodPominietegoSladu; zdanie: string };
 
@@ -756,8 +783,24 @@ export type WynikZadaniaZWgladu =
 /** ⚠️ Wgląd wchodzi do tabeli JAKO `system`, nie jako `journal`/`calendar`. Patrz komentarz niżej. */
 export const ZRODLO_ZADANIA_Z_WGLADU: ZrodloZadania = 'system';
 
-/** Kanoniczny kształt `uuid` — jedyna rzecz, którą `source_row_id` przyjmie. */
-const KSZTALT_UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+/**
+ * ⭐ PLAN-D-S1 16.08.2026 — GRANICA DŁUGOŚCI ŚLADU, PRZEPISANA Z CHECK-A, NIE ZGADNIĘTA.
+ *
+ * Migracja `player_tasks_source_row_id_na_text` (16.08.2026) zmieniła
+ * `source_row_id` z `uuid` na `text` i dołożyła CHECK
+ * `player_tasks_source_row_id_ksztalt`:
+ *
+ *   source_row_id is null
+ *   OR (btrim(source_row_id) = source_row_id AND char_length(...) between 1 and 64)
+ *
+ * ⛔ TO JEST CAŁY WARUNEK, JAKI KOLUMNA STAWIA — i to jest cały warunek, jaki
+ * stawia ta funkcja. Nie ma tu listy „które tabele mają `bigint`, a które `uuid`",
+ * bo taka lista starzałaby się po cichu przy pierwszym nowym źródle (O67, O89).
+ * ⚠️ Poprzednia wersja tego pliku (T1) miała w tym miejscu wyrażenie na kształt
+ * `uuid` i odrzucała przez nie ślad PIĘCIU z sześciu wglądów. Powód zniknął
+ * razem z typem kolumny.
+ */
+const MAKS_DLUGOSC_SLADU = 64;
 
 /**
  * CZĘŚĆ 2 wglądu jako jedno zdanie — ze zastrzeżeniem doklejonym DOKŁADNIE
@@ -793,6 +836,11 @@ export function zdanieZnaczeniaWgladu(w: Wglad): string {
  *                       pochodzi: `origin` mówi, KTO to zadanie założył, a
  *                       założył je produkt. Skąd wie — mówi `source_table`.
  *   `system_key`      ← `zbudujKluczSystemowy(wglad.klucz, okno)` (WG-18, D4).
+ *   `source_table`    ← nazwa tabeli ze śladu wglądu, przycięta.
+ *   `source_row_id`   ← ⭐ identyfikator wiersza JAKO NAPIS (`String(...)`, przycięty).
+ *                       Od 16.08.2026 kolumna jest `text`, więc ślad z `bigint`-owego
+ *                       `id` WCHODZI. Oba pola albo oba puste, albo oba pełne —
+ *                       tego wymaga CHECK `player_tasks_zrodlo_calosc`.
  *   `due_on`          ← ⛔ ZAWSZE `null` (D5). Wglądy niosą `termin` do rankera
  *                       i to jest w porządku — ale ranker układa KOLEJNOŚĆ,
  *                       a termin w bazie jest zobowiązaniem wobec zawodnika.
@@ -827,8 +875,17 @@ export function zbudujZadanieSystemoweZWgladu(wejscie: {
   let sladDoZapisu: SladZrodlowy | null = null;
   let sladPominiety: SladPominiety | null = null;
   if (wejscie.slad !== null) {
-    const skad = wejscie.slad.skad.trim();
-    const idWiersza = (wejscie.slad.idWiersza ?? '').trim();
+    const skad = String(wejscie.slad.skad ?? '').trim();
+    // ⭐ D3 (PLAN-D-S1). ŚLAD IDZIE DO BAZY JAKO TEKST, BEZ ZGADYWANIA TYPU.
+    // `String(...)` stoi tu z powodu, który da się nazwać: producentów zadań
+    // systemowych pisze backend w JavaScripcie (`gamechange-app/api/`), gdzie
+    // `idWiersza: string | null` jest tylko obietnicą. `bigint` przyjdzie stamtąd
+    // jako `number` i bez tej linii wszedłby do wiersza LICZBĄ — a `typeof` jest
+    // tym, po czym poznaje się rozjazd, gdy `insert` już poleci.
+    // ⛔ NIE parsujemy go, NIE rzutujemy na liczbę i NIE pytamy, czy „wygląda
+    // na bigint". Kolumna jest `text` właśnie po to, żeby nikt nie musiał wiedzieć,
+    // która tabela źródłowa ma jaki typ `id`.
+    const idWiersza = String(wejscie.slad.idWiersza ?? '').trim();
     if (skad.length === 0) {
       sladPominiety = {
         powod: 'brak_tabeli',
@@ -843,16 +900,21 @@ export function zbudujZadanieSystemoweZWgladu(wejscie: {
         zdanie: `ślad z „${skad}" nie wskazuje wiersza (fakt o BRAKU wartości) — `
           + 'CHECK `player_tasks_zrodlo_calosc` wymaga obu pól naraz, więc oba zostają puste',
       };
-    } else if (!KSZTALT_UUID.test(idWiersza)) {
-      // ⛔ ZMIERZONE, NIE ZAŁOŻONE — patrz punkt 1 w komentarzu sekcji.
+    } else if (idWiersza.length > MAKS_DLUGOSC_SLADU) {
+      // ⛔ JEDYNA POZOSTAŁA GRANICA — i jest nią CHECK, nie domysł o typie.
       sladPominiety = {
-        powod: 'id_nie_jest_uuid',
-        zdanie: `„${skad}.id" = „${idWiersza}" nie jest uuid, a `
-          + '`player_tasks.source_row_id` jest kolumną `uuid` — wstawienie skończyłoby się '
-          + '`22P02 invalid input syntax for type uuid`, więc ślad NIE WCHODZI. '
-          + 'Naprawa należy do schematu, nie do tej funkcji (nota T1 §7).',
+        powod: 'id_dluzszy_niz_kolumna',
+        zdanie: `„${skad}.id" ma ${idWiersza.length} znaków, a CHECK `
+          + '`player_tasks_source_row_id_ksztalt` przyjmuje najwyżej '
+          + `${MAKS_DLUGOSC_SLADU} — ślad NIE WCHODZI, bo wstawienie skończyłoby się `
+          + '`23514 check_violation` po stronie backendu, czyli tam, gdzie nikt tego nie przeczyta.',
       };
     } else {
+      // ⭐ TU KOŃCZY SIĘ PAS S1. Do 16.08.2026 wieczorem ta gałąź była
+      // nieosiągalna dla PIĘCIU z sześciu wglądów, bo stała przed nią bramka
+      // `uuid`, a wszystkie cztery tabele źródłowe mają `id` typu `bigint`.
+      // Teraz ślad przechodzi — i `player_tasks` wreszcie wie, z którego
+      // rekordu powstało zadanie (WG-17 „skąd to wiemy").
       sladDoZapisu = { tabela: skad, idWiersza };
     }
   }

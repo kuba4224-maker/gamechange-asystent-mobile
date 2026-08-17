@@ -165,8 +165,19 @@ const BRAK_MIGRACJI =
  * ⭐ ZMIERZONE 16.08.2026, projekt `kqrbztsvepjtggjmmcdx`, zapytania do
  *    `pg_policy`, `pg_class`, `pg_constraint`, `pg_indexes`, `pg_trigger`,
  *    `information_schema.role_table_grants`. Zero zapisu do bazy.
- *    Wynik: rls=t · polityki=3 · polityka_delete=0 · checki=8 · indeksy=3
- *    · wyzwalacz=1 · granty_authenticated=3 · granty_anon=0 · wierszy=0.
+ *    Wynik (pas I1, rano): rls=t · polityki=3 · polityka_delete=0 · checki=8
+ *    · indeksy=3 · wyzwalacz=1 · granty_authenticated=3 · granty_anon=0 · wierszy=0.
+ * ⭐ ZMIERZONE PONOWNIE 16.08.2026 WIECZOREM (pas S1) — DWIE LICZBY SIĘ ZMIENIŁY
+ *    i obie zmiany są w porządku, więc stoją tu z powodem, a nie po cichu (O67):
+ *      • checki 8 → 9 · CHECK-ów i kluczy razem 10 → 11: doszedł
+ *        `player_tasks_source_row_id_ksztalt`, dołożony razem ze zmianą typu
+ *        `source_row_id` z `uuid` na `text` (migracja `…_na_text`).
+ *      • wierszy 0 → 1: ⭐ PIERWSZE PRAWDZIWE ZADANIE ZAWODNIKA. Wiersz
+ *        `origin='player'`, `system_key`/`source_table`/`source_row_id` = `null`,
+ *        `state='done'` — czyli producent (a) z pasa T1 przeszedł przez RLS
+ *        i przez odhaczenie, w prawdziwej appce. ⛔ Liczba wierszy NIE JEST
+ *        kontraktem i nie ma tu swojej asercji: rośnie od używania produktu.
+ *    ⚠️ Polityk, indeksów, grantów i wyzwalacza pomiar S1 NIE ZMIENIŁ.
  * ⭐ WNIOSEK Z POMIARU (O74 działa w obie strony): H1 postawił tę pozycję
  *    najwyżej, bo „cudze zadania mogą być czytelne". POMIAR TEGO NIE
  *    POTWIERDZIŁ. Nie ma dziury — był brak dowodu.
@@ -866,40 +877,132 @@ console.log('\n⭐ 0a. (T1) DWAJ PRODUCENCI — TABELA, KTÓRA MOŻE DOSTAĆ ZAD
     && zOknem.kandydat.wiersz.system_key === `${raz.kandydat.wiersz.system_key}:2026-W33`,
     JSON.stringify(zOknem !== null && zOknem.ok ? zOknem.kandydat.wiersz.system_key : zOknem));
 
-  // ⛔ ⭐ ŚLAD, KTÓREGO KOLUMNA NIE PRZYJMIE — ZMIERZONE NA PRODUKCJI 16.08.2026.
-  // `player_tasks.source_row_id` jest typu `uuid`, a wszystkie cztery tabele
-  // źródłowe wglądów mają `id` typu `bigint`. `select '12'::uuid` kończy się
-  // `22P02 invalid input syntax for type uuid`.
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ (S1-C8) ZAPADKA ODWRÓCONA — TA LICZBA ZMIENIŁA SIĘ CELOWO (D4, O67)
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // ⛔ TU BYŁO: „DOKŁADNIE PIĘĆ z sześciu wglądów TRACI ślad przez typ kolumny".
+  // ⭐ TU JEST:  „DOKŁADNIE ZERO traci ślad przez typ, DOKŁADNIE PIĘĆ go ZAPISUJE".
+  //
+  // ── DLACZEGO LICZBA SIĘ ZMIENIŁA, skoro asercje mają być stałe ──────
+  // Bo zmieniła się rzecz, której ta asercja pilnowała. Do 16.08.2026 rano
+  // `player_tasks.source_row_id` był typu `uuid`, a `pain_entries.id`,
+  // `daily_logs.id`, `calendar_events.id` i `match_contexts.id` są `bigint`
+  // (`select '12'::uuid` → `22P02`). Zapadka T1 stała na PIĘCIU odrzuconych
+  // i mówiła wprost: „gdy ta liczba spadnie, ktoś naprawił schemat".
+  // Migracja `player_tasks_source_row_id_na_text` (16.08.2026 wieczorem)
+  // zmieniła typ na `text`. ⛔ ASERCJI NIE SKASOWANO — ODWRÓCONO JĄ, żeby
+  // ta sama drogą, którą wykryto defekt, dało się wykryć jego NAWRÓT.
+  //
+  // ⚠️ ZERO I PIĘĆ MUSZĄ STAĆ RAZEM. Sama „zero odrzuconych" jest spełniona
+  // także przez producenta, który śladu NIE BUDUJE W OGÓLE — czyli przez
+  // dokładnie ten cichy brak, którego ten pas się pozbywał (O86).
   const zPominietymSladem = wiersze.filter((k) => k.sladPominiety !== null);
-  const przezUuid = wiersze.filter((k) => k.sladPominiety?.powod === 'id_nie_jest_uuid');
+  const zeSladem = wiersze.filter(
+    (k) => k.wiersz.source_table !== null && k.wiersz.source_row_id !== null);
   const przezBrakWiersza = wiersze.filter((k) => k.sladPominiety?.powod === 'brak_wiersza');
-  check('⛔ ⭐ (T1-C8) DOKŁADNIE PIĘĆ z sześciu wglądów traci ślad PRZEZ TYP KOLUMNY — RÓWNOŚĆ, nie „≥ 1" (O73)',
-    przezUuid.length === 5,
-    `śladów odrzuconych jako nie-uuid: ${przezUuid.length} z ${wiersze.length} `
-    + `(pominiętych w ogóle: ${zPominietymSladem.length}) — to jest ZNALEZISKO T1, nie usterka `
-    + 'tego testu: `source_row_id` jest `uuid`, a `pain_entries.id`, `daily_logs.id`, '
-    + '`calendar_events.id` i `match_contexts.id` są `bigint`. Gdy ta liczba SPADNIE, ktoś '
-    + 'naprawił schemat — i wtedy ta asercja ma zapytać, czy producent zaczął ślad zapisywać.');
-  check('⭐ (T1-C8) …a szósty traci go z INNEGO powodu i jest to powód uczciwy (fakt o BRAKU wartości)',
+  const przezDlugosc = wiersze.filter((k) => k.sladPominiety?.powod === 'id_dluzszy_niz_kolumna');
+
+  check('⛔ ⭐ (S1-C8) ZERO wglądów traci ślad z powodu TYPU `id` — RÓWNOŚĆ na zerze (D4, O73)',
+    zPominietymSladem.length - przezBrakWiersza.length - przezDlugosc.length === 0,
+    `pominiętych bez uczciwego powodu: ${zPominietymSladem.length - przezBrakWiersza.length - przezDlugosc.length} `
+    + `(pominiętych w ogóle: ${zPominietymSladem.length}, z tego przez brak wiersza: `
+    + `${przezBrakWiersza.length}, przez długość: ${przezDlugosc.length}) — kolumna jest `
+    + '`text`, więc `bigint`-owe `id` z `pain_entries`, `daily_logs`, `calendar_events` '
+    + 'i `match_contexts` mieści się w niej co do znaku. Jeżeli ta liczba UROSŁA, ktoś '
+    + 'wrócił do bramki na kształt identyfikatora — a wtedy zadanie systemowe znów nie '
+    + 'zapisze wskazania na rekord, z którego powstało (WG-17 „skąd to wiemy").');
+
+  check('⛔ ⭐ (S1-C8) DOKŁADNIE PIĘĆ z sześciu wglądów ZAPISUJE ślad — RÓWNOŚĆ, nie „≥ 1" (D4, O73)',
+    zeSladem.length === 5 && wiersze.length === 6,
+    `ze śladem: ${zeSladem.length} z ${wiersze.length} → `
+    + zeSladem.map((k) => `${k.wiersz.system_key}=${k.wiersz.source_table}#${k.wiersz.source_row_id}`).join(' | ')
+    + ' ⛔ SPADEK DO ZERA znaczy, że producent przestał budować ślad w ogóle — a to wygląda '
+    + 'na zielono dokładnie tak samo jak naprawa.');
+
+  check('⭐ (S1-C8) …a szósty go NIE MA i jest to powód uczciwy (fakt o BRAKU wartości, nie o rekordzie)',
     przezBrakWiersza.length === 1
-    && przezUuid.length + przezBrakWiersza.length === zPominietymSladem.length,
-    `przez brak wiersza: ${przezBrakWiersza.length} · przez uuid: ${przezUuid.length} · `
-    + `razem pominiętych: ${zPominietymSladem.length}`);
-  check('⛔ (T1-C8) pominięty ślad jest NAZWANY, nie połknięty — i zostawia OBA pola puste (CHECK `zrodlo_calosc`)',
+    && przezBrakWiersza.length + przezDlugosc.length === zPominietymSladem.length
+    && zeSladem.length + zPominietymSladem.length === wiersze.length,
+    `przez brak wiersza: ${przezBrakWiersza.length} · przez długość: ${przezDlugosc.length} · `
+    + `razem pominiętych: ${zPominietymSladem.length} · ze śladem: ${zeSladem.length}`);
+
+  check('⛔ (S1-C8) pominięty ślad jest NAZWANY, nie połknięty — i zostawia OBA pola puste (CHECK `zrodlo_calosc`)',
     zPominietymSladem.every((k) =>
       (k.sladPominiety?.zdanie ?? '').trim().length > 0
       && k.wiersz.source_table === null && k.wiersz.source_row_id === null),
     zPominietymSladem.map((k) => `${k.wiersz.system_key}: ${k.sladPominiety?.powod}`).join(' | '));
 
-  // ⭐ KONTROLA ODWROTNA. Bez niej asercję wyżej spełnia też producent,
-  // który ślad odrzuca ZAWSZE — czyli nigdy go nie zapisze, także po naprawie.
+  // ── ⭐ (S1-D3) ŚLAD JEST NAPISEM, NIE LICZBĄ ──────────────────────
+  // ⚠️ Bez tej asercji `source_row_id: 3` (liczba) przeszedłby przez `!== null`
+  // i przez każdą asercję wyżej. Wysłany do PostgREST wyszedłby jako `3` w JSON,
+  // a kolumna jest `text` — i to jest dokładnie ta klasa rozjazdu, o której mówi
+  // O89: typ kolumny jest częścią kontraktu producenta.
+  check('⛔ ⭐ (S1-D3) każdy zapisany `source_row_id` jest NAPISEM (`typeof === "string"`), nie liczbą',
+    zeSladem.length > 0 && zeSladem.every((k) => typeof k.wiersz.source_row_id === 'string'),
+    zeSladem.map((k) => `${k.wiersz.system_key}: ${typeof k.wiersz.source_row_id}`).join(' | '));
+
+  check('⛔ ⭐ (S1-D3) …i po `btrim` równa się sobie oraz mieści się w 1–64 znakach — inaczej CHECK '
+    + '`player_tasks_source_row_id_ksztalt` odrzuci wiersz po stronie backendu',
+    zeSladem.length > 0 && zeSladem.every((k) => {
+      const v = String(k.wiersz.source_row_id);
+      return v.trim() === v && v.length >= 1 && v.length <= 64;
+    }),
+    zeSladem.map((k) => `${k.wiersz.system_key}: „${k.wiersz.source_row_id}"`).join(' | '));
+
+  check('⛔ ⭐ (S1-D3) `source_table` też jest niepustym, przyciętym napisem — połowa śladu to nie ślad',
+    zeSladem.length > 0 && zeSladem.every((k) => {
+      const t = k.wiersz.source_table;
+      return typeof t === 'string' && t.trim() === t && t.length > 0;
+    }),
+    zeSladem.map((k) => `${k.wiersz.system_key}: „${k.wiersz.source_table}"`).join(' | '));
+
+  // ── ⭐ (S1-C9) ŚLAD Z BIAŁYMI ZNAKAMI NA BRZEGACH NIE JEST ŚLADEM ──
+  // CHECK w bazie wymaga `btrim(source_row_id) = source_row_id`. Producent ma
+  // to załatwić PRZED wysłaniem, a nie oddać bazie do odrzucenia.
+  const zeSpacjami = pierwszy === undefined ? null : zbudujZadanieSystemoweZWgladu({
+    wglad: pierwszy.wglad, userId: UZYTKOWNIK,
+    slad: { skad: '  pain_entries  ', idWiersza: '  3  ' }, okno: null,
+  });
+  check('⭐ (S1-C9) ślad z białymi znakami na brzegach wchodzi PRZYCIĘTY, a nie w postaci surowej',
+    zeSpacjami !== null && zeSpacjami.ok
+    && zeSpacjami.kandydat.wiersz.source_table === 'pain_entries'
+    && zeSpacjami.kandydat.wiersz.source_row_id === '3'
+    && zeSpacjami.kandydat.sladPominiety === null,
+    JSON.stringify(zeSpacjami !== null && zeSpacjami.ok ? zeSpacjami.kandydat.wiersz : zeSpacjami));
+
+  const pusteId = pierwszy === undefined ? null : zbudujZadanieSystemoweZWgladu({
+    wglad: pierwszy.wglad, userId: UZYTKOWNIK,
+    slad: { skad: 'pain_entries', idWiersza: '   ' }, okno: null,
+  });
+  check('⛔ ⭐ (S1-C9) identyfikator z samych spacji NIE JEST śladem — wychodzi `null` z POWODEM, nie `\'\'` (R5)',
+    pusteId !== null && pusteId.ok
+    && pusteId.kandydat.wiersz.source_row_id === null
+    && pusteId.kandydat.wiersz.source_table === null
+    && pusteId.kandydat.sladPominiety?.powod === 'brak_wiersza'
+    && (pusteId.kandydat.sladPominiety?.zdanie ?? '').trim().length > 0,
+    JSON.stringify(pusteId !== null && pusteId.ok ? pusteId.kandydat : pusteId));
+
+  const zaDlugie = pierwszy === undefined ? null : zbudujZadanieSystemoweZWgladu({
+    wglad: pierwszy.wglad, userId: UZYTKOWNIK,
+    slad: { skad: 'pain_entries', idWiersza: 'x'.repeat(65) }, okno: null,
+  });
+  check('⛔ ⭐ (S1-C9) ślad dłuższy niż 64 znaki NIE WCHODZI — granica przepisana z CHECK-a, nie z domysłu',
+    zaDlugie !== null && zaDlugie.ok
+    && zaDlugie.kandydat.wiersz.source_row_id === null
+    && zaDlugie.kandydat.sladPominiety?.powod === 'id_dluzszy_niz_kolumna',
+    JSON.stringify(zaDlugie !== null && zaDlugie.ok ? zaDlugie.kandydat.sladPominiety : zaDlugie));
+
+  // ⭐ KONTROLA ODWROTNA — ŚLAD W KSZTAŁCIE `uuid` NADAL WCHODZI.
+  // ⚠️ Kolumna `text` przyjmuje OBA kształty i to jest cały sens zmiany typu:
+  // producent nie musi wiedzieć, która tabela źródłowa ma `bigint`, a która `uuid`.
   const zPrawdziwymUuid = pierwszy === undefined ? null : zbudujZadanieSystemoweZWgladu({
     wglad: pierwszy.wglad,
     userId: UZYTKOWNIK,
     slad: { skad: 'pain_entries', idWiersza: '3f1b2c44-8a9e-4a1b-9f2d-1c0e5b7a9d33' },
     okno: null,
   });
-  check('⭐ (T1-C9) ślad w kształcie `uuid` WCHODZI — producent nie odrzuca śladu zawsze',
+  check('⭐ (S1-C9) ślad w kształcie `uuid` też WCHODZI — kolumna `text` nie wybiera między źródłami',
     zPrawdziwymUuid !== null && zPrawdziwymUuid.ok
     && zPrawdziwymUuid.kandydat.wiersz.source_table === 'pain_entries'
     && zPrawdziwymUuid.kandydat.wiersz.source_row_id === '3f1b2c44-8a9e-4a1b-9f2d-1c0e5b7a9d33'
@@ -949,6 +1052,256 @@ console.log('\n⭐ 0a. (T1) DWAJ PRODUCENCI — TABELA, KTÓRA MOŻE DOSTAĆ ZAD
     && /okno:\s*string\s*\|\s*null;/.test(zywyTS),
     'ziarnistość klucza jest regułą odduplikowania: producent, który nie wybierze świadomie, '
     + 'wybierze przypadkiem, a skutek (to samo zadanie codziennie od nowa) zobaczy zawodnik');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n⭐ 0b. (S1) ŚLAD, KTÓRY DA SIĘ ZAPISAĆ — BRAMKA, KTÓRA STRACIŁA POWÓD');
+// ═════════════════════════════════════════════════════════════════════
+//
+// ── CO BYŁO ZEPSUTE — nazwane liczbą, nie odczuciem ──────────────────
+//
+// > `player_tasks.source_row_id` był typu `uuid`, a WSZYSTKIE CZTERY tabele
+// > źródłowe wglądów (`pain_entries`, `daily_logs`, `calendar_events`,
+// > `match_contexts`) mają `id` typu `bigint`. Ślad PIĘCIU z sześciu wglądów
+// > fizycznie się w tej kolumnie nie mieścił, więc ANI JEDNO zadanie systemowe
+// > nie mogłoby zapisać wskazania na rekord, z którego powstało — a obietnica
+// > WG-17 („skąd to wiemy") żyła wyłącznie w `reason_key`.
+//
+// Migracja `player_tasks_source_row_id_na_text` (produkcja, 16.08.2026)
+// zmieniła typ na `text` i dołożyła CHECK `player_tasks_source_row_id_ksztalt`.
+// Ten pas zdjął z kodu bramkę, która przestała mieć powód.
+//
+// ── CZEGO TA SEKCJA PILNUJE ─────────────────────────────────────────
+//   D2 · kod maszynowy `id_nie_jest_uuid` zniknął z CAŁEGO repozytorium,
+//        ale `sladPominiety` ZOSTAŁO — bo wgląd nadal może nie wskazywać rekordu;
+//   D5 · plik migracji przestał kłamać o typie kolumny;
+//   D6 · zadanie zawodnika nadal wychodzi BEZ śladu (zabezpieczenie nieletniego);
+//   D7 · appka NIE DUBLUJE reguł wyzwalacza `trg_player_tasks_pilnuj`.
+//
+// ⚠️ CZEGO TA SEKCJA NIE UDAJE. Nie łączy się z bazą. Że kolumna NAPRAWDĘ jest
+// dziś typu `text`, wie z pomiaru zapisanego w `SCHEMAT_ZMIERZONY_PRZEZ_S1`,
+// a nie z produkcji — rozjazd produkcji z tą stałą jest dla suity niewidoczny (O65).
+{
+  const bezKom = bezKomentarzyTS;
+  const UZYTKOWNIK_S1 = '8d7e1ebb-52d7-4440-a105-e14b2a6ffbf5';
+
+  /**
+   * ⭐ POMIAR PRODUKCJI, PAS S1 16.08.2026, projekt `kqrbztsvepjtggjmmcdx`.
+   * Zapytania do `information_schema.columns`, `pg_constraint`, `pg_policies`,
+   * `pg_indexes`. ⛔ Zero zapisu do bazy, zero migracji — migracja była już wykonana.
+   *
+   * ⚠️ `wierszy` NIE JEST tu zapisane celowo: między pomiarem T1 (0 wierszy)
+   * a pomiarem S1 (1 wiersz) ktoś dodał i odhaczył zadanie w prawdziwej appce.
+   * Liczba wierszy rośnie od używania produktu i nie jest kontraktem.
+   */
+  const SCHEMAT_ZMIERZONY_PRZEZ_S1 = {
+    data: '16.08.2026',
+    typSourceRowId: 'text',
+    nazwaCheckuKsztaltu: 'player_tasks_source_row_id_ksztalt',
+    maksDlugoscSladu: 64,
+    /** ⛔ Typ `id` w tabelach źródłowych wglądów — zmierzony, nie zapamiętany. */
+    typyIdZrodel: {
+      pain_entries: 'bigint',
+      daily_logs: 'bigint',
+      calendar_events: 'bigint',
+      match_contexts: 'bigint',
+      users: 'uuid',
+    } as Record<string, string>,
+  } as const;
+
+  // ── ODKRYWANIE Z KATALOGU, NIE LISTA NA SZTYWNO (O69) ─────────────
+  // ⚠️ Przemiatamy CAŁE repozytorium, nie samo `lib/`. Kod maszynowy, który
+  // „zniknął" z jednego pliku i został w drugim, jest gorszy niż kod, który
+  // został w obu — bo dwa miejsca mówią wtedy o tej samej rzeczy dwie różne.
+  const POMIN_KAT_S1 = new Set(['_diag_backup', 'node_modules', '.git', '.expo', 'assets']);
+  const chodzS1 = (katalog: string, out: string[] = []): string[] => {
+    if (!existsSync(katalog)) return out;
+    for (const wpis of readdirSync(katalog)) {
+      if (POMIN_KAT_S1.has(wpis)) continue;
+      const p = join(katalog, wpis);
+      if (statSync(p).isDirectory()) chodzS1(p, out);
+      else if (/\.(ts|tsx|js|jsx|sql)$/.test(p)) out.push(p);
+    }
+    return out;
+  };
+  const PLIKI_REPO = ['app', 'components', 'lib', 'docs', 'tests']
+    .flatMap((k) => chodzS1(join(appRoot, k)))
+    .map((p) => relative(appRoot, p).split(sep).join('/'))
+    .sort();
+  const zrodloRepo = new Map<string, string>(
+    PLIKI_REPO.map((p) => [p, readFileSync(join(appRoot, p), 'utf8')]),
+  );
+
+  check('⛔ (S1-0) przemiatanie repozytorium coś znalazło — pusty zbiór uczyniłby wszystko niżej zielonym (O69)',
+    PLIKI_REPO.length > 10
+    && PLIKI_REPO.includes('lib/zadania.ts')
+    && PLIKI_REPO.includes(PLIK_MIGRACJI),
+    `plików: ${PLIKI_REPO.length}; `
+    + `lib/zadania.ts ${PLIKI_REPO.includes('lib/zadania.ts') ? 'jest' : '⛔ NIE MA'}; `
+    + `${PLIK_MIGRACJI} ${PLIKI_REPO.includes(PLIK_MIGRACJI) ? 'jest' : '⛔ NIE MA'}`);
+
+  // ── ⭐ D2: KOD MASZYNOWY, KTÓRY MIAŁ ZNIKNĄĆ ──────────────────────
+  //
+  // ⚠️ DWIE RZECZY, KTÓRE MUSZĘ TU NAZWAĆ, ZAMIAST ROBIĆ PO CICHU:
+  //
+  // 1. SZUKANY KOD JEST SKLEJANY Z KAWAŁKÓW, a nie wpisany wprost. Gdyby stał
+  //    w tym pliku jako napis, asercja „nie występuje ani razu" zapalałaby się
+  //    NA SOBIE — i jedynym sposobem uciszenia jej byłoby wyłączenie tego pliku
+  //    z przemiatania, czyli zrobienie w strażniku dziury wielkości strażnika.
+  // 2. SZUKAMY W ŻYWYM KODZIE, NIE W KOMENTARZACH. Komentarz, który mówi
+  //    „TU BYŁO: …", jest historią i ma prawo zostać — bez niej następna sesja
+  //    zobaczy odwróconą liczbę w zapadce i nie dowie się, czemu się odwróciła
+  //    (O67). Kodem maszynowym jest to, po czym da się FILTROWAĆ.
+  const MARTWY_KOD = ['id', 'nie', 'jest', 'uuid'].join('_');
+  const zywyKod = (p: string): string => {
+    const s = zrodloRepo.get(p) ?? '';
+    return p.endsWith('.sql') ? bezKomentarzySQL(s) : bezKom(s);
+  };
+  const zMartwymKodem = PLIKI_REPO.filter((p) => zywyKod(p).includes(MARTWY_KOD));
+  check(`⛔ ⭐ (S1-D2) kod maszynowy „${MARTWY_KOD}" NIE WYSTĘPUJE w żywym kodzie repozytorium ANI RAZU`,
+    zMartwymKodem.length === 0,
+    `występuje w: ${zMartwymKodem.join(', ')} — powód, który ten kod nazywał, przestał `
+    + 'istnieć 16.08.2026 razem z typem `uuid` kolumny `source_row_id`. Kod maszynowy, '
+    + 'który opisuje nieistniejącą przyczynę, jest gorszy niż jego brak: da się po nim '
+    + 'filtrować i zawsze wyjdzie zero, więc wygląda jak „naprawione".');
+
+  check('⛔ ⭐ (S1-D2) …i przemiatanie martwego kodu NAPRAWDĘ czyta pliki — kontrola odwrotna na żywym kodzie',
+    PLIKI_REPO.filter((p) => zywyKod(p).includes('brak_wiersza')).length > 0,
+    'przemiatanie nie znalazło ani razu kodu `brak_wiersza`, który W KODZIE JEST — '
+    + 'czyli asercja wyżej przechodzi dlatego, że nic nie czyta, a nie dlatego, że jest czysto');
+
+  // ── ⛔ D2: `sladPominiety` NIE ZNIKA — ZAPADKA NA RÓWNOŚĆ ─────────
+  // ⭐ ZMIERZONE 16.08.2026 na `main` = `e68833a`, nie przepisane z pamięci:
+  // pole `sladPominiety` czytają DOKŁADNIE DWA pliki — moduł, który je produkuje,
+  // i ten strażnik. ⛔ SPADEK DO JEDNEGO znaczy, że ktoś „uprościł" producenta
+  // do cichego `null`; WZROST znaczy, że doszedł konsument, który powinien
+  // wiedzieć, co robi z pominiętym śladem (dziś nie ma takiego i to jest w porządku:
+  // wstawiacz mieszka w `gamechange-app`, nie tutaj).
+  const CZYTELNICY_SLADU_POMINIETEGO = ['lib/zadania.selftest.ts', 'lib/zadania.ts'];
+  const czytelnicy = PLIKI_REPO
+    .filter((p) => /sladPominiety/.test(zrodloRepo.get(p) ?? ''))
+    .sort();
+  check(`⛔ ⭐ (S1-D2) \`sladPominiety\` czyta DOKŁADNIE ${CZYTELNICY_SLADU_POMINIETEGO.length} pliki — RÓWNOŚĆ, nie „≥ 1" (O73)`,
+    czytelnicy.length === CZYTELNICY_SLADU_POMINIETEGO.length
+    && CZYTELNICY_SLADU_POMINIETEGO.every((p) => czytelnicy.includes(p)),
+    `czytają: ${czytelnicy.join(', ') || '⛔ ŻADEN'} · oczekiwane: `
+    + `${CZYTELNICY_SLADU_POMINIETEGO.join(', ')} — zero znaczy, że pole zniknęło razem `
+    + 'z powodem, dla którego wgląd nie ma śladu, czyli że wrócił cichy `null` (R5).');
+
+  check('⛔ ⭐ (S1-D2) `sladPominiety` NADAL ISTNIEJE w module i ma zdanie, nie sam kod',
+    /sladPominiety/.test(zywyTS)
+    && /export\s+type\s+SladPominiety\s*=\s*\{\s*powod:[\s\S]{0,80}?zdanie:\s*string/.test(zywyTS)
+    && /'brak_wiersza'/.test(zywyTS),
+    'wgląd może NIE WSKAZYWAĆ REKORDU (`brak_roku_urodzenia` opisuje BRAK wartości) '
+    + 'i to musi wyjść WARTOŚCIĄ, a nie cichym `null` — pole zostaje, znaczenie się zmieniło');
+
+  // ── ⭐ GRANICA DŁUGOŚCI: JEDNA LICZBA, DWA MIEJSCA, ZAPADKA NA RÓWNOŚĆ ──
+  const granicaWKodzie = /MAKS_DLUGOSC_SLADU\s*=\s*(\d+)/.exec(zywyTS);
+  check(`⛔ ⭐ (S1-D3) granica długości śladu w kodzie to DOKŁADNIE ${SCHEMAT_ZMIERZONY_PRZEZ_S1.maksDlugoscSladu} — tyle, ile zmierzono w CHECK-u`,
+    granicaWKodzie !== null
+    && Number(granicaWKodzie[1]) === SCHEMAT_ZMIERZONY_PRZEZ_S1.maksDlugoscSladu,
+    `w kodzie: ${granicaWKodzie?.[1] ?? '(nie ma stałej MAKS_DLUGOSC_SLADU)'} · `
+    + `w CHECK-u \`${SCHEMAT_ZMIERZONY_PRZEZ_S1.nazwaCheckuKsztaltu}\`: `
+    + `${SCHEMAT_ZMIERZONY_PRZEZ_S1.maksDlugoscSladu}`);
+
+  check('⛔ ⭐ (S1-D1) w module NIE MA już bramki na kształt `uuid` dla śladu źródłowego',
+    !/KSZTALT_UUID/.test(zywyTS)
+    && !/\{8\}-\[0-9a-fA-F\]\{4\}/.test(zywyTS),
+    'wyrażenie na kształt `uuid` wróciło do `lib/zadania.ts` — a kolumna jest `text` '
+    + 'i wszystkie cztery tabele źródłowe mają `id` typu `bigint`, więc taka bramka '
+    + 'odrzuca ślad PIĘCIU z sześciu wglądów');
+
+  // ── ⭐ D5: PLIK MIGRACJI PRZESTAŁ KŁAMAĆ O TYPIE KOLUMNY ──────────
+  const oMigracjiS1 = (label: string, cond: boolean, detail: string) =>
+    check(label, !!migracja && cond, migracja ? detail : BRAK_MIGRACJI);
+  const M_ID = migracjaSurowa ? samIdentyfikatorSQL(migracjaSurowa) : '';
+
+  oMigracjiS1('⛔ ⭐ (S1-D5) migracja NIE deklaruje już `source_row_id uuid` — od 16.08 to była nieprawda',
+    !/source_row_id\s+uuid/i.test(M_ID),
+    'plik migracji mówi `uuid`, a produkcja ma `text` — a ten plik jest jedynym miejscem, '
+    + 'z którego następna sesja dowie się, jak wygląda tabela (O67)');
+
+  oMigracjiS1(`⛔ ⭐ (S1-D5) migracja deklaruje \`source_row_id ${SCHEMAT_ZMIERZONY_PRZEZ_S1.typSourceRowId}\` — zgodnie z pomiarem`,
+    new RegExp(`source_row_id\\s+${SCHEMAT_ZMIERZONY_PRZEZ_S1.typSourceRowId}\\b`, 'i').test(M_ID),
+    `nie znalazłem deklaracji \`source_row_id ${SCHEMAT_ZMIERZONY_PRZEZ_S1.typSourceRowId}\``);
+
+  oMigracjiS1(`⭐ (S1-D5) migracja zawiera CHECK \`${SCHEMAT_ZMIERZONY_PRZEZ_S1.nazwaCheckuKsztaltu}\` — z nazwy`,
+    new RegExp(SCHEMAT_ZMIERZONY_PRZEZ_S1.nazwaCheckuKsztaltu, 'i').test(M_ID),
+    'CHECK dołożony razem ze zmianą typu nie stoi w pliku, więc następna sesja odtworzy '
+    + 'tabelę bez niego i ślad z białymi znakami na brzegach wejdzie do bazy');
+
+  oMigracjiS1('⭐ (S1-D5) CHECK kształtu pilnuje `btrim` I DŁUGOŚCI, a nie tylko jednego z dwóch',
+    /btrim\s*\(\s*source_row_id\s*\)\s*=\s*source_row_id/i.test(M_ID)
+    && new RegExp(`char_length\\s*\\(\\s*source_row_id\\s*\\)[\\s\\S]{0,60}?${SCHEMAT_ZMIERZONY_PRZEZ_S1.maksDlugoscSladu}`, 'i').test(M_ID),
+    'sam `btrim` przepuści ślad na 300 znaków, sama długość przepuści ślad ze spacją na końcu');
+
+  oMigracjiS1('⛔ ⭐ (S1-D5) CHECK kształtu NIE wymienia tabel źródłowych z nazwy (O67, O89)',
+    !new RegExp(
+      `${SCHEMAT_ZMIERZONY_PRZEZ_S1.nazwaCheckuKsztaltu}[\\s\\S]{0,400}?`
+      + `(pain_entries|daily_logs|calendar_events|match_contexts)`, 'i').test(M_ID),
+    'lista „które źródła mają `bigint`, a które `uuid`" zapisana w CHECK-u zestarzeje się '
+    + 'po cichu przy pierwszym nowym źródle danych — a wtedy baza odrzuci ślad, którego '
+    + 'nikt nie zabraniał');
+
+  // ── ⛔ D6: ZADANIE WŁASNE ZAWODNIKA NADAL BEZ ŚLADU (ASERCJA ODWROTNA) ──
+  // ⚠️ To NIE JEST ta sama reguła co wyżej. Polityka `player_tasks_insert_own`
+  // ODRZUCI wiersz zawodnika ze śladem — bo zadanie ze śladem wygląda na liście
+  // dokładnie tak samo jak rzecz wstawiona przez produkt. Zdjęcie bramki `uuid`
+  // NIE MA PRAWA otworzyć tej drogi.
+  const wlasneS1 = zbudujZadanieWlasne({ userId: UZYTKOWNIK_S1, tytul: 'Kupić nowe wkładki do korków' });
+  check('⛔ ⭐ (S1-D6) zadanie WŁASNE zawodnika nadal wychodzi BEZ śladu — `source_table` i `source_row_id` to `null`',
+    wlasneS1.ok === true
+    && wlasneS1.wiersz.source_table === null
+    && wlasneS1.wiersz.source_row_id === null
+    && wlasneS1.wiersz.system_key === null
+    && wlasneS1.wiersz.origin === 'player',
+    JSON.stringify(wlasneS1)
+    + ' — polityka `player_tasks_insert_own` ma `source_table is null`, `source_row_id is null` '
+    + 'i `system_key is null` w `with check`. To jest zabezpieczenie nieletniego przed '
+    + 'podszyciem się pod produkt, a nie brakująca funkcja.');
+
+  check('⛔ ⭐ (S1-D6) …i te `null`-e są WPISANE JAWNIE, a nie osiągnięte pominięciem klucza',
+    /source_table:\s*null/.test(zywyTS)
+    && /source_row_id:\s*null/.test(zywyTS)
+    && Object.prototype.hasOwnProperty.call(wlasneS1.ok ? wlasneS1.wiersz : {}, 'source_row_id')
+    && Object.prototype.hasOwnProperty.call(wlasneS1.ok ? wlasneS1.wiersz : {}, 'source_table'),
+    '`insert` bez klucza zostawia bazie wartość domyślną, a domyślna może się zmienić '
+    + 'w migracji, której ten plik nie zobaczy. Jawny `null` jest twierdzeniem.');
+
+  // ── ⛔ D7: APPKA NIE DUBLUJE REGUŁ WYZWALACZA ────────────────────
+  // Wyzwalacz `trg_player_tasks_pilnuj` (BEFORE UPDATE) blokuje zmianę `origin`
+  // po utworzeniu i dopisanie `system_key`/`source_table`/`source_row_id`
+  // do zadania zawodnika. ⛔ Druga kopia tej reguły w kodzie appki rozjedzie się
+  // z oryginałem przy pierwszej zmianie i OBIE będą zielone.
+  const dublujacyWyzwalacz = PLIKI_REPO
+    .filter((p) => p.startsWith('lib/') || p.startsWith('components/'))
+    .filter((p) => !p.endsWith('.selftest.ts'))
+    .filter((p) => {
+      const s = bezKom(zrodloRepo.get(p) ?? '');
+      // „stary origin kontra nowy origin" albo „zawodnik dorabia sobie system_key"
+      return /\b(stary|poprzedni|previous|old)Origin\b/i.test(s)
+        || /origin\s*!==\s*(zadanie|wiersz|stare|old)\w*\.origin/i.test(s)
+        || /origin\s*(===|!==)\s*['"]player['"][\s\S]{0,120}?system_key\s*(===|!==)/i.test(s);
+    });
+  check('⛔ ⭐ (S1-D7) kod appki NIE DUBLUJE reguł wyzwalacza `trg_player_tasks_pilnuj`',
+    dublujacyWyzwalacz.length === 0,
+    `dublują: ${dublujacyWyzwalacz.join(', ')} — ścieżka „wstaw jako \`player\`, potem awansuj `
+    + 'UPDATE-em na `system`" jest zamknięta W BAZIE, przez wyzwalacz. Druga kopia tej reguły '
+    + 'w kodzie rozjedzie się z oryginałem i obie będą świecić na zielono.');
+
+  oMigracjiS1('⭐ (S1-D7) …a wyzwalacz, którego nie dublujemy, NADAL STOI w migracji — z nazwy',
+    /trg_player_tasks_pilnuj/i.test(M_ID),
+    'jeżeli wyzwalacz zniknął, to reguły, których appka celowo nie dubluje, nie pilnuje NIKT');
+
+  // ── ⭐ TABELA SZEŚCIU ŹRÓDEŁ — POMIAR, KTÓRY MA SIĘ NIE ZESTARZEĆ CICHO ──
+  // ⚠️ Ta asercja nie sprawdza bazy. Sprawdza, że pomiar typów `id` NIE ZNIKNĄŁ
+  // z pliku razem z bramką, którą uzasadniał — bo następna sesja, która zobaczy
+  // `source_row_id: text`, ma się dowiedzieć TUTAJ, czemu tak jest.
+  check('⭐ (S1-0) pomiar typów `id` czterech tabel źródłowych stoi w tym pliku i mówi `bigint`',
+    ['pain_entries', 'daily_logs', 'calendar_events', 'match_contexts']
+      .every((t) => SCHEMAT_ZMIERZONY_PRZEZ_S1.typyIdZrodel[t] === 'bigint')
+    && SCHEMAT_ZMIERZONY_PRZEZ_S1.typyIdZrodel.users === 'uuid',
+    JSON.stringify(SCHEMAT_ZMIERZONY_PRZEZ_S1.typyIdZrodel));
 }
 
 // ═════════════════════════════════════════════════════════════════════
