@@ -719,15 +719,23 @@ function cialoEksportu(src: string, nazwa: string): string | null {
 // jej stąd, a pozycja nowa zapala go z poleceniem podpięcia albo skasowania.
 // Bez zapadki w obie strony „dług zgłoszony" jest miejscem, w którym da się
 // przenocować dowolnie długo.
+// ⚠️ PLAN-D-L1 17.08.2026 — POZYCJA `lib/sladZachowania.ts :: policzSlad`
+// ZNIKŁA Z TEJ LISTY, BO ZNIKŁ PLIK. Nie została „naprawiona": pas L1 usunął
+// `lib/sladZachowania.ts` razem z jego selftestem, po dowodzie zera importerów
+// w całym repozytorium poza własnym selftestem. ⛔ To NIE JEST ciche wypadnięcie
+// — co ten moduł liczył i co trzeba zrobić, żeby wrócił, stoi w nocie
+// `claude/PRZEKAZANIE_PAS_L1_17_08_2026.md` (nagrobek, D7).
 const SILNIKI_BEZ_EKRANU: { klucz: string; kto: string; dlaczego: string }[] = [
   {
-    klucz: 'lib/sladZachowania.ts :: policzSlad',
-    kto: 'runda systematyczności (N1) — zgłoszone przez pas F1 15.08.2026, NIE naprawione (O68)',
-    dlaczego: 'Jedyny konsument, karta „Ostatnie 28 dni, policzone" na ekranie Kalibracji, '
-      + 'został usunięty z produktu 13.08.2026 razem z całą Kalibracją. Plik i tabela '
-      + '`behavioural_trace` zostały ŚWIADOMIE — decyzja jest opisana w nagłówku '
-      + '`lib/sladZachowania.ts` i ma datę. ⚠️ To jest 33. pozycja tej samej choroby, '
-      + 'nie wyjątek od niej: cztery liczniki są policzone, przetestowane i niewidoczne.',
+    klucz: 'lib/obciazenieOstatnichDni.ts :: policzObciazenieWOknie',
+    kto: 'Kuba — przebudowa architektury informacji, po niej podpięcie do ekranu (pas L1, 17.08.2026)',
+    dlaczego: 'Silnik obciążenia ostatnich dni powstał w pasie L1 na decyzję Kuby (wariant A: '
+      + 'obciążenie ostatnich 7 dni na pierwszym planie, dorobek całkowity niżej). ⛔ TEN SAM PAS '
+      + 'MIAŁ JAWNY ZAKAZ dotykania tego, gdzie cokolwiek stoi na ekranie — Kuba przebudowuje '
+      + 'właśnie architekturę informacji i każda zmiana układu poszłaby do kosza. Dlatego silnik '
+      + 'jest zbudowany, zmierzony na żywych danych i NIEPODPIĘTY: świadomie i z datą. '
+      + '⚠️ Pozycja wypada z tej listy w dniu, w którym ekran zacznie wołać '
+      + '`policzObciazenieWOknie` — strażnik sam o tym powie.',
   },
 ];
 

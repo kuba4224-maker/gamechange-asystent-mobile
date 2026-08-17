@@ -935,7 +935,14 @@ console.log('\n11. ⭐ PLAN-D-K1 — JEDEN FAKT MA W PRODUKCIE JEDNĄ NAZWĘ');
     .filter((p) => WZORZEC_KONSUMENTA.test(readFileSync(p, 'utf8')))
     .map((p) => p.slice(root.length + 1))
     .sort();
-  const KONSUMENTOW_16_08_2026 = 11;
+  // ⭐ AKTUALIZACJA 17.08.2026, PAS L1: 11 → 12. Doszedł
+  // `lib/obciazenieOstatnichDni.ts` i ⚠️ NIE JEST TO konsument `StanWykonania`.
+  // Wpada tu przez człon `nie_odczytano` wzorca wyżej, który w tym pliku należy
+  // do `WejscieZrodla` z `lib/nagrodaZaPrace.ts` (nieodczytane ŹRÓDŁO PRACY),
+  // a nie do rozstrzygnięcia wystąpienia. Moduł NIE ROZGAŁĘZIA SIĘ po wartości
+  // `StanWykonania` — potwierdza to asercja D7 niżej, która przeszła. Liczba
+  // podniesiona świadomie, z nazwą pliku i z powodem (O73).
+  const KONSUMENTOW_16_08_2026 = 12;
   check(`⭐ O73 — konsumentów \`StanWykonania\` jest DOKŁADNIE ${KONSUMENTOW_16_08_2026} (zapadka na RÓWNOŚĆ, nie na „≥1")`,
     konsumenci.length === KONSUMENTOW_16_08_2026,
     `${konsumenci.length}: ${konsumenci.join(', ')}`);

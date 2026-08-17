@@ -16,13 +16,22 @@
 // o tym, jak powstaje nawyk. To jest złamanie Z0 przy zielonych testach.
 // Zasada: `claude/ZASADY_OBOWIAZUJACE_13_08_2026.md`, **N1**.
 //
-// ── ⭐ JAK TEN ZAKAZ STAŁ SIĘ KSZTAŁTEM KODU, A NIE DYSCYPLINĄ ──────
-// Reguła „nie karzemy za przerwę" jest nie do złamania, jeżeli funkcja
-// NIE MA CZYM zmierzyć przerwy. Dlatego `JednostkaPracy` **nie niesie daty**.
-// Daty wchodzą do tego pliku wyłącznie przez czytniki z §3 i są tam
-// odrzucane — w JEDNYM, nazwanym miejscu, które da się pokazać palcem.
-// Poniżej tej granicy nie istnieje nic, czym dałoby się policzyć „ile dni
-// temu" ani „ile dni z rzędu”, więc kolejna sesja nie musi o tym pamiętać.
+// ── ⭐ PLAN-D-L1 (17.08.2026) — CO SIĘ ZMIENIŁO I CO ZOSTAŁO ────────
+// Do 17.08.2026 `JednostkaPracy` NIE NIOSŁA DATY, a zakaz „nie karzemy za
+// przerwę" był nie do złamania, bo funkcja nie miała CZYM zmierzyć przerwy.
+// Decyzja Kuby z 17.08 (pas L1, D1): produkt ma umieć powiedzieć, ile pracy
+// mieści się w ostatnich dniach — więc jednostka datę DOSTAJE.
+//
+// ⛔ TO NIE JEST ZŁAGODZENIE ZAKAZU. `policzNagrode` — funkcja DOROBKU
+// CAŁKOWITEGO — nadal NIE MA ŻADNEGO PARAMETRU OKNA i NIE CZYTA pola `kiedy`
+// ani razu. Okno mieszka WYŁĄCZNIE w `lib/obciazenieOstatnichDni.ts`, jako
+// osobna funkcja, a nie jako przełącznik tej. ⭐ Powód, dla którego to są dwie
+// funkcje, a nie jedna z parametrem: funkcja z przełącznikiem „okno" jest
+// zaproszeniem, żeby ktoś podał okno tam, gdzie go nie wolno — i wtedy dorobek
+// zaczyna maleć po tygodniu przerwy, czyli karze za kontuzję, chorobę i sesję
+// egzaminacyjną. Pilnują tego DWIE asercje strażnika: jedna czyta to źródło
+// jako tekst, druga to samo URUCHAMIA — ten sam zestaw jednostek rozrzucony
+// po roku i skupiony w jednym dniu ma dać TĘ SAMĄ liczbę dorobku.
 //
 // ── ⭐ DLACZEGO ODZNAKI SĄ WYLICZANE, A NIE PRZECHOWYWANE ───────────
 //   wykonana praca (wiersze, które JUŻ SĄ w bazie) → czysta funkcja → odznaki
@@ -197,12 +206,46 @@ export const PROGI: readonly Prog[] = [
 // ═══════════════════════════════════════════════════════════════════
 
 /**
- * ⭐ JEDNOSTKA PRACY. **Nie ma tu pola z datą i nie będzie.**
+ * ⭐ DATA JEDNOSTKI PRACY — **TRZY WARTOŚCI, NIE DWIE** (R5, Z0).
  *
- * ⛔ Dołożenie daty do tego typu jest jedyną zmianą, która pozwoliłaby kolejnej
- * sesji policzyć „dni z rzędu" albo „okno ostatnich N dni" — czyli przywrócić
- * dokładnie to, co ten pas usuwa. Pilnuje tego asercja strażnika, która czyta
- * ten plik jako tekst.
+ * ⛔ Trzeci stan nie jest ozdobą. „Wiem, którego dnia ta praca została
+ * wykonana" i „wiem tylko, kiedy powstał wiersz w bazie" to dwie różne rzeczy,
+ * a podanie drugiej jako pierwszej jest podaniem prawdopodobnego jako pewnego.
+ *
+ *   `dzien_pracy`  — źródło ma kolumnę, której ZNACZENIEM jest dzień wykonanej
+ *                    pracy: `session_verdicts.occurred_on`,
+ *                    `calendar_events.scheduled_date`,
+ *                    `focus_block_checkins.answered_at` (odpowiedź JEST pracą)
+ *                    oraz `daily_logs.created_at` dla wpisu, którego pracą jest
+ *                    sam wpis.
+ *   `dzien_zapisu` — jedyna data, jaką źródło ma, mówi KIEDY POWSTAŁ WIERSZ,
+ *                    a praca, którą ten wiersz opisuje, wydarzyła się wcześniej
+ *                    i **nie ma gdzie tego zapisać**. ⚠️ Zmierzone 17.08.2026:
+ *                    `match_contexts` nie ma kolumny z datą meczu, a
+ *                    `daily_logs` nie ma kolumny z datą treningu (ani klucza
+ *                    w `payload`). ⛔ NIE ZGADUJEMY daty — nazywamy ją po
+ *                    imieniu i liczymy dalej, mówiąc wprost, czym ona jest.
+ *   `nieznana`     — wiersz nie ma ŻADNEJ użytecznej daty. ⛔ To nie jest
+ *                    „dzisiaj" i nie jest „dawno".
+ */
+export type DataPracy =
+  | { rodzaj: 'dzien_pracy'; dzien: string }
+  | { rodzaj: 'dzien_zapisu'; dzien: string }
+  | { rodzaj: 'nieznana'; powod: string };
+
+/** `YYYY-MM-DD` z dowolnego znacznika czasu, albo `null`, gdy się nie da. */
+function dzienZe(x: unknown): string | null {
+  if (typeof x !== 'string' || x.length < 10) return null;
+  const d = x.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+}
+
+/**
+ * ⭐ JEDNOSTKA PRACY.
+ *
+ * ⛔ Pole `kiedy` istnieje WYŁĄCZNIE dla `lib/obciazenieOstatnichDni.ts`.
+ * `policzNagrode` w tym pliku nie sięga po nie ani razu i nie ma prawa sięgnąć
+ * — inaczej dorobek całkowity zacząłby zależeć od kalendarza.
  */
 export type JednostkaPracy = {
   /**
@@ -224,6 +267,12 @@ export type JednostkaPracy = {
    * z założenia węższa niż liczba wierszy.
    */
   zOdpowiedziaKontrolna: boolean;
+  /**
+   * ⭐ PLAN-D-L1 (D1) — kiedy ta praca została wykonana. ⛔ CZYTA TO WYŁĄCZNIE
+   * `lib/obciazenieOstatnichDni.ts`. Zapadka strażnika pilnuje, że `policzNagrode`
+   * nie czyta tego pola i nie przyjmuje żadnego parametru okna.
+   */
+  kiedy: DataPracy;
 };
 
 /**
@@ -271,44 +320,25 @@ export type WejscieNagrody = {
 };
 
 // ═══════════════════════════════════════════════════════════════════
-// 3. ⭐ CZYTNIKI — JEDYNE MIEJSCE W TYM PLIKU, W KTÓRYM ISTNIEJĄ DATY
+// 3. ⭐ CZYTNIKI — JEDYNE MIEJSCE, W KTÓRYM WIERSZ BAZY ZAMIENIA SIĘ W PRACĘ
 // ═══════════════════════════════════════════════════════════════════
 //
-// Poniżej tej sekcji nie ma ani jednej daty. Wiersze wchodzą z datami, bo
-// tak wyglądają w bazie; wychodzą bez nich, bo data nie ma prawa wpłynąć
-// na to, ile pracy zawodnik wykonał.
-
-/**
- * ⛔ PUNKT WPIĘCIA MUTACJI DLA STRAŻNIKA — i jedyne miejsce, w którym data
- * mogłaby cokolwiek zmienić. Produkcyjny wołający TEGO ARGUMENTU NIE PODAJE,
- * więc mutacja nie ma jak wejść na ekran (ten sam wzorzec co `ZasadyWykonania`
- * w `lib/wykonanieSesji.ts`).
- */
-export type ZasadyCzytania = {
-  /**
-   * ⛔ ZAWSZE `null`. Gdy liczba — czytnik odrzuca wiersze starsze niż N dni,
-   * czyli przywraca licznik okna, który maleje z upływem czasu.
-   */
-  oknoDni: number | null;
-  /** Dzisiejsza data dla okna wyżej. Bez niej okno i tak nie działa. */
-  dzis: string | null;
-};
-
-export const CZYTAJ_WSZYSTKO: ZasadyCzytania = { oknoDni: null, dzis: null };
-
-/** `true`, gdy wiersz przechodzi przez (nieistniejące w produkcji) okno. */
-function wOknie(dzien: string | null, zasady: ZasadyCzytania): boolean {
-  if (zasady.oknoDni === null || zasady.dzis === null) return true;
-  if (typeof dzien !== 'string' || dzien.length < 10) return true;
-  const granica = przesunDate(zasady.dzis, -(zasady.oknoDni - 1));
-  if (granica === null) return true;
-  return dzien.slice(0, 10) >= granica;
-}
+// ⭐ PLAN-D-L1 (D3/D4): W TYM PLIKU NIE MA JUŻ ŻADNEGO OKNA. Do 17.08.2026
+// czytniki przyjmowały `ZasadyCzytania { oknoDni, dzis }` — punkt wpięcia
+// mutacji, którego produkcja nigdy nie podawała. Po dołożeniu daty do jednostki
+// (D1) było to DRUGIE miejsce, w którym dałoby się przyciąć dorobek oknem,
+// a decyzja D4 brzmi: okna stoją w JEDNYM miejscu. Zostały tam, gdzie należą —
+// w `lib/obciazenieOstatnichDni.ts`. Czytniki oddają WSZYSTKO, co dostały,
+// i doklejają do każdej jednostki datę wraz z tym, CZYM ta data jest.
 
 /** Wystąpienie z DOWODEM wykonania, tak jak rozstrzygnął je pas D1. */
 export type WierszSesji = {
   idWydarzenia: number;
-  /** ⚠️ Wchodzi wyłącznie do klucza i do (nieistniejącego) okna. Nie do arytmetyki. */
+  /**
+   * Dzień WYSTĄPIENIA sesji (`session_verdicts.occurred_on` albo
+   * `calendar_events.scheduled_date`). ⚠️ Wchodzi do klucza i do pola `kiedy`.
+   * ⛔ Nie wchodzi do arytmetyki dorobku.
+   */
   dzien: string;
   /** Segment Bloku Skupienia, do którego należy ta sesja. `null` = nie wiadomo. */
   segment: string | null;
@@ -316,20 +346,21 @@ export type WierszSesji = {
   maWpisWDzienniku: boolean;
 };
 
-export function jednostkiZSesji(
-  wiersze: readonly WierszSesji[],
-  zasady: ZasadyCzytania = CZYTAJ_WSZYSTKO,
-): JednostkaPracy[] {
+export function jednostkiZSesji(wiersze: readonly WierszSesji[]): JednostkaPracy[] {
   const out: JednostkaPracy[] = [];
   for (const w of wiersze) {
     if (!w || typeof w.idWydarzenia !== 'number' || !Number.isFinite(w.idWydarzenia)) continue;
     if (typeof w.dzien !== 'string' || w.dzien.length < 10) continue;
-    if (!wOknie(w.dzien, zasady)) continue;
+    const dzien = dzienZe(w.dzien);
     out.push({
       klucz: `sesja:${w.idWydarzenia}@${w.dzien.slice(0, 10)}`,
       rodzaj: 'sesja_z_dowodem',
       segment: typeof w.segment === 'string' && w.segment.length > 0 ? w.segment : null,
       zOdpowiedziaKontrolna: w.maWpisWDzienniku === true,
+      // ⭐ `occurred_on` / `scheduled_date` MÓWIĄ o dniu sesji, nie o dniu zapisu.
+      kiedy: dzien === null
+        ? { rodzaj: 'nieznana', powod: 'dzień wystąpienia nie jest datą' }
+        : { rodzaj: 'dzien_pracy', dzien },
     });
   }
   return out;
@@ -338,7 +369,13 @@ export function jednostkiZSesji(
 export type WierszDziennika = {
   id: number;
   entry_type: string | null;
-  /** ⚠️ Tylko do klucza i do (nieistniejącego) okna. */
+  /**
+   * ⚠️ `daily_logs` NIE MA kolumny z dniem, którego wpis dotyczy — zmierzone
+   * 17.08.2026 na `information_schema.columns` i na kluczach `payload`
+   * (`sleep_quality`, `morning_fatigue`, `sleep_hours`, `mood_motivation`,
+   * `duration_minutes`, `post_fatigue`, `rpe` — ani jednej daty).
+   * To jest DATA POWSTANIA WIERSZA i tylko tym się staje w polu `kiedy`.
+   */
   created_at: string | null;
   /** Surowy `payload`. Czytamy z niego wyłącznie obecność pomiaru obciążenia. */
   payload: unknown;
@@ -361,15 +398,11 @@ export function maPomiarObciazenia(payload: unknown): boolean {
   return liczba(p.rpe) || liczba(p.duration_minutes);
 }
 
-export function jednostkiZDziennika(
-  wiersze: readonly WierszDziennika[],
-  zasady: ZasadyCzytania = CZYTAJ_WSZYSTKO,
-): JednostkaPracy[] {
+export function jednostkiZDziennika(wiersze: readonly WierszDziennika[]): JednostkaPracy[] {
   const out: JednostkaPracy[] = [];
   for (const w of wiersze) {
     if (!w || typeof w.id !== 'number' || !Number.isFinite(w.id)) continue;
-    const dzien = typeof w.created_at === 'string' ? w.created_at.slice(0, 10) : null;
-    if (!wOknie(dzien, zasady)) continue;
+    const dzien = dzienZe(w.created_at);
     const zPomiarem = maPomiarObciazenia(w.payload);
     out.push({
       klucz: `dziennik:${w.id}`,
@@ -377,6 +410,15 @@ export function jednostkiZDziennika(
       // ⛔ Dziennik nie niesie segmentu i nie udajemy, że niesie.
       segment: null,
       zOdpowiedziaKontrolna: zPomiarem,
+      // ⭐ TA SAMA KOLUMNA, DWA RÓŻNE ZNACZENIA — i to nie jest niedopatrzenie.
+      // Wpis poranny: pracą JEST wpis, więc dzień powstania wiersza to dzień
+      // pracy co do znaku. Wpis potreningowy: pracą jest TRENING, a wiersz
+      // powstał wtedy, kiedy zawodnik usiadł do formularza — czyli tego samego
+      // dnia albo później, i nie ma czym tego rozstrzygnąć. ⛔ Zamiast zgadywać,
+      // nazywamy to `dzien_zapisu` i niesiemy tę różnicę dalej (Z0).
+      kiedy: dzien === null
+        ? { rodzaj: 'nieznana', powod: 'wpis Dziennika bez daty powstania' }
+        : { rodzaj: zPomiarem ? 'dzien_zapisu' : 'dzien_pracy', dzien },
     });
   }
   return out;
@@ -391,7 +433,6 @@ export type WierszOdpowiedziKontrolnej = {
 
 export function jednostkiZOdpowiedziKontrolnych(
   wiersze: readonly WierszOdpowiedziKontrolnej[],
-  zasady: ZasadyCzytania = CZYTAJ_WSZYSTKO,
 ): JednostkaPracy[] {
   const out: JednostkaPracy[] = [];
   for (const w of wiersze) {
@@ -399,29 +440,51 @@ export function jednostkiZOdpowiedziKontrolnych(
     // ⛔ Samo ZADANIE pytania nie jest pracą zawodnika. Nagradzanie go byłoby
     // nagrodą za to, że produkt się odezwał — czyli za obecność (N1).
     if (typeof w.answered_at !== 'string' || w.answered_at.length === 0) continue;
-    if (!wOknie(w.answered_at.slice(0, 10), zasady)) continue;
+    const dzien = dzienZe(w.answered_at);
     out.push({
       klucz: `kontrola:${w.id}`,
       rodzaj: 'odpowiedz_kontrolna',
       segment: typeof w.segment === 'string' && w.segment.length > 0 ? w.segment : null,
       zOdpowiedziaKontrolna: true,
+      // ⭐ Pracą JEST odpowiedź, a `answered_at` mówi, kiedy padła. Dzień pracy
+      // co do znaku — nie zapisu o pracy wykonanej kiedy indziej.
+      kiedy: dzien === null
+        ? { rodzaj: 'nieznana', powod: 'odpowiedź kontrolna bez daty' }
+        : { rodzaj: 'dzien_pracy', dzien },
     });
   }
   return out;
 }
 
-export type WierszMeczu = { id: number; created_at: string | null };
+export type WierszMeczu = {
+  id: number;
+  /**
+   * ⚠️ `match_contexts` NIE MA kolumny z datą meczu — zmierzone 17.08.2026 na
+   * `information_schema.columns` (`id`, `user_id`, `game_type`, `own_score`,
+   * `opponent_score`, `role`, `minutes_played`, `match_rpe`, `created_at`,
+   * `self_rating`, `mental_state`, `free_note`, `position_played_today`,
+   * `entered_recovery_state`, `demanding_conditions`). To jest data POWSTANIA
+   * WIERSZA i tylko tym się staje w polu `kiedy`.
+   */
+  created_at: string | null;
+};
 
-export function jednostkiZMeczow(
-  wiersze: readonly WierszMeczu[],
-  zasady: ZasadyCzytania = CZYTAJ_WSZYSTKO,
-): JednostkaPracy[] {
+export function jednostkiZMeczow(wiersze: readonly WierszMeczu[]): JednostkaPracy[] {
   const out: JednostkaPracy[] = [];
   for (const w of wiersze) {
     if (!w || typeof w.id !== 'number' || !Number.isFinite(w.id)) continue;
-    const dzien = typeof w.created_at === 'string' ? w.created_at.slice(0, 10) : null;
-    if (!wOknie(dzien, zasady)) continue;
-    out.push({ klucz: `mecz:${w.id}`, rodzaj: 'mecz', segment: null, zOdpowiedziaKontrolna: false });
+    const dzien = dzienZe(w.created_at);
+    out.push({
+      klucz: `mecz:${w.id}`,
+      rodzaj: 'mecz',
+      segment: null,
+      zOdpowiedziaKontrolna: false,
+      // ⛔ Mecz odbył się kiedyś, a wiersz powstał, gdy zawodnik go zapisał.
+      // Nie mamy czym tego rozróżnić, więc nie udajemy, że mamy (Z0).
+      kiedy: dzien === null
+        ? { rodzaj: 'nieznana', powod: 'zapisany mecz bez daty powstania wiersza' }
+        : { rodzaj: 'dzien_zapisu', dzien },
+    });
   }
   return out;
 }
@@ -479,7 +542,6 @@ export function zrodloSesji(args: {
   wpisyDziennika: ReadonlySet<number> | null;
   /** `focus_block_id` → `segment_id`. `null` = nie znam mapy; NIE blokuje. */
   segmentBloku: ReadonlyMap<string, string> | null;
-  zasady?: ZasadyCzytania;
 }): WejscieZrodla {
   if (args.wydarzenia === null) {
     return zrodloNieczytane('nie odczytałem wydarzeń kalendarza');
@@ -540,21 +602,7 @@ export function zrodloSesji(args: {
 
   // ⛔ Duplikaty (werdykt + `completed` na tym samym wystąpieniu) odsiewa
   // `policzNagrode` po kluczu — tutaj nie ma potrzeby ich gonić.
-  return { rodzaj: 'jest', jednostki: jednostkiZSesji(wiersze, args.zasady ?? CZYTAJ_WSZYSTKO) };
-}
-
-/**
- * Przesuwa datę `YYYY-MM-DD` o `oDni`. Skopiowane co do znaku
- * z `lib/wykonanieSesji.ts` — świadomie, bo ten plik NIE MA prawa importować
- * niczego, co ciągnie za sobą pojęcie okna. Jedyny konsument: `wOknie`,
- * czyli gałąź, która w produkcji nigdy się nie wykonuje.
- */
-function przesunDate(data: string, oDni: number): string | null {
-  if (typeof data !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(data)) return null;
-  if (!Number.isFinite(oDni)) return null;
-  const t = Date.parse(`${data.slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(t)) return null;
-  return new Date(t + oDni * 86400000).toISOString().slice(0, 10);
+  return { rodzaj: 'jest', jednostki: jednostkiZSesji(wiersze) };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -645,6 +693,16 @@ export const ZASADY_NAGRODY_PRAWDZIWE: ZasadyNagrody = {
  * dolne ograniczenie jako sumę (Z0).
  * ⛔ To NIE JEST ostrożność kosztem funkcji: stan `nie_policzona` jest
  * ODRÓŻNIALNY od `policzona` z zerem i ekran rysuje dwa różne zdania.
+ *
+ * ⭐⛔ ZAPADKA D2 (PLAN-D-L1, 17.08.2026) — NAJWAŻNIEJSZE ZDANIE TEGO PLIKU.
+ * Ta funkcja NIE PRZYJMUJE ŻADNEGO PARAMETRU OKNA i NIE CZYTA pola `kiedy`
+ * z jednostek. Ani jednego razu, w żadnej gałęzi. Jednostki mają od 17.08 daty
+ * i to jest w porządku — dopóki DOROBEK CAŁKOWITY ich nie widzi. Gdyby zaczął,
+ * licznik zacząłby spadać po tygodniu przerwy, czyli karałby zawodnika za
+ * kontuzję, chorobę i sesję egzaminacyjną — a to jest nagradzanie obecności
+ * (N1), którego produkt sobie zakazuje. Pilnują tego dwie asercje strażnika:
+ * jedna czyta ciało tej funkcji jako tekst, druga URUCHAMIA ten sam zestaw
+ * jednostek w dwóch rozkładach w czasie i żąda tej samej liczby.
  */
 export function policzNagrode(
   we: WejscieNagrody,

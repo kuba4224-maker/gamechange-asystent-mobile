@@ -25,6 +25,18 @@
 //   (C4-5) ekran zaczyna mówić o dniach z rzędu — jednym słowem w jednej
 //          stałej, którego nikt nie zauważy w 153 kB pliku.
 //
+// ── ⭐ PLAN-D-L1 (17.08.2026) — SZEŚĆ GRUP DOŁOŻONYCH ───────────────
+// Od 17.08 `JednostkaPracy` NIESIE DATĘ (decyzja Kuby D1), bo produkt ma umieć
+// powiedzieć, ile pracy mieści się w ostatnich dniach. ⛔ Zakaz z (C4-1) NIE
+// ZNIKNĄŁ — przeniósł się z kształtu danych do funkcji dorobku i jest teraz
+// pilnowany MOCNIEJ, bo także uruchomieniem:
+//   (L1-D2) ⭐ dorobek całkowity nie przyjmuje okna i nie czyta daty jednostki;
+//   (L1-D3/D4) okno naprawdę obcina, a 7 i 28 stoją dokładnie w jednym miejscu;
+//   (L1-D5) moduł obciążenia mówi ILE, nigdy CZY — szukane po treści całego pliku;
+//   (L1-D6) trzy wartości wyniku i trzy różne zdania;
+//   (L1-D8) jednostka bez daty nie jest zerem i nie jest „dzisiaj";
+//   (L1-D7) ⭐ zapadka na moduły `lib/` bez ani jednego konsumenta — RÓWNOŚĆ.
+//
 // ⚠️ CZEGO TEN PLIK NIE UDAJE. Część asercji czyta ŹRÓDŁO EKRANU JAKO TEKST
 // (wzorzec z `kartaDzisILicznik.selftest.ts` i `wgladyNaDzis.selftest.ts`).
 // To nie jest test — to jest strażnik regresji. Nie uruchamia Reacta i nie wie,
@@ -34,7 +46,7 @@
 // więc `tsc` pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
 // ═════════════════════════════════════════════════════════════════════
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,16 +63,24 @@ import {
   PROGI,
   WAGI_PRACY,
   ZASADY_NAGRODY_PRAWDZIWE,
-  CZYTAJ_WSZYSTKO,
   type JednostkaPracy,
   type NagrodaZaPrace,
   type OdznakaId,
   type WejscieNagrody,
   type WejscieZrodla,
   type WierszSesji,
-  type ZasadyCzytania,
   type ZasadyNagrody,
 } from './nagrodaZaPrace';
+import {
+  policzObciazenieWOknie,
+  zdanieObciazenia,
+  opisObciazeniaDoLogu,
+  OKNO_OBCIAZENIA_DNI,
+  OKNO_ODNIESIENIA_DNI,
+  ZASADY_OBCIAZENIA_PRAWDZIWE,
+  type ObciazenieWOknie,
+  type ZasadyObciazenia,
+} from './obciazenieOstatnichDni';
 import { czytajWerdykty } from './wykonanieSesji';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -117,10 +137,13 @@ function argumentyWywolania(src: string, nazwa: string): string[][] {
 
 const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
 const PLIK_LIB = 'lib/nagrodaZaPrace.ts';
+const PLIK_OBCIAZENIE = 'lib/obciazenieOstatnichDni.ts';
 const dzisSurowe = readFileSync(join(root, PLIK_DZIS), 'utf8');
 const dzis = bezKomentarzy(dzisSurowe);
 const libSurowe = readFileSync(join(root, PLIK_LIB), 'utf8');
 const lib = bezKomentarzy(libSurowe);
+const obciazenieSurowe = readFileSync(join(root, PLIK_OBCIAZENIE), 'utf8');
+const obciazenie = bezKomentarzy(obciazenieSurowe);
 
 // ═══════════════════════════════════════════════════════════════════
 // BUDOWNICZOWIE WEJŚĆ — jedno miejsce, żeby asercje mówiły o regule,
@@ -198,16 +221,22 @@ console.log('\nG0. KONTRAKT PLIKU');
     !/Date\.now\(/.test(lib) && !/new Date\(\s*\)/.test(lib),
     'plik sięga po zegar — a wtedy „ile dni temu" znów jest w zasięgu ręki');
 
-  // ⭐ Typ jednostki pracy NIE MA POLA Z DATĄ. To jest ta jedna zmiana, która
-  // pozwoliłaby kolejnej sesji przywrócić okno albo serię.
+  // ⭐ PLAN-D-L1 (D1) — DO 17.08.2026 STAŁA TU ASERCJA ODWROTNA: „typ
+  // `JednostkaPracy` NIE MA pola z datą". ⛔ Nie została skasowana po cichu —
+  // została ODWRÓCONA decyzją Kuby D1 i zastąpiona zapadką D2 niżej, która
+  // pilnuje tego samego zakazu w miejscu, w którym on naprawdę obowiązuje:
+  // w funkcji DOROBKU CAŁKOWITEGO, a nie w kształcie danych.
   const blokTypu = libSurowe.slice(
     libSurowe.indexOf('export type JednostkaPracy = {'),
-    libSurowe.indexOf('export type WejscieZrodla'),
+    libSurowe.indexOf('// ═══', libSurowe.indexOf('export type JednostkaPracy = {')),
   );
-  check('⭐⛔ typ `JednostkaPracy` NIE MA pola z datą',
-    blokTypu.length > 0
-    && !/^\s*(dzien|data|created_at|dzis|kiedy|date)\s*[?:]/m.test(bezKomentarzy(blokTypu)),
-    `blok typu: ${blokTypu.slice(0, 200)}`);
+  check('⭐ (L1-D1) typ `JednostkaPracy` MA pole `kiedy` — bez niego okna nie da się policzyć',
+    blokTypu.length > 0 && /^\s*kiedy\s*:/m.test(bezKomentarzy(blokTypu)),
+    `blok typu: ${bezKomentarzy(blokTypu).slice(0, 220)}`);
+
+  check('⭐ (L1-D1) `DataPracy` ma TRZY wartości, nie dwie — dzień pracy ≠ dzień zapisu ≠ brak daty',
+    /rodzaj: 'dzien_pracy'/.test(lib) && /rodzaj: 'dzien_zapisu'/.test(lib) && /rodzaj: 'nieznana'/.test(lib),
+    'data jednostki zwinęła się do „jest albo nie ma" — a wtedy data zapisu udaje datę pracy (Z0)');
 
   check('⛔ każdy próg ma wartość ≥ 1 — próg zerowy byłby nagrodą za samo pojawienie się',
     PROGI.length > 0 && PROGI.every((p) => Number.isInteger(p.prog) && p.prog >= 1),
@@ -319,7 +348,7 @@ function losowyRozkladDni(ziarno: number, ile: number): number[] {
 }
 
 /** Ten sam KOMPLET pracy, rozłożony w czasie tak, jak każe `dni`. */
-function tenSamKomplet(dni: readonly number[], zasady: ZasadyCzytania = CZYTAJ_WSZYSTKO): NagrodaZaPrace {
+function tenSamKomplet(dni: readonly number[]): NagrodaZaPrace {
   const bazowa = '2026-01-01';
   const s: WierszSesji[] = dni.slice(0, 6).map((d, i) => ({
     idWydarzenia: 1000 + i, dzien: przesun(bazowa, d), segment: 'wytrzymalosc', maWpisWDzienniku: i % 2 === 0,
@@ -335,10 +364,10 @@ function tenSamKomplet(dni: readonly number[], zasady: ZasadyCzytania = CZYTAJ_W
     id: `c${i}`, answered_at: `${przesun(bazowa, d)}T18:00:00Z`, segment: 'wytrzymalosc',
   }));
   return policzNagrode(we({
-    sesje: zrodlo(jednostkiZSesji(s, zasady)),
-    dziennik: zrodlo(jednostkiZDziennika(w, zasady).concat(jednostkiZDziennika(p, zasady))),
-    mecze: zrodlo(jednostkiZMeczow(m, zasady)),
-    odpowiedziKontrolne: zrodlo(jednostkiZOdpowiedziKontrolnych(k, zasady)),
+    sesje: zrodlo(jednostkiZSesji(s)),
+    dziennik: zrodlo(jednostkiZDziennika(w).concat(jednostkiZDziennika(p))),
+    mecze: zrodlo(jednostkiZMeczow(m)),
+    odpowiedziKontrolne: zrodlo(jednostkiZOdpowiedziKontrolnych(k)),
   }));
 }
 
@@ -359,7 +388,7 @@ function odcisk(n: NagrodaZaPrace): string {
  * od „wszystko jednego dnia" po „z przerwami po dwa i pół miesiąca" — i żąda,
  * żeby wynik był IDENTYCZNY co do znaku.
  */
-function rozkladyDajaTenSamWynik(zasady: ZasadyCzytania): { ok: boolean; detal: string } {
+function rozkladyDajaTenSamWynik(): { ok: boolean; detal: string } {
   const rozklady: number[][] = [
     Array.from({ length: 20 }, () => 0),                    // wszystko jednego dnia
     Array.from({ length: 20 }, (_, i) => i),                // dzień po dniu
@@ -369,9 +398,9 @@ function rozkladyDajaTenSamWynik(zasady: ZasadyCzytania): { ok: boolean; detal: 
   ];
   for (let z = 1; z <= 45; z++) rozklady.push(losowyRozkladDni(z * 7919, 20));
 
-  const wzorzec = odcisk(tenSamKomplet(rozklady[0], zasady));
+  const wzorzec = odcisk(tenSamKomplet(rozklady[0]));
   for (let i = 1; i < rozklady.length; i++) {
-    const teraz = odcisk(tenSamKomplet(rozklady[i], zasady));
+    const teraz = odcisk(tenSamKomplet(rozklady[i]));
     if (teraz !== wzorzec) {
       return { ok: false, detal: `rozkład #${i} (dni ${rozklady[i].slice(0, 6).join(',')}…) dał „${teraz}", a rozkład #0 „${wzorzec}"` };
     }
@@ -380,7 +409,7 @@ function rozkladyDajaTenSamWynik(zasady: ZasadyCzytania): { ok: boolean; detal: 
 }
 
 {
-  const wynik = rozkladyDajaTenSamWynik(CZYTAJ_WSZYSTKO);
+  const wynik = rozkladyDajaTenSamWynik();
   check('⭐⭐ 50 ROZKŁADÓW TEJ SAMEJ PRACY W CZASIE — WYNIK IDENTYCZNY CO DO ZNAKU',
     wynik.ok, wynik.detal);
 
@@ -707,6 +736,323 @@ console.log('\nG6. EKRAN — app/(tabs)/dzis.tsx');
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// L1. ⭐ PLAN-D-L1 17.08.2026 — OBCIĄŻENIE OSTATNICH DNI I PORZĄDEK W SILNIKU
+// ═══════════════════════════════════════════════════════════════════
+//
+// Sześć grup, każda z własną decyzją Kuby:
+//   (L1-D2) ⭐ NAJWAŻNIEJSZA — dorobek całkowity NADAL nie ma okna;
+//   (L1-D3/D4) okno naprawdę obcina, a obie liczby stoją w jednym miejscu;
+//   (L1-D5) moduł obciążenia mówi ILE, nigdy CZY;
+//   (L1-D6) trzy wartości i trzy różne zdania;
+//   (L1-D8) jednostka bez daty nie jest zerem i nie jest „dzisiaj";
+//   (L1-D7) ⭐ zapadka na moduły `lib/` bez ani jednego konsumenta.
+
+const DZIS_L1 = '2026-08-17';
+
+/** Osiem wpisów objętości (waga 1): cztery W OKNIE 7 dni, cztery sprzed miesięcy. */
+const WEJSCIE_POLOWA_STARSZA: WejscieNagrody = we({
+  dziennik: zrodlo(jednostkiZDziennika([
+    ...[0, 1, 2, 3].map((i) => ({
+      id: 9100 + i, entry_type: 'morning', created_at: `${przesun('2026-08-11', i)}T07:00:00Z`,
+      payload: { sleep_hours: 7 },
+    })),
+    ...[0, 1, 2, 3].map((i) => ({
+      id: 9200 + i, entry_type: 'morning', created_at: `${przesun('2026-06-01', i)}T07:00:00Z`,
+      payload: { sleep_hours: 7 },
+    })),
+  ])),
+});
+const PUNKTY_POLOWY = 4;
+const PUNKTY_CALOSCI = 8;
+
+/** Dwie jednostki, których nie da się umieścić w czasie — źródło nie ma daty. */
+const WEJSCIE_BEZ_DATY: WejscieNagrody = we({
+  dziennik: zrodlo(jednostkiZDziennika([
+    { id: 9300, entry_type: 'morning', created_at: null, payload: { sleep_hours: 7 } },
+    { id: 9301, entry_type: 'morning', created_at: 'nie data', payload: { sleep_hours: 7 } },
+  ])),
+});
+
+/** Praca jest, ale cała starsza niż okno. ⛔ To NIE JEST awaria odczytu. */
+const WEJSCIE_TYLKO_STARE: WejscieNagrody = we({
+  dziennik: zrodlo(jednostkiZDziennika(wpisy(4, '2026-06-01'))),
+});
+
+console.log('\nL1-D2. ⭐⭐ ZAPADKA: DOROBEK CAŁKOWITY NADAL NIE MA OKNA');
+{
+  // ── (a) DOWÓD Z TEKSTU ŹRÓDŁA ──────────────────────────────────────
+  const cialoDorobku = (() => {
+    const od = lib.indexOf('export function policzNagrode(');
+    if (od < 0) return null;
+    const koniec = lib.indexOf('\nexport function', od + 10);
+    return lib.slice(od, koniec > od ? koniec : lib.length);
+  })();
+
+  check('⭐⛔ (L1-D2) `policzNagrode` NIE CZYTA pola `kiedy` ani żadnej daty jednostki',
+    cialoDorobku !== null
+    && !/\.kiedy\b/.test(cialoDorobku)
+    && !/\bkiedy\b/.test(cialoDorobku)
+    && !/\.dzien\b/.test(cialoDorobku),
+    cialoDorobku === null
+      ? 'nie znalazłem ciała `policzNagrode`'
+      : 'dorobek całkowity sięgnął po datę — od tej chwili może maleć');
+
+  check('⭐⛔ (L1-D2) `policzNagrode` NIE PRZYJMUJE żadnego parametru okna',
+    cialoDorobku !== null
+    && !/okno/i.test(cialoDorobku.slice(0, cialoDorobku.indexOf('{'))),
+    'w podpisie dorobku pojawiło się okno');
+
+  check('⭐⛔ (L1-D2) `nagrodaZaPrace.ts` nie zna nazw okien z modułu obciążenia',
+    !/OKNO_OBCIAZENIA_DNI|OKNO_ODNIESIENIA_DNI/.test(lib)
+    && !/from ['"]\.\/obciazenieOstatnichDni['"]/.test(lib),
+    'plik dorobku zaczął importować okno — czyli okno jest o jeden import od dorobku');
+
+  // ── (b) ⭐ DOWÓD Z URUCHOMIENIA — ten sam zestaw, dwa rozkłady w czasie ──
+  // ⛔ To jest ta asercja, której nie da się oszukać czytaniem kodu.
+  const wJednymDniu = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const poRoku = Array.from({ length: 20 }, (_, i) => i * 18);
+  check('⭐⭐⛔ (L1-D2) TEN SAM ZESTAW skupiony w JEDNYM DNIU i rozrzucony PO ROKU — TA SAMA liczba dorobku',
+    odcisk(tenSamKomplet(wJednymDniu)) === odcisk(tenSamKomplet(poRoku)),
+    `jeden dzień: ${odcisk(tenSamKomplet(wJednymDniu))} · rok: ${odcisk(tenSamKomplet(poRoku))}`);
+
+  // …i ta sama praca policzona przez OKNO daje przy tych dwóch rozkładach
+  // liczby RÓŻNE. Bez tego zdania asercja wyżej mogłaby być zielona dlatego,
+  // że okno w ogóle nie działa.
+  const komplet = (dni: readonly number[]): WejscieNagrody => we({
+    dziennik: zrodlo(jednostkiZDziennika(dni.map((d, i) => ({
+      id: 9400 + i, entry_type: 'morning', created_at: `${przesun('2026-08-17', -d)}T07:00:00Z`,
+      payload: { sleep_hours: 7 },
+    })))),
+  });
+  const oknoSkupione = policzObciazenieWOknie(komplet(wJednymDniu), { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
+  const oknoRozrzucone = policzObciazenieWOknie(komplet(poRoku), { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
+  check('⭐ (L1-D2) …a OBCIĄŻENIE przy tych samych dwóch rozkładach daje liczby RÓŻNE',
+    oknoSkupione.rodzaj === 'policzone' && oknoRozrzucone.rodzaj === 'policzone'
+    && oknoSkupione.punkty !== oknoRozrzucone.punkty,
+    `${opisObciazeniaDoLogu(oknoSkupione)} vs ${opisObciazeniaDoLogu(oknoRozrzucone)}`);
+}
+
+console.log('\nL1-D3/D4. OKNO OBCINA, A OBIE LICZBY STOJĄ W JEDNYM MIEJSCU');
+{
+  const w7 = policzObciazenieWOknie(WEJSCIE_POLOWA_STARSZA, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
+  const dorobek = policzNagrode(WEJSCIE_POLOWA_STARSZA);
+  check(`⭐ (L1-D3) połowa pracy starsza niż tydzień → obciążenie oddaje POŁOWĘ (${PUNKTY_POLOWY} z ${PUNKTY_CALOSCI})`,
+    w7.rodzaj === 'policzone' && w7.punkty === PUNKTY_POLOWY,
+    opisObciazeniaDoLogu(w7));
+  check(`⭐ (L1-D3) …a DOROBEK przy tym samym wejściu oddaje CAŁOŚĆ (${PUNKTY_CALOSCI})`,
+    punkty(dorobek) === PUNKTY_CALOSCI, `dorobek=${punkty(dorobek)}`);
+
+  check('⭐ (L1-D3) to są DWIE osobne funkcje w DWÓCH plikach, nie jedna z przełącznikiem',
+    /export function policzObciazenieWOknie\(/.test(obciazenie)
+    && /export function policzNagrode\(/.test(lib)
+    && !/export function policzObciazenieWOknie\(/.test(lib),
+    'obie liczby wyszły z jednej funkcji — czyli przełącznik trybu istnieje');
+
+  // ⛔ (D4) OBIE LICZBY STOJĄ RAZ. Nie „w trzech asercjach".
+  const ile = (s: string, re: RegExp) => (s.match(re) ?? []).length;
+  check('⭐⛔ (L1-D4) liczba 7 stoi w module obciążenia DOKŁADNIE RAZ — przy nazwanej stałej',
+    ile(obciazenie, /\b7\b/g) === 1 && /OKNO_OBCIAZENIA_DNI = 7;/.test(obciazenie),
+    `wystąpień „7": ${ile(obciazenie, /\b7\b/g)}`);
+  check('⭐⛔ (L1-D4) liczba 28 stoi w module obciążenia DOKŁADNIE RAZ — przy nazwanej stałej',
+    ile(obciazenie, /\b28\b/g) === 1 && /OKNO_ODNIESIENIA_DNI = 28;/.test(obciazenie),
+    `wystąpień „28": ${ile(obciazenie, /\b28\b/g)}`);
+  check('⭐ (L1-D4) obie stałe mają przy sobie zdanie, SKĄD SIĘ WZIĘŁY',
+    /Skąd 7:/.test(obciazenieSurowe) && /Skąd 28:/.test(obciazenieSurowe)
+    && /NIE MA ZA SOBĄ BADANIA/.test(obciazenieSurowe),
+    'liczba bez uzasadnienia wraca za miesiąc jako „tak było"');
+  check('⭐ (L1-D4) obie stałe są DODATNIMI liczbami całkowitymi i 28 > 7',
+    Number.isInteger(OKNO_OBCIAZENIA_DNI) && OKNO_OBCIAZENIA_DNI >= 1
+    && Number.isInteger(OKNO_ODNIESIENIA_DNI) && OKNO_ODNIESIENIA_DNI > OKNO_OBCIAZENIA_DNI,
+    `${OKNO_OBCIAZENIA_DNI} / ${OKNO_ODNIESIENIA_DNI}`);
+
+  // ⛔ Sam ten strażnik też nie wpisuje długości okna liczbą. ⚠️ Wzorzec celuje
+  // w `[1-9]`, a nie w dowolną cyfrę, i to nie jest niedopatrzenie: `oknoDni: 0`
+  // stoi niżej JAKO PRÓBKA WEJŚCIA NIEPOPRAWNEGO. Zero nie jest długością okna,
+  // więc nie da się nim przepisać stałej w drugie miejsce.
+  const jaSam = readFileSync(join(root, 'lib/nagrodaZaPrace.selftest.ts'), 'utf8');
+  check('⭐⛔ (L1-D4) ANI JEDNO wywołanie w tym strażniku nie podaje długości okna liczbą',
+    !/oknoDni:\s*[1-9]/.test(jaSam),
+    'długość okna wpisana drugi raz — czyli zmiana stałej nie zmieni już wszystkiego');
+
+  // Okno 28 dni obejmuje wszystko, co obejmuje okno 7 dni. Nigdy odwrotnie.
+  const w28 = policzObciazenieWOknie(WEJSCIE_POLOWA_STARSZA, { dzis: DZIS_L1, oknoDni: OKNO_ODNIESIENIA_DNI });
+  check('⭐ (L1-D4) okno szersze nigdy nie oddaje MNIEJ niż węższe',
+    w28.rodzaj === 'policzone' && w7.rodzaj === 'policzone' && w28.punkty >= w7.punkty,
+    `${opisObciazeniaDoLogu(w7)} · ${opisObciazeniaDoLogu(w28)}`);
+}
+
+console.log('\nL1-D5. MODUŁ OBCIĄŻENIA MÓWI ILE, NIGDY CZY');
+{
+  // ⛔ SZUKANE PO TREŚCI, W CAŁYM PLIKU — RAZEM Z KOMENTARZAMI. To jest
+  // mocniejsze niż wzorzec z G6 (tam czytamy ekran bez komentarzy, bo ekran
+  // cytuje zakazy w dokumentacji). Moduł obciążenia jest pisany tak, żeby
+  // NIE CYTOWAĆ zakazanych brzmień — powody stoją w `nagrodaZaPrace.ts`
+  // i w nocie. Cena jest świadoma, zysk też: nie da się przemycić słowa
+  // do brzmienia, chowając je w komentarzu.
+  const zakazaneL1: readonly (readonly [string, RegExp])[] = [
+    ['seria dni', /\bseri(a|i|e|ę|ą|ach|om|ami)\b/i],
+    ['passa', /\bpass(a|y|ie|ę|ą)\b/i],
+    ['z rzędu', /z\s+rzędu/i],
+    ['streak', /\bstreak/i],
+    ['codziennie', /\bcodzienn/i],
+    ['porównanie', /\bporówn/i],
+    ['ranking', /\branking/i],
+    ['na tle', /na\s+tle\b/i],
+    ['lepszy', /\blepsz/i],
+    ['gorszy', /\bgorsz/i],
+    ['inni zawodnicy', /innych\s+zawodnik/i],
+    ['ocena', /\bocen/i],
+    ['dobrze', /\bdobrze\b/i],
+    ['słabo', /\bsłab/i],
+    ['za mało', /za\s+mało/i],
+    ['za dużo', /za\s+dużo/i],
+    ['wystarczająco', /wystarczająco/i],
+    ['powinieneś', /\bpowin(ien|na|no|ieneś)/i],
+  ];
+  const trafienia = zakazaneL1
+    .map(([slowo, wzorzec]) => [slowo, obciazenieSurowe.split('\n').filter((l) => wzorzec.test(l))] as const)
+    .filter(([, l]) => l.length > 0);
+  check(`⭐⛔ (L1-D5) w module obciążenia NIE MA ani jednego z ${zakazaneL1.length} zakazanych brzmień — szukane po TREŚCI`,
+    trafienia.length === 0,
+    trafienia.map(([s, l]) => `„${s}": ${l[0].trim().slice(0, 120)}`).join(' | '));
+
+  // ⭐ Strażnik strażnika: lista naprawdę łapie, a nie jest ozdobą.
+  const probka = 'const x = "seria dni z rzędu";';
+  check('⭐ (L1-D5) (strażnik strażnika) ta sama lista ZAPALA się na próbce z zakazanym brzmieniem',
+    zakazaneL1.some(([, wzorzec]) => wzorzec.test(probka)),
+    'lista zakazanych brzmień nie łapie nawet jawnej próbki');
+
+  // Zdania oddawane przez moduł też są czyste — sprawdzone na wyniku, nie na źródle.
+  const trzyZdania = [
+    zdanieObciazenia(policzObciazenieWOknie(WEJSCIE_POLOWA_STARSZA, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI })),
+    zdanieObciazenia(policzObciazenieWOknie(WEJSCIE_TYLKO_STARE, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI })),
+    zdanieObciazenia(policzObciazenieWOknie(we({ mecze: { rodzaj: 'nie_odczytano', powod: 'sieć' } }), { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI })),
+  ];
+  check('⭐⛔ (L1-D5) ŻADNE z trzech zdań oddawanych zawodnikowi nie zawiera zakazanego brzmienia',
+    trzyZdania.every((z) => zakazaneL1.every(([, wzorzec]) => !wzorzec.test(z))),
+    trzyZdania.join(' || '));
+  for (const z of trzyZdania) console.log(`       (brzmienie: ${z})`);
+}
+
+console.log('\nL1-D6/D8. TRZY WARTOŚCI, TRZY ZDANIA — I BRAK DATY, KTÓRY NIE JEST ZEREM');
+{
+  const pusto = policzObciazenieWOknie(WEJSCIE_TYLKO_STARE, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
+  const awaria = policzObciazenieWOknie(
+    we({ dziennik: { rodzaj: 'nie_odczytano', powod: 'sieć padła' } }),
+    { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI },
+  );
+  const jest = policzObciazenieWOknie(WEJSCIE_POLOWA_STARSZA, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
+
+  check('⭐ (L1-D6) TRZY różne wartości: policzone · brak pracy w oknie · nie policzone',
+    jest.rodzaj === 'policzone' && pusto.rodzaj === 'brak_pracy_w_oknie' && awaria.rodzaj === 'nie_policzone',
+    `${jest.rodzaj} / ${pusto.rodzaj} / ${awaria.rodzaj}`);
+
+  const zdania = [zdanieObciazenia(jest), zdanieObciazenia(pusto), zdanieObciazenia(awaria)];
+  check('⭐ (L1-D6) …i TRZY różne zdania — żadne dwa nie są tym samym napisem',
+    new Set(zdania).size === 3, zdania.join(' || '));
+
+  check('⭐⛔ (L1-D6) kształt „brak pracy w oknie" NIE MA pola `punkty` — „0 punktów" jest nie do narysowania',
+    pusto.rodzaj === 'brak_pracy_w_oknie' && !('punkty' in pusto),
+    'da się narysować zero tam, gdzie zero i awaria wyglądają tak samo');
+
+  check('⭐ (L1-D6) „nie policzone" mówi, CZEGO nie przeczytało',
+    awaria.rodzaj === 'nie_policzone' && awaria.nieodczytane.length === 1
+    && awaria.nieodczytane[0].includes('sieć padła'),
+    JSON.stringify(awaria.rodzaj === 'nie_policzone' ? awaria.nieodczytane : []));
+
+  // ── (D8) jednostka bez daty ────────────────────────────────────────
+  const bezDaty = policzObciazenieWOknie(WEJSCIE_BEZ_DATY, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
+  check('⭐⛔ (L1-D8) jednostka BEZ DATY nie wpada do okna — data nie jest zgadywana',
+    bezDaty.rodzaj === 'brak_pracy_w_oknie',
+    opisObciazeniaDoLogu(bezDaty));
+  check('⭐ (L1-D8) …i NIE ZNIKA po cichu: jest policzona i nazwana z rodzaju',
+    bezDaty.rodzaj === 'brak_pracy_w_oknie' && bezDaty.pozaPomiarem.length === 2
+    && bezDaty.pozaPomiarem.every((p) => p.rodzaj === 'wpis_dziennika' && p.powod.length > 5),
+    JSON.stringify(bezDaty.rodzaj === 'nie_policzone' ? [] : bezDaty.pozaPomiarem));
+  check('⭐⛔ (L1-D8) …a DOROBEK liczy ją normalnie — brak daty nie odbiera wykonanej pracy',
+    punkty(policzNagrode(WEJSCIE_BEZ_DATY)) === 2,
+    `dorobek=${punkty(policzNagrode(WEJSCIE_BEZ_DATY))}`);
+
+  // ── (D8) dzień pracy ≠ dzień zapisu, i wynik to rozróżnia ──────────
+  const mieszane = policzObciazenieWOknie(we({
+    dziennik: zrodlo(jednostkiZDziennika([
+      { id: 9500, entry_type: 'morning', created_at: '2026-08-15T07:00:00Z', payload: { sleep_hours: 7 } },
+      { id: 9501, entry_type: 'post_training', created_at: '2026-08-15T19:00:00Z', payload: { rpe: 6 } },
+    ])),
+    mecze: zrodlo(jednostkiZMeczow([{ id: 9600, created_at: '2026-08-16T20:00:00Z' }])),
+  }), { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
+  check('⭐ (L1-D8) wynik ROZRÓŻNIA pracę zadatowaną dniem pracy od zadatowanej dniem zapisu',
+    mieszane.rodzaj === 'policzone' && mieszane.zDniaPracy === 1 && mieszane.zDniaZapisu === 2,
+    opisObciazeniaDoLogu(mieszane));
+
+  // ⛔ Niepoprawne wejścia nie udają pomiaru.
+  const zlaData = policzObciazenieWOknie(WEJSCIE_POLOWA_STARSZA, { dzis: 'kiedyś', oknoDni: OKNO_OBCIAZENIA_DNI });
+  check('⛔ (L1-D6) bez dzisiejszej daty funkcja ODMAWIA, zamiast oddać zero',
+    zlaData.rodzaj === 'nie_policzone', `dostałem ${zlaData.rodzaj}`);
+  const zleOkno = policzObciazenieWOknie(WEJSCIE_POLOWA_STARSZA, { dzis: DZIS_L1, oknoDni: 0 });
+  check('⛔ (L1-D6) okno o długości 0 dni to nie jest okno — funkcja ODMAWIA',
+    zleOkno.rodzaj === 'nie_policzone', `dostałem ${zleOkno.rodzaj}`);
+}
+
+console.log('\nL1-D7. ⭐ ZAPADKA: MODUŁY `lib/` BEZ ANI JEDNEGO KONSUMENTA');
+{
+  // ⛔ RÓWNOŚĆ, NIE „≤" (O73). Lista nazw w komunikacie, żeby dało się to
+  // odhaczyć bez uruchamiania czegokolwiek.
+  //
+  // ⚠️ DEFINICJA KONSUMENTA, napisana wprost: importer W CAŁYM REPOZYTORIUM
+  // (poza `_diag_backup/`) INNY NIŻ własny selftest modułu. Moduł, którego
+  // jedynym importerem jest jego własny strażnik, jest martwy: strażnik
+  // pilnuje wtedy sam siebie. Zmierzone 17.08.2026 przed pasem L1: DWA takie
+  // moduły — `lib/arbiterGlosu.ts` i `lib/sladZachowania.ts`. Pas L1 usunął
+  // oba, więc po nim ma być ZERO.
+  const KATALOGI = ['lib', 'app', 'app/(tabs)', 'components', 'tests'];
+  const pliki: { rel: string; tresc: string }[] = [];
+  for (const k of KATALOGI) {
+    const kat = join(root, k);
+    if (!existsSync(kat)) continue;
+    for (const f of readdirSync(kat)) {
+      if (!/\.(ts|tsx|mjs)$/.test(f)) continue;
+      pliki.push({ rel: `${k}/${f}`, tresc: readFileSync(join(kat, f), 'utf8') });
+    }
+  }
+  const moduly = readdirSync(join(root, 'lib'))
+    .filter((f) => /\.tsx?$/.test(f) && !f.endsWith('.selftest.ts'))
+    .map((f) => f.replace(/\.tsx?$/, ''));
+
+  const bezKonsumenta: string[] = [];
+  for (const m of moduly) {
+    const igla = new RegExp(`from\\s+['"][^'"]*\\b${m}['"]|require\\(['"][^'"]*\\b${m}['"]\\)|import\\(['"][^'"]*\\b${m}['"]\\)`);
+    const importerzy = pliki
+      .filter((p) => p.rel !== `lib/${m}.ts` && p.rel !== `lib/${m}.tsx` && p.rel !== `lib/${m}.selftest.ts`)
+      .filter((p) => igla.test(p.tresc))
+      .map((p) => p.rel);
+    if (importerzy.length === 0) bezKonsumenta.push(`lib/${m}.ts`);
+  }
+
+  check(`⭐⛔ (L1-D7) modułów w \`lib/\` bez ani jednego konsumenta: ${bezKonsumenta.length} — ma być 0`,
+    bezKonsumenta.length === 0,
+    bezKonsumenta.length === 0
+      ? ''
+      : `BEZ KONSUMENTA (podepnij albo skasuj razem z selftestem): ${bezKonsumenta.join(' | ')}`);
+
+  // ⭐ Strażnik strażnika — bez tego „zero" mogłoby znaczyć „detektor nie widzi".
+  const iglaAtrapy = /from\s+['"][^'"]*\batrapaL1['"]/;
+  check('⭐ (L1-D7) (strażnik strażnika) detektor importu ZNAJDUJE import, gdy ten istnieje…',
+    iglaAtrapy.test("import { x } from '../lib/atrapaL1';"),
+    'wzorzec importu nie łapie nawet jawnego importu — „zero" byłoby wtedy bez treści');
+  check('⭐ (L1-D7) (strażnik strażnika) …i MILCZY, gdy importu nie ma',
+    !iglaAtrapy.test("const atrapaL1 = 1;"),
+    'wzorzec importu łapie samą nazwę bez importu');
+
+  // ⛔ USUNIĘTE MODUŁY NAPRAWDĘ ZNIKNĘŁY — razem z selftestami.
+  for (const nazwa of ['arbiterGlosu', 'sladZachowania']) {
+    check(`⭐ (L1-D7) \`lib/${nazwa}.ts\` i jego selftest NIE ISTNIEJĄ`,
+      !existsSync(join(root, 'lib', `${nazwa}.ts`)) && !existsSync(join(root, 'lib', `${nazwa}.selftest.ts`)),
+      `plik wrócił — strażnik pilnujący nieistniejącego modułu to kolejny martwy kod`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // G7. ⭐ BATERIA MUTACYJNA — pięć mutacji, każda zapala, każda cofnięta
 // ═══════════════════════════════════════════════════════════════════
 console.log('\nG7. ⭐ BATERIA MUTACYJNA');
@@ -715,15 +1061,15 @@ type Wynik = { label: string; ok: boolean; detal: string };
 
 /**
  * Bateria puszczana raz na PRAWDZIWYCH zasadach i raz na każdej mutacji.
- * ⛔ Punkt wpięcia (`ZasadyNagrody`, `ZasadyCzytania`) NIE JEST podawany przez
+ * ⛔ Punkt wpięcia (`ZasadyNagrody`, `ZasadyObciazenia`) NIE JEST podawany przez
  * ekran — pilnuje tego asercja z G6 — więc mutacja nie ma drogi do zawodnika.
  */
-function bateria(zasady: ZasadyNagrody, czytanie: ZasadyCzytania): Wynik[] {
+function bateria(zasady: ZasadyNagrody, obc: ZasadyObciazenia): Wynik[] {
   const w: Wynik[] = [];
   const push = (label: string, ok: boolean, detal: string) => w.push({ label, ok, detal });
 
   // 1. przerwa nie zmienia dorobku (⭐ dowód zakazu serii)
-  const rozklady = rozkladyDajaTenSamWynikZ(zasady, czytanie);
+  const rozklady = rozkladyDajaTenSamWynikZ(zasady);
   push('rozkład pracy w czasie nie zmienia dorobku', rozklady.ok, rozklady.detal);
 
   // 2. nieodczytane źródło nie daje liczby
@@ -744,7 +1090,7 @@ function bateria(zasady: ZasadyNagrody, czytanie: ZasadyCzytania): Wynik[] {
 
   // 5. niepełne cele nie dają odznaki celu
   const niepelne = policzNagrode(we({
-    sesje: zrodlo(jednostkiZSesji(sesje(20, 'wytrzymalosc'), czytanie)),
+    sesje: zrodlo(jednostkiZSesji(sesje(20, 'wytrzymalosc'))),
     segmentyCelow: { rodzaj: 'niepelne', powod: 'filtr status=active' },
   }), zasady);
   push('niepełne cele → brak odznaki celu i jawny powód',
@@ -757,27 +1103,45 @@ function bateria(zasady: ZasadyNagrody, czytanie: ZasadyCzytania): Wynik[] {
   const duze = punkty(policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisy(9))) }), zasady));
   push('więcej pracy → nie mniej punktów', duze >= male, `4 wpisy=${male}, 9 wpisów=${duze}`);
 
+  // ── ⭐ PLAN-D-L1 — TRZY POZYCJE O OKNIE ────────────────────────────
+  // 7. (D3/D4) okno naprawdę OBCINA: połowa pracy starsza niż tydzień odpada
+  const polowa = policzObciazenieWOknie(WEJSCIE_POLOWA_STARSZA, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI }, obc);
+  push('okno 7 dni oddaje POŁOWĘ, gdy połowa pracy jest starsza niż tydzień',
+    polowa.rodzaj === 'policzone' && polowa.punkty === PUNKTY_POLOWY,
+    `dostałem ${polowa.rodzaj === 'policzone' ? polowa.punkty : polowa.rodzaj}, spodziewam się ${PUNKTY_POLOWY}`);
+
+  // 8. (D8) jednostka BEZ DATY nie wchodzi do okna i jest nazwana
+  const bezDaty = policzObciazenieWOknie(WEJSCIE_BEZ_DATY, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI }, obc);
+  push('jednostka bez daty NIE wchodzi do okna i trafia do `pozaPomiarem`',
+    bezDaty.rodzaj === 'brak_pracy_w_oknie' && bezDaty.pozaPomiarem.length === 2,
+    `rodzaj=${bezDaty.rodzaj} · pozaPomiarem=${bezDaty.rodzaj === 'nie_policzone' ? '—' : bezDaty.pozaPomiarem.length}`);
+
+  // 9. (D6) pustka w oknie ma WŁASNY stan, nie stan awarii
+  const pustka = policzObciazenieWOknie(WEJSCIE_TYLKO_STARE, { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI }, obc);
+  push('brak pracy w oknie → `brak_pracy_w_oknie`, a nie `nie_policzone`',
+    pustka.rodzaj === 'brak_pracy_w_oknie', `dostałem ${pustka.rodzaj}`);
+
   return w;
 }
 
 /** Wariant `rozkladyDajaTenSamWynik` przyjmujący też `ZasadyNagrody`. */
-function rozkladyDajaTenSamWynikZ(zasady: ZasadyNagrody, czytanie: ZasadyCzytania): { ok: boolean; detal: string } {
+function rozkladyDajaTenSamWynikZ(zasady: ZasadyNagrody): { ok: boolean; detal: string } {
   const bazowa = '2026-01-01';
   const zbuduj = (dni: readonly number[]) => policzNagrode(we({
     sesje: zrodlo(jednostkiZSesji(dni.slice(0, 6).map((d, i) => ({
       idWydarzenia: 1000 + i, dzien: przesun(bazowa, d), segment: 'wytrzymalosc', maWpisWDzienniku: i % 2 === 0,
-    })), czytanie)),
+    })))),
     dziennik: zrodlo(jednostkiZDziennika(dni.slice(6, 12).map((d, i) => ({
       id: 2000 + i, entry_type: 'morning', created_at: `${przesun(bazowa, d)}T07:00:00Z`, payload: { sleep_hours: 7 },
-    })), czytanie).concat(jednostkiZDziennika(dni.slice(12, 16).map((d, i) => ({
+    }))).concat(jednostkiZDziennika(dni.slice(12, 16).map((d, i) => ({
       id: 3000 + i, entry_type: 'post_training', created_at: `${przesun(bazowa, d)}T19:00:00Z`, payload: { rpe: 6 },
-    })), czytanie))),
+    }))))),
     mecze: zrodlo(jednostkiZMeczow(dni.slice(16, 18).map((d, i) => ({
       id: 4000 + i, created_at: `${przesun(bazowa, d)}T20:00:00Z`,
-    })), czytanie)),
+    })))),
     odpowiedziKontrolne: zrodlo(jednostkiZOdpowiedziKontrolnych(dni.slice(18, 20).map((d, i) => ({
       id: `c${i}`, answered_at: `${przesun(bazowa, d)}T18:00:00Z`, segment: 'wytrzymalosc',
-    })), czytanie)),
+    })))),
   }), zasady);
 
   const rozklady: number[][] = [
@@ -800,54 +1164,64 @@ function rozkladyDajaTenSamWynikZ(zasady: ZasadyNagrody, czytanie: ZasadyCzytani
 }
 
 {
-  const prawdziwe = bateria(ZASADY_NAGRODY_PRAWDZIWE, CZYTAJ_WSZYSTKO);
+  const prawdziwe = bateria(ZASADY_NAGRODY_PRAWDZIWE, ZASADY_OBCIAZENIA_PRAWDZIWE);
   const zieloneNaPrawdziwych = prawdziwe.filter((x) => !x.ok);
   check(`⭐ na PRAWDZIWYCH zasadach bateria jest zielona (${prawdziwe.length} asercji)`,
     zieloneNaPrawdziwych.length === 0,
     zieloneNaPrawdziwych.map((x) => `${x.label}: ${x.detal}`).join(' | '));
 
-  const mutacje: { nazwa: string; zasady: ZasadyNagrody; czytanie: ZasadyCzytania }[] = [
+  const mutacje: { nazwa: string; zasady: ZasadyNagrody; obc: ZasadyObciazenia }[] = [
     {
-      nazwa: 'M1 · ⭐ WRACA OKNO 14 DNI (czytnik odrzuca starszą pracę)',
-      zasady: ZASADY_NAGRODY_PRAWDZIWE,
-      czytanie: { oknoDni: 14, dzis: '2026-01-20' },
-    },
-    {
-      nazwa: 'M2 · nieodczytane źródło liczone jak puste',
+      nazwa: 'M1 · nieodczytane źródło liczone jak puste',
       zasady: { ...ZASADY_NAGRODY_PRAWDZIWE, brakWolnoUznacZaZero: true },
-      czytanie: CZYTAJ_WSZYSTKO,
+      obc: ZASADY_OBCIAZENIA_PRAWDZIWE,
     },
     {
-      nazwa: 'M3 · odznaka bez pokrycia w pracy',
+      nazwa: 'M2 · odznaka bez pokrycia w pracy',
       zasady: { ...ZASADY_NAGRODY_PRAWDZIWE, progWolnoDacBezPracy: true },
-      czytanie: CZYTAJ_WSZYSTKO,
+      obc: ZASADY_OBCIAZENIA_PRAWDZIWE,
     },
     {
-      nazwa: 'M4 · duplikaty liczone wielokrotnie',
+      nazwa: 'M3 · duplikaty liczone wielokrotnie',
       zasady: { ...ZASADY_NAGRODY_PRAWDZIWE, odsiewajDuplikaty: false },
-      czytanie: CZYTAJ_WSZYSTKO,
+      obc: ZASADY_OBCIAZENIA_PRAWDZIWE,
     },
     {
-      nazwa: 'M5 · niepełny zbiór celów liczony jak pełny',
+      nazwa: 'M4 · niepełny zbiór celów liczony jak pełny',
       zasady: { ...ZASADY_NAGRODY_PRAWDZIWE, niepelneCeleLiczaSieJakPelne: true },
-      czytanie: CZYTAJ_WSZYSTKO,
+      obc: ZASADY_OBCIAZENIA_PRAWDZIWE,
+    },
+    {
+      nazwa: 'M5 · ⭐ (L1) OKNO PRZESTAJE OBOWIĄZYWAĆ — obciążenie liczy całą historię',
+      zasady: ZASADY_NAGRODY_PRAWDZIWE,
+      obc: { ...ZASADY_OBCIAZENIA_PRAWDZIWE, oknoObowiazuje: false },
+    },
+    {
+      nazwa: 'M6 · ⭐ (L1) jednostka BEZ DATY wpada do okna — data zgadnięta po cichu',
+      zasady: ZASADY_NAGRODY_PRAWDZIWE,
+      obc: { ...ZASADY_OBCIAZENIA_PRAWDZIWE, bezDatyWchodziDoOkna: true },
+    },
+    {
+      nazwa: 'M7 · ⭐ (L1) pustka w oknie zlewa się z nieudanym odczytem',
+      zasady: ZASADY_NAGRODY_PRAWDZIWE,
+      obc: { ...ZASADY_OBCIAZENIA_PRAWDZIWE, pustkaZlewaSieZAwaria: true },
     },
   ];
 
   let wszystkieZapalily = true;
   for (const m of mutacje) {
-    const wynik = bateria(m.zasady, m.czytanie);
+    const wynik = bateria(m.zasady, m.obc);
     const fail = wynik.filter((x) => !x.ok);
     if (fail.length === 0) wszystkieZapalily = false;
     console.log(`\n${m.nazwa}   →   ${fail.length} / ${wynik.length} FAIL`);
     for (const f of fail) console.log(`      ↳ ${f.label}: ${f.detal.slice(0, 190)}`);
   }
   console.log('');
-  check('⭐ KAŻDA z pięciu mutacji zapala co najmniej jedną asercję',
+  check(`⭐ KAŻDA z ${mutacje.length} mutacji zapala co najmniej jedną asercję`,
     wszystkieZapalily, 'któraś mutacja przeszła niezauważona');
 
   // Cofnięcie każdej mutacji: bateria znów zielona.
-  const poCofnieciu = bateria(ZASADY_NAGRODY_PRAWDZIWE, CZYTAJ_WSZYSTKO).filter((x) => !x.ok);
+  const poCofnieciu = bateria(ZASADY_NAGRODY_PRAWDZIWE, ZASADY_OBCIAZENIA_PRAWDZIWE).filter((x) => !x.ok);
   check('⭐ po cofnięciu wszystkich mutacji bateria jest znowu zielona',
     poCofnieciu.length === 0, poCofnieciu.map((x) => x.label).join(' | '));
 }

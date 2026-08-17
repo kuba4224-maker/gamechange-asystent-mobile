@@ -177,10 +177,13 @@ function check(label: string, cond: boolean, detail: string) {
 // (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md), więc `readFileSync`
 // rzuciłby wyjątkiem i wywrócił CAŁY ten strażnik — łącznie z asercjami (N1),
 // które mają zostać nietknięte.
-// ⚠️ SAM `lib/sladZachowania.ts` ZOSTAJE i jego selftest nadal przechodzi.
-// Znikła karta, nie licznik. W dniu, w którym ślad zachowania dostanie nowego
-// konsumenta (runda systematyczności, zasada N1), ta sekcja wraca — z nową
-// ścieżką i tym samym pytaniem: czy zawodnik na pewno zdąży to zobaczyć.
+// ⚠️ AKTUALIZACJA 17.08.2026 (PLAN-D-L1): `lib/sladZachowania.ts` JUŻ NIE
+// ISTNIEJE. Do 17.08 stało tu zdanie „sam plik ZOSTAJE i jego selftest nadal
+// przechodzi" — pas L1 usunął plik razem z selftestem po dowodzie zera
+// importerów w całym repozytorium poza własnym selftestem. Znikła najpierw
+// karta (13.08), potem licznik (17.08). ⛔ Nagrobek — co ten moduł liczył,
+// co zostało w bazie i co trzeba zrobić, żeby wrócił — stoi w nocie
+// `claude/PRZEKAZANIE_PAS_L1_17_08_2026.md`, nie w kodzie.
 
 // ═══════════════════════════════════════════════════════════════════
 // 4. STRAŻNIK STRAŻNIKA
@@ -252,7 +255,12 @@ function check(label: string, cond: boolean, detail: string) {
   // ⭐ LICZBA ZMIERZONA 17.08.2026, PO NAPRAWIE DWÓCH PLIKÓW (pas Q1).
   // Przed naprawą było 37: te 35 plus `lib/ostatniCentymetr.selftest.ts`
   // i `lib/pustkaWCalymRepo.selftest.ts`.
-  const PLIKOW_Z_WZORCEM_17_08_2026 = 35;
+  // ⭐ AKTUALIZACJA 17.08.2026, PAS L1: 35 → 33. Liczba SPADŁA O DWA i to jest
+  // dobra wiadomość — pas L1 usunął `lib/arbiterGlosu.selftest.ts`
+  // i `lib/sladZachowania.selftest.ts` razem z ich modułami (D7, dowód zera
+  // konsumentów). ⛔ Nie naprawiono tam niczego: pliki po prostu przestały
+  // istnieć. Nagrobek jest w `claude/PRZEKAZANIE_PAS_L1_17_08_2026.md`.
+  const PLIKOW_Z_WZORCEM_17_08_2026 = 33;
   check(`⭐ D6 ZAPADKA NA RÓWNOŚĆ — plików z wzorcem „blok przed linią" jest DOKŁADNIE ${PLIKOW_Z_WZORCEM_17_08_2026}`,
     zWzorcem.length === PLIKOW_Z_WZORCEM_17_08_2026,
     `${zWzorcem.length}: ${zWzorcem.join(', ')} — ⛔ jeżeli liczba WZROSŁA, ktoś dopisał `
