@@ -942,7 +942,7 @@ console.log('\n11. ⭐ PLAN-D-K1 — JEDEN FAKT MA W PRODUKCIE JEDNĄ NAZWĘ');
   // a nie do rozstrzygnięcia wystąpienia. Moduł NIE ROZGAŁĘZIA SIĘ po wartości
   // `StanWykonania` — potwierdza to asercja D7 niżej, która przeszła. Liczba
   // podniesiona świadomie, z nazwą pliku i z powodem (O73).
-  const KONSUMENTOW_16_08_2026 = 12;
+  const KONSUMENTOW_16_08_2026 = 13;
   check(`⭐ O73 — konsumentów \`StanWykonania\` jest DOKŁADNIE ${KONSUMENTOW_16_08_2026} (zapadka na RÓWNOŚĆ, nie na „≥1")`,
     konsumenci.length === KONSUMENTOW_16_08_2026,
     `${konsumenci.length}: ${konsumenci.join(', ')}`);

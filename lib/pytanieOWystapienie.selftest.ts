@@ -617,6 +617,637 @@ check('⛔ PRODUKCYJNY WOŁAJĄCY NIE PODAJE ZASAD — mutacja nie ma drogi na e
   && !/zbudujPytaniaOWystapienia\([^)]*ZasadyPytan/.test(ekran),
   'ekran podaje drugi argument — mutacja może wejść do produktu');
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-O1 17.08.2026 — GRUPY 9–11: OCENA NA KAFLU W DNIU
+// ═══════════════════════════════════════════════════════════════════
+//
+// ⚠️ DLACZEGO TUTAJ, A NIE W NOWYM PLIKU. Polecenie O1 §3 zabrania nowego
+// strażnika wprost, ale powód jest starszy niż polecenie: `lib/ocenaZKafla.ts`
+// jest DRUGĄ POŁOWĄ tej samej rozmowy z zawodnikiem. Pytanie „zrobiłeś?" i to,
+// co zawodnik dokłada do odpowiedzi, rozjeżdżają się dokładnie wtedy, gdy
+// pilnują ich dwa osobne pliki: jeden zmienia okno, drugi zostaje z krokami,
+// które nie mają już czego dotyczyć. ⭐ Kiedy pęknie ocena z kafla, na czerwono
+// ma się zapalić plik o nazwie `pytanieOWystapienie` — bo to jest to samo
+// pytanie, tylko dłuższe.
+//
+//   (9)  ⭐ REGUŁA — kroki, powód, rodzaj pozycji, źródła wartości, jednostki.
+//   (10) ⭐ EKRAN — RPE bez podpowiedzi (D3) i wszystko, co z tego wynika.
+//   (11) ⭐ OSIEM MUTACJI z asercją odwrotną i `md5` przed i po.
+//
+// ⛔ ASERCJE D3 SĄ PO TREŚCI, NIE PO NAZWIE STAŁEJ (O88). Stała nazwana
+// `RPE_BEZ_PODPOWIEDZI` mogłaby nieść piątkę i strażnik nazwany po niej
+// świeciłby na zielono — dlatego pytamy o WARTOŚĆ, którą oddaje funkcja,
+// i o TEKST fragmentu ekranu, który rysuje przyciski.
+
+import {
+  krokiOceny,
+  rpePoczatkowe,
+  podpowiedzCzasu,
+  rozstrzygnijPowod,
+  rozpoznajRodzajPozycji,
+  sciezkaUsuniecia,
+  czyOceniamy,
+  wierszWerdyktu,
+  wierszWpisuPoTreningu,
+  wierszBolu,
+  zbudujPayloadIZrodla,
+  wartosciBezZrodla,
+  jednostkiZOceny,
+  stanNalezyDoOceny,
+  rodzajSesjiDoWpisu,
+  STAN_SPOZA_OCENY,
+  ZASADY_PRAWDZIWE_OCENY,
+  POWODY_NIEOBECNOSCI,
+  RPE_WARTOSCI,
+  MINUTY_DO_WYBORU,
+  MAKS_MINUT,
+  MAKS_RPE,
+  type ZasadyOceny,
+  type FaktyPozycji,
+  type WagaPowodu,
+} from './ocenaZKafla';
+import { createHash } from 'node:crypto';
+
+const PLIK_REGULY_O1 = join(root, 'lib', 'ocenaZKafla.ts');
+const surowaRegulaO1 = existsSync(PLIK_REGULY_O1) ? readFileSync(PLIK_REGULY_O1, 'utf8') : null;
+
+function md5(t: string): string {
+  return createHash('md5').update(t, 'utf8').digest('hex');
+}
+
+// ⭐ `md5` PRZED BATERIĄ MUTACJI. Mutacje żyją wyłącznie w pamięci; ten odcisk
+// i jego bliźniak na końcu grupy 11 są na to DOWODEM, a nie zapewnieniem.
+const MD5_REGULY_PRZED = md5(surowaRegulaO1 ?? '');
+const MD5_EKRANU_PRZED = md5(ekranSurowy);
+
+console.log('\n═══ GRUPA 9 — REGUŁA OCENY `lib/ocenaZKafla.ts` ═══');
+
+check('(9) ⭐ `lib/ocenaZKafla.ts` ISTNIEJE — bez niego reszta tej grupy milczałaby '
+  + 'przez brak pliku, a nie przez czystość',
+  surowaRegulaO1 !== null, 'pliku reguły oceny nie ma na dysku');
+
+const regulaO1 = zywy(surowaRegulaO1 ?? '');
+
+check('(9) ⛔ reguła NIE CZYTA ZEGARA ani bazy — inaczej nie da się jej sprawdzić bez sieci',
+  regulaO1 !== '' && !/new Date\(\)|Date\.now\(|supabase/.test(regulaO1),
+  'w regule oceny stoi zegar albo klient bazy');
+
+// ── ⭐ D2 — CZTERY KROKI, Z KTÓRYCH PIERWSZY SAM WYSTARCZA ─────────
+{
+  const bezOdpowiedzi = krokiOceny(null);
+  const poTak = krokiOceny('odbylo_sie');
+  const poNie = krokiOceny('nie_odbylo_sie');
+  const widoczne = (k: readonly { id: string; widoczny: boolean }[]) =>
+    k.filter((x) => x.widoczny).map((x) => x.id).sort().join(',');
+
+  check('(9) ⭐ D2 — PRZED ODPOWIEDZIĄ WIDAĆ WYŁĄCZNIE KROK 1',
+    widoczne(bezOdpowiedzi) === 'odbylo_sie', widoczne(bezOdpowiedzi));
+
+  // ⚠️ KROK 1 ZOSTAJE WIDOCZNY PO ODPOWIEDZI I TO JEST DECYZJA, NIE NIEDOPATRZENIE:
+  // zawodnik, który dotknął nie tego przycisku, ma go poprawić w tym samym
+  // miejscu, a nie szukać drugiego ekranu (P0, wzorzec stanu `odpowiedziane`).
+  check('(9) ⭐ D2 — po „zrobione" dochodzą czas z RPE i ból, ⛔ NIE powód',
+    widoczne(poTak) === 'bol,czas_i_rpe,odbylo_sie', widoczne(poTak));
+
+  check('(9) ⭐ D2 — po „nie odbyło się" dochodzą powód i ból, ⛔ NIE RPE '
+    + '(pytanie o ciężkość sesji, której nie było, nie ma treści)',
+    widoczne(poNie) === 'bol,odbylo_sie,powod', widoczne(poNie));
+
+  const dalsze = [...poTak, ...poNie].filter((k) => k.id !== 'odbylo_sie');
+  check('(9) ⭐ D2 — ⛔ ANI JEDEN krok poza pierwszym nie jest obowiązkowy '
+    + 'i ⛔ ANI JEDEN nie jest rozwinięty (zapadka na RÓWNOŚĆ, O73)',
+    dalsze.length > 0 && dalsze.every((k) => k.obowiazkowy === false && k.zwiniety === true),
+    `${dalsze.filter((k) => k.obowiazkowy || !k.zwiniety).map((k) => k.id).join(', ') || 'brak'}`);
+
+  check('(9) ⭐ D2 — KROK 1 JEST OBOWIĄZKOWY i ROZWINIĘTY w każdym stanie',
+    [bezOdpowiedzi, poTak, poNie].every((k) => {
+      const p = k.find((x) => x.id === 'odbylo_sie');
+      return p !== undefined && p.obowiazkowy && !p.zwiniety && p.widoczny;
+    }), 'pierwszy krok przestał być jedyną rzeczą, która wystarcza');
+}
+
+// ── ⭐ ASERCJA URUCHOMIENIOWA D2 — SAMO „ODBYŁO SIĘ" DAJE POPRAWNY WIERSZ ──
+{
+  const wiersz = wierszWerdyktu({
+    idZawodnika: '0be298a2-5e66-4ee2-8b57-15e6b6765c83',
+    idWydarzenia: 33,
+    dzien: '2026-08-17',
+    werdykt: 'odbylo_sie',
+    powod: null,
+  });
+  check('(9) ⭐⭐ D2 URUCHOMIENIOWO — SAMA ODPOWIEDŹ „odbyło się", BEZ RPE '
+    + 'i BEZ CZASU, produkuje POPRAWNY wiersz werdyktu',
+    wiersz.verdict === 'odbylo_sie'
+    && wiersz.origin === 'player'
+    && wiersz.withdrawn_at === null
+    && wiersz.absence_reason === null
+    && wiersz.calendar_event_id === 33
+    && wiersz.occurred_on === '2026-08-17',
+    JSON.stringify(wiersz));
+
+  check('(9) ⛔ wiersz werdyktu NIE NIESIE ŚLADU ZMIANY — stawia go wyzwalacz, '
+    + 'a polityka RLS `session_verdicts_insert_own` wprost tego zabrania (D9)',
+    !('previous_verdict' in wiersz) && !('changed_at' in wiersz),
+    Object.keys(wiersz).join(', '));
+
+  // ⛔ CHECK `session_verdicts_powod_tylko_przy_nieodbyciu` — PRZENIESIONY
+  // PRZED WYSYŁKĘ. Bez tego zmiana zdania z „nie odbyło się" na „zrobione"
+  // wracałaby kodem `23514`, czyli błędem przy ruchu, do którego zawodnik
+  // ma pełne prawo (D9).
+  const zPowodemPrzyTak = wierszWerdyktu({
+    idZawodnika: 'x', idWydarzenia: 1, dzien: '2026-08-17', werdykt: 'odbylo_sie', powod: 'kontuzja',
+  });
+  check('(9) ⭐ D9 — POWÓD ZNIKA przy zmianie zdania na „zrobione" '
+    + '(inaczej `upsert` zostawiłby go i baza odrzuciłaby poprawny ruch)',
+    zPowodemPrzyTak.absence_reason === null, String(zPowodemPrzyTak.absence_reason));
+
+  const zPowodemPrzyNie = wierszWerdyktu({
+    idZawodnika: 'x', idWydarzenia: 1, dzien: '2026-08-17', werdykt: 'nie_odbylo_sie', powod: 'kontuzja',
+  });
+  check('(9) ⭐ …a przy „nie odbyło się" powód ZOSTAJE',
+    zPowodemPrzyNie.absence_reason === 'kontuzja', String(zPowodemPrzyNie.absence_reason));
+}
+
+// ── ⭐ D3 — RPE BEZ PODPOWIEDZI, CZAS Z PODPOWIEDZIĄ ────────────────
+{
+  check('(9) ⭐⭐ D3 — `rpePoczatkowe()` ODDAJE `null`. ⛔ Sprawdzone po WARTOŚCI, '
+    + 'nie po nazwie stałej (O88)',
+    rpePoczatkowe() === null, String(rpePoczatkowe()));
+
+  check('(9) ⭐ D3 — ⛔ w całym module NIE MA funkcji, która mogłaby RPE podpowiedzieć',
+    regulaO1 !== '' && !/podpowiedzRpe|domyslneRpe|rpeDomyslne|sugerowaneRpe/i.test(regulaO1),
+    'w module reguły powstała droga podpowiadania RPE');
+
+  check('(9) ⭐ D3 — ⛔ moduł nie zna suwaka',
+    regulaO1 !== '' && !/[Ss]lider|uchwyt/.test(regulaO1),
+    'w module reguły pojawił się suwak');
+
+  check(`(9) ⭐ D3 — RPE ma ${RPE_WARTOSCI.length} wartości i ANI JEDNA nie jest wyróżniona`,
+    RPE_WARTOSCI.length === 10 && RPE_WARTOSCI[0] === 1 && RPE_WARTOSCI[9] === MAKS_RPE,
+    RPE_WARTOSCI.join(','));
+
+  // ⭐ ASERCJA ODWROTNA — bez niej „nic nie jest podpowiadane" dałoby się
+  // spełnić, wyłączając podpowiadanie WSZĘDZIE, i strażnik by tego nie zauważył.
+  const zPlanu = podpowiedzCzasu(45);
+  check('(9) ⭐⭐ D3 ODWROTNIE — CZAS TRWANIA PODPOWIEDŹ MA: plan 45 min '
+    + 'daje podpowiedź ze źródłem `plan`',
+    zPlanu.jest === true && zPlanu.minuty === 45 && zPlanu.zrodlo === 'plan',
+    JSON.stringify(zPlanu));
+
+  check('(9) ⛔ …a plan, który nic nie mówi, NIE dostaje wypełniacza — dostaje powód',
+    podpowiedzCzasu(null).jest === false
+    && podpowiedzCzasu(null).jest === false
+    && !podpowiedzCzasu(null).jest,
+    JSON.stringify(podpowiedzCzasu(null)));
+
+  check('(9) ⛔ podpowiedź spoza zakresu bazy NIE WCHODZI '
+    + `(\`chk_daily_logs_payload_ranges\`: duration_minutes ≤ ${MAKS_MINUT})`,
+    podpowiedzCzasu(MAKS_MINUT + 1).jest === false && podpowiedzCzasu(0).jest === false,
+    `${MAKS_MINUT + 1} → ${JSON.stringify(podpowiedzCzasu(MAKS_MINUT + 1))}`);
+
+  check('(9) ⭐ długości do wyboru mieszczą się w granicy bazy — zapadka na RÓWNOŚĆ z CHECK-iem',
+    MINUTY_DO_WYBORU.every((m) => m > 0 && m <= MAKS_MINUT),
+    MINUTY_DO_WYBORU.join(','));
+}
+
+// ── ⭐ D4 — KAŻDA WARTOŚĆ MA WPIS O ŹRÓDLE. ZAPADKA NA RÓWNOŚĆ ──────
+{
+  const p = zbudujPayloadIZrodla([
+    { klucz: 'duration_minutes', liczba: 90, zrodlo: 'plan' },
+    { klucz: 'rpe', liczba: 7, zrodlo: 'zawodnik' },
+    { klucz: 'post_fatigue', liczba: 4, zrodlo: 'zawodnik' },
+  ]);
+  const ileWartosci = Object.keys(p.payload).length;
+  const ileZrodel = Object.keys(p.data_sources).length;
+
+  check('(9) ⭐⭐ D4 ZAPADKA NA RÓWNOŚĆ — liczba wartości RÓWNA SIĘ liczbie wpisów '
+    + 'o źródle (O73: „≥" przepuściłoby dokładnie ten defekt, przed którym stoi)',
+    ileWartosci === 3 && ileZrodel === 3 && ileWartosci === ileZrodel,
+    `wartości ${ileWartosci}, źródeł ${ileZrodel}`);
+
+  check('(9) ⭐ D4 — ⛔ ZERO wartości bez wpisu o źródle',
+    wartosciBezZrodla(p).length === 0, wartosciBezZrodla(p).join(', '));
+
+  check('(9) ⭐ D4 — źródło jest FAKTEM O TEJ WARTOŚCI: czas z planu ma `plan`, '
+    + 'RPE ma `zawodnik` i nie ma jak dostać niczego innego',
+    p.data_sources.duration_minutes === 'plan' && p.data_sources.rpe === 'zawodnik',
+    JSON.stringify(p.data_sources));
+
+  const pozaZakresem = zbudujPayloadIZrodla([
+    { klucz: 'rpe', liczba: MAKS_RPE + 1, zrodlo: 'zawodnik' },
+    { klucz: 'duration_minutes', liczba: MAKS_MINUT + 1, zrodlo: 'zawodnik' },
+    { klucz: 'wymyslona', liczba: 1, zrodlo: 'zawodnik' },
+  ]);
+  check('(9) ⛔ wartość spoza CHECK-a bazy NIE WCHODZI ANI DO JEDNEJ MAPY — '
+    + 'wiersz odrzucony przez `23514` zabrałby ze sobą także te poprawne',
+    Object.keys(pozaZakresem.payload).length === 0
+    && Object.keys(pozaZakresem.data_sources).length === 0,
+    JSON.stringify(pozaZakresem));
+}
+
+// ── ⭐ D5 — WPIS WSKAZUJE WYDARZENIE ───────────────────────────────
+{
+  const wpis = wierszWpisuPoTreningu({
+    idZawodnika: 'x', idWydarzenia: 16, eventType: 'micro_session',
+    wartosci: [{ klucz: 'rpe', liczba: 6, zrodlo: 'zawodnik' }],
+  });
+  check('(9) ⭐⭐ D5 — WPIS PO TRENINGU WSKAZUJE WYDARZENIE '
+    + '(17.08.2026 takich wpisów było 0 z 10)',
+    wpis.calendar_event_id === 16, String(wpis.calendar_event_id));
+
+  check('(9) ⭐ D5 — wpis spełnia `chk_session_type_matches_entry`: '
+    + '`post_training` MA `session_type`',
+    wpis.entry_type === 'post_training' && typeof wpis.session_type === 'string' && wpis.session_type !== '',
+    `${wpis.entry_type} / ${wpis.session_type}`);
+
+  const DOPUSZCZALNE_SESJE = ['club_training', 'own_training', 'micro_session', 'match', 'other'];
+  const rodzajeWydarzen = ['club_training', 'own_training', 'micro_session', 'task', 'match', 'cos_nowego', null];
+  const wyniki = rodzajeWydarzen.map((r) => rodzajSesjiDoWpisu(r));
+  check('(9) ⛔ KAŻDY rodzaj wydarzenia — także NIEZNANY — mapuje się na wartość, '
+    + 'którą `daily_logs_session_type_check` przyjmie',
+    wyniki.every((w) => DOPUSZCZALNE_SESJE.includes(w)),
+    wyniki.join(', '));
+
+  check('(9) ⛔ rodzaj NIEZNANY idzie do `other`, a nie surową wartością do bazy (R5)',
+    rodzajSesjiDoWpisu('cos_nowego') === 'other' && rodzajSesjiDoWpisu(null) === 'other',
+    `${rodzajSesjiDoWpisu('cos_nowego')} / ${rodzajSesjiDoWpisu(null)}`);
+
+  const bol = wierszBolu({
+    idZawodnika: 'x', idWpisu: 7, miejsce: 'lydka', strona: null, natezenie: 6, wykluczaZTreningu: false,
+  });
+  check('(9) ⭐ ból WISI NA WPISIE — `pain_entries_owner` wymaga `daily_log_id`',
+    bol !== null && bol.daily_log_id === 7 && bol.intensity === 6, JSON.stringify(bol));
+
+  check('(9) ⛔ ból bez miejsca NIE POWSTAJE — `body_location` jest NOT NULL',
+    wierszBolu({ idZawodnika: 'x', idWpisu: 7, miejsce: '  ', strona: null, natezenie: 6, wykluczaZTreningu: false }) === null,
+    'pusty `body_location` przeszedł dalej');
+}
+
+// ── ⭐ D6 — TRZY RODZAJE POZYCJI I ŚCIEŻKA USUNIĘCIA ───────────────
+{
+  const f = (o: Partial<FaktyPozycji>): FaktyPozycji => ({
+    idWydarzenia: o.idWydarzenia === undefined ? 1 : o.idWydarzenia,
+    eventType: o.eventType === undefined ? 'micro_session' : o.eventType,
+    source: o.source === undefined ? 'system' : o.source,
+    maSesjeTrenera: o.maSesjeTrenera === true,
+  });
+
+  const TABELA: readonly [string, FaktyPozycji, string][] = [
+    ['sesja Bloku (system)', f({ eventType: 'micro_session' }), 'wlasna_praca'],
+    ['własny trening', f({ eventType: 'own_training', source: 'player' }), 'wlasna_praca'],
+    ['zadanie zawodnika', f({ eventType: 'task', source: 'player' }), 'wlasna_praca'],
+    ['trening klubowy', f({ eventType: 'club_training', source: 'player' }), 'zobowiazanie'],
+    ['mecz', f({ eventType: 'match', source: 'player' }), 'zobowiazanie'],
+    ['cokolwiek od trenera', f({ eventType: 'micro_session', maSesjeTrenera: true }), 'zobowiazanie'],
+    ['cokolwiek ze źródła coach', f({ eventType: 'own_training', source: 'coach' }), 'zobowiazanie'],
+    ['ankieta / wgląd (brak wiersza)', f({ idWydarzenia: null }), 'rzecz_produktu'],
+  ];
+  const bledy = TABELA.filter(([, fakty, oczekiwany]) => {
+    const r = rozpoznajRodzajPozycji(fakty);
+    return !r.znany || r.rodzaj !== oczekiwany;
+  }).map(([n]) => n);
+  check(`(9) ⭐ D6 — ${TABELA.length} pozycji rozpoznanych Z DANYCH, ZERO z tytułu`,
+    bledy.length === 0, `źle: ${bledy.join(', ')}`);
+
+  // ⛔ O84 — TO JEST ASERCJA, DLA KTÓREJ POWSTAŁA CAŁA GAŁĄŹ „NIE WIEM".
+  const nowyRodzaj = rozpoznajRodzajPozycji(f({ eventType: 'zupelnie_nowy_rodzaj' }));
+  check('(9) ⭐⭐ D6 / O84 — RODZAJ, KTÓREGO APPKA NIE ZNA, daje JAWNE „nie wiem", '
+    + '⛔ a nie ciche wpadnięcie do „własnej pracy" (bo tamto pozwala usuwać)',
+    nowyRodzaj.znany === false, JSON.stringify(nowyRodzaj));
+
+  const usuwalne = TABELA
+    .filter(([, fakty]) => sciezkaUsuniecia(rozpoznajRodzajPozycji(fakty)).jest)
+    .map(([n]) => n).sort();
+  check('(9) ⭐⭐ D6 — ⛔ ZOBOWIĄZANIA NIE MAJĄ ŚCIEŻKI USUNIĘCIA, własna praca MA '
+    + '(zapadka na RÓWNOŚĆ listy, nie na jej długość)',
+    usuwalne.join(' | ') === 'sesja Bloku (system) | własny trening | zadanie zawodnika',
+    `usuwalne: ${usuwalne.join(' | ')}`);
+
+  check('(9) ⛔ pozycja o NIEZNANYM rodzaju zachowuje się jak zobowiązanie — '
+    + 'z dwóch możliwych pomyłek ta druga jest nieodwracalna',
+    sciezkaUsuniecia(nowyRodzaj).jest === false, 'nieznany rodzaj dostał prawo usunięcia');
+
+  check('(9) ⛔ RZECZY PRODUKTU SIĘ NIE OCENIA, a nieznanej pozycji też nie',
+    czyOceniamy(rozpoznajRodzajPozycji(f({ idWydarzenia: null }))) === false
+    && czyOceniamy(nowyRodzaj) === false
+    && czyOceniamy(rozpoznajRodzajPozycji(f({ eventType: 'club_training' }))) === true,
+    'ocena trafiła na rzecz, o której nie ma czego orzekać');
+}
+
+// ── ⭐ D7 — POWÓD MA TRZY WARTOŚCI, NIE DWIE ───────────────────────
+{
+  const wagi = new Set<WagaPowodu>();
+  const TABELA_POWODOW: readonly [string | null, WagaPowodu][] = [
+    ['kontuzja', 'nie_liczy_sie'],
+    ['choroba', 'nie_liczy_sie'],
+    ['szkola', 'nie_liczy_sie'],
+    ['rodzina', 'nie_liczy_sie'],
+    ['inny', 'liczy_sie'],
+    [null, 'nie_wiemy'],
+    ['', 'nie_wiemy'],
+    ['cos_spoza_checka', 'nie_wiemy'],
+  ];
+  const zle = TABELA_POWODOW.filter(([w, oczekiwana]) => {
+    const r = rozstrzygnijPowod(w);
+    wagi.add(r.waga);
+    return r.waga !== oczekiwana;
+  }).map(([w]) => String(w));
+
+  check(`(9) ⭐ D7 — ${TABELA_POWODOW.length} wejść rozstrzygniętych zgodnie z decyzją Kuby`,
+    zle.length === 0, `źle: ${zle.join(', ')}`);
+
+  check('(9) ⭐⭐ D7 — funkcja oddaje TRZY WARTOŚCI, nie dwie (zapadka na RÓWNOŚĆ, O73)',
+    wagi.size === 3, `oddała ${wagi.size}: ${[...wagi].sort().join(', ')}`);
+
+  check('(9) ⭐⭐ D7 — ⛔ BRAK POWODU DAJE „NIE WIEMY", a NIE „liczy się" (R5). '
+    + 'Milczenie zawodnika nie jest oświadczeniem o niczym',
+    rozstrzygnijPowod(null).waga === 'nie_wiemy'
+    && rozstrzygnijPowod(null).waga !== 'liczy_sie',
+    rozstrzygnijPowod(null).waga);
+
+  check('(9) ⛔ …i ma POWÓD także wtedy, gdy nie wie (inaczej za miesiąc nikt nie odtworzy czemu)',
+    rozstrzygnijPowod(null).powod !== '' && rozstrzygnijPowod('cos_spoza_checka').powod.includes('cos_spoza_checka'),
+    JSON.stringify(rozstrzygnijPowod(null)));
+
+  check('(9) ⭐ pięć powodów co do znaku jak `session_verdicts_absence_reason_enum` '
+    + '(⛔ `szkola` BEZ polskich znaków — skrót przy przepisywaniu nie rzuca błędem, '
+    + 'tylko po cichu rozjeżdża dopasowanie)',
+    POWODY_NIEOBECNOSCI.join(',') === 'kontuzja,choroba,szkola,rodzina,inny',
+    POWODY_NIEOBECNOSCI.join(','));
+
+  // ⛔ ZAKRES — TEN PAS NIE BUDUJE ZDANIA O WYSTARCZALNOŚCI (§5 polecenia).
+  check('(9) ⛔ moduł NIE ZAWIERA zdania o wystarczalności wobec celu — to osobny pas',
+    regulaO1 !== '' && !/wystarczaj|za mało|niewystarczaj|prog[uiy]Celu/i.test(regulaO1),
+    'w module oceny pojawiło się zdanie o tym, czy zawodnik robi dość');
+}
+
+// ── ⭐ D8 — NIC NIE ODEJMUJE DOROBKU ───────────────────────────────
+{
+  const wszystkie = [
+    jednostkiZOceny('odbylo_sie'),
+    jednostkiZOceny('nie_odbylo_sie'),
+    jednostkiZOceny(null),
+  ];
+  check('(9) ⭐⭐ D8 — ⛔ ŻADNA jednostka pracy z tej ścieżki NIE JEST UJEMNA. '
+    + 'Nieobecność daje ZERO, nie minus',
+    wszystkie.every((j) => j.jednostki >= 0),
+    wszystkie.map((j) => j.jednostki).join(', '));
+
+  check('(9) ⭐ D8 — nieobecność daje DOKŁADNIE zero (równość, nie „≥ 0")',
+    jednostkiZOceny('nie_odbylo_sie').jednostki === 0
+    && jednostkiZOceny('odbylo_sie').jednostki === 1,
+    `${jednostkiZOceny('nie_odbylo_sie').jednostki} / ${jednostkiZOceny('odbylo_sie').jednostki}`);
+
+  check('(9) ⛔ w module nie ma ANI JEDNEGO odejmowania od dorobku',
+    regulaO1 !== '' && !/jednostki\s*-=|punkty\s*-=|-\s*jednostk/i.test(regulaO1),
+    'w module pojawiło się odejmowanie pracy');
+
+  // ⭐ D7 PASA K1 — PIĄTA WARTOŚĆ STANU JEST WYMIENIONA Z NAZWY I SPRAWDZONA
+  // URUCHOMIENIOWO, a nie przemilczana. Konsument, który o niej nie mówi,
+  // jest konsumentem, który jej nie rozważył — a to wychodzi po tygodniach.
+  check('(9) ⭐ D7 (K1) — moduł WPROST nazywa piątą wartość stanu i odsyła ją poza ocenę',
+    stanNalezyDoOceny(STAN_SPOZA_OCENY) === false
+    && stanNalezyDoOceny('odbylo_sie') === true
+    && stanNalezyDoOceny('nie_odbylo_sie') === true
+    && stanNalezyDoOceny('brak_wpisu') === false
+    && stanNalezyDoOceny('nie_odczytano') === false,
+    `odwolane → ${stanNalezyDoOceny(STAN_SPOZA_OCENY)}`);
+
+  check('(9) ⭐ jednostki liczy `Record`, a nie `if/else` — trzecia wartość werdyktu '
+    + 'wywali `tsc` w tej samej sekundzie, zamiast zostać przemilczana',
+    regulaO1 !== '' && /Record<WartoscWerdyktu, JednostkiZOceny>/.test(regulaO1),
+    'jednostki wróciły do rozgałęzienia, które umie przemilczeć wartość');
+}
+
+console.log('\n═══ GRUPA 10 — EKRAN: OCENA NA KAFLU ═══');
+
+const cialoKrokow = cialo(ekran, 'function renderKrokiOceny');
+const cialoSzczegolow = cialo(ekran, 'async function zapiszSzczegolyOceny');
+const cialoUsuniecia = cialo(ekran, 'async function zdejmijZPlanu');
+
+check('(10) ekran ma render kroków oceny, zapis szczegółów i ścieżkę zdjęcia z planu',
+  cialoKrokow !== '' && cialoSzczegolow !== '' && cialoUsuniecia !== '',
+  `kroki=${cialoKrokow.length}B, szczegóły=${cialoSzczegolow.length}B, usunięcie=${cialoUsuniecia.length}B`);
+
+check('(10) ⭐ kroki są WOŁANE w JSX, a nie tylko zdefiniowane — inaczej strażnik '
+  + 'świeciłby na zielono przy rzeczy, której zawodnik nigdy nie zobaczy',
+  /\{renderKrokiOceny\(p\)\}/.test(ekran), 'render kroków zdefiniowany i nieużyty');
+
+// ── ⭐⭐ D3 NA EKRANIE — PO TREŚCI, NIE PO NAZWIE (O88) ────────────
+check('(10) ⭐⭐ D3 — RPE STARTUJE Z `rpePoczatkowe()`, a NIE z liczby',
+  /useState<WartoscRpe \| null>\(rpePoczatkowe\(\)\)/.test(ekran)
+  && !/setRpeWybrane\(\s*\d/.test(ekran),
+  'RPE dostało wartość początkową w ekranie');
+
+check('(10) ⭐⭐ D3 — ⛔ W CAŁEJ ŚCIEŻCE RPE NIE MA ANI JEDNEJ WARTOŚCI DOMYŚLNEJ, '
+  + 'POCZĄTKOWEJ ANI PODPOWIEDZIANEJ (sprawdzone po treści fragmentu)',
+  cialoKrokow !== ''
+  && !/rpeWybrane\s*\?\?\s*\d/.test(cialoKrokow)
+  && !/rpeWybrane\s*\|\|\s*\d/.test(cialoKrokow)
+  && !/defaultValue|initialValue|domysln/i.test(cialoKrokow),
+  'w ścieżce RPE stoi wartość podstawiana za zawodnika');
+
+check('(10) ⭐⭐ D3 — ⛔ ZERO SUWAKÓW W CAŁYM EKRANIE. Suwak ma uchwyt, uchwyt '
+  + 'gdzieś stoi, a to „gdzieś" jest podpowiedzią, choćby nikt jej tak nie nazwał',
+  !/Slider|slider/.test(ekran), 'na ekranie „Dziś" pojawił się suwak');
+
+check('(10) ⭐ D3 — RPE rysuje się PRZYCISKAMI z `RPE_WARTOSCI`, a zaznaczenie '
+  + 'bierze się WYŁĄCZNIE z tego, co zawodnik dotknął',
+  /RPE_WARTOSCI\.map\(/.test(cialoKrokow)
+  && /rpeWybrane === r && styles\.pytanieBtnWybrany/.test(cialoKrokow),
+  'zaznaczenie RPE nie pochodzi z dotknięcia zawodnika');
+
+check('(10) ⭐⭐ D3 ODWROTNIE — CZAS TRWANIA MA NA EKRANIE DROGĘ PODPOWIEDZI '
+  + '(`podpowiedzCzasu`), a RPE nie ma jej ani jednej',
+  /podpowiedzCzasu\(/.test(cialoKrokow)
+  && /podpowiedz\.jest && podpowiedz\.minuty === m/.test(cialoKrokow),
+  'czas trwania stracił podpowiedź — wtedy „nic nie podpowiadamy" spełnia się przez wyłączenie wszystkiego');
+
+// ── ⭐ D4 i D5 NA EKRANIE ──────────────────────────────────────────
+check('(10) ⭐ D4 — ekran NIE BUDUJE `data_sources` SAM: obie mapy powstają '
+  + 'w `wierszWpisuPoTreningu`, z jednej listy',
+  /wierszWpisuPoTreningu\(\{/.test(cialoSzczegolow)
+  && !/data_sources:\s*\{/.test(cialoSzczegolow),
+  'ekran zbudował własną mapę źródeł obok reguły');
+
+check('(10) ⭐ D4 — KAŻDA wartość wchodzi do wpisu ZE ŹRÓDŁEM: czas ma `plan` '
+  + 'albo `zawodnik`, RPE ⛔ WYŁĄCZNIE `zawodnik`',
+  /zrodlo: czasZPlanu \? 'plan' : 'zawodnik'/.test(cialoSzczegolow)
+  && /klucz: 'rpe', liczba: rpeWybrane, zrodlo: 'zawodnik'/.test(cialoSzczegolow),
+  'wartość idzie do bazy bez zapisania, skąd pochodzi');
+
+check('(10) ⭐ D5 — ekran podaje regule `idWydarzenia`, a nie zostawia wpisu bez wskazania',
+  /idWydarzenia: p\.idWydarzenia/.test(cialoSzczegolow),
+  'wpis po treningu nie wskazuje wydarzenia');
+
+check('(10) ⭐ zapytanie o wydarzenia CZYTA `coach_session_id` — bez tego rodzaj '
+  + 'pozycji liczyłby się z nazwy, a nie z danych (D6, O84)',
+  /coach_session_id/.test(ekran), 'ekran nie czyta kolumny, na której stoi D6');
+
+// ── ⭐⭐ D10 — TYLE ODCZYTÓW `error`, ILE WYWOŁAŃ BAZY ─────────────
+{
+  const sciezkaZapisu = `${cialoZapisu}\n${cialoSzczegolow}\n${cialoUsuniecia}`;
+  const wywolan = (sciezkaZapisu.match(/await supabase/g) ?? []).length;
+  const odczytow = (sciezkaZapisu.match(/error: \w+/g) ?? []).length;
+  check('(10) ⭐⭐ D10 ZAPADKA NA RÓWNOŚĆ — LICZBA WYWOŁAŃ BAZY RÓWNA SIĘ LICZBIE '
+    + 'ODCZYTÓW `error`. ⛔ Klient Supabase NIE RZUCA (O83): zignorowany `error` '
+    + 'w destrukturyzacji jest cichym brakiem, nie awarią',
+    wywolan > 0 && wywolan === odczytow, `wywołań ${wywolan}, odczytów error ${odczytow}`);
+
+  check('(10) ⭐ KAŻDE wywołanie traktuje ZERO ZWRÓCONYCH WIERSZY jako porażkę (O61)',
+    (sciezkaZapisu.match(/length === 0/g) ?? []).length >= 2
+    && /Nie udało się zapisać/.test(cialoSzczegolow),
+    'zapis odrzucony przez RLS zostanie pokazany jako sukces');
+
+  check('(10) ⛔ D10 — ZERO `service_role` i zero klucza serwisowego na ekranie',
+    !/service_role|serviceRole|SERVICE_ROLE/.test(ekran),
+    'ekran obchodzi RLS');
+}
+
+// ── ⭐ D6 NA EKRANIE — ŚCIEŻKA USUNIĘCIA ALBO ZDANIE ───────────────
+// ⛔ OBA MIEJSCA PYTAJĄ REGUŁY — i render, i sam zapis. Sprawdzenie wyłącznie
+// przy renderze zostawiłoby drogę „przycisku nie widać, ale funkcja działa",
+// czyli usunięcie zobowiązania jednym wywołaniem z innego miejsca.
+check('(10) ⭐⭐ D6 — ekran PYTA REGUŁY, czy wolno usunąć, i nie ma własnej kopii tej decyzji',
+  [cialoKrokow, cialoUsuniecia].every((k) => /sciezkaUsuniecia\(/.test(k) && /rozpoznajRodzajPozycji\(/.test(k))
+  && !/'zobowiazanie'|'wlasna_praca'|'rzecz_produktu'/.test(ekran),
+  'ekran rozstrzyga usuwalność po swojemu');
+
+check('(10) ⛔ D6 — przy pozycji bez ścieżki usunięcia stoi ZDANIE, a NIE wyszarzony '
+  + 'przycisk. Przycisk, który nic nie robi, uczy, że dotykanie nic nie daje',
+  /BEZ_USUNIECIA/.test(cialoKrokow) && !/disabled=\{true\}/.test(cialoKrokow),
+  'na ekranie stanął martwy przycisk usunięcia');
+
+check('(10) ⛔ M1 — ekran nadal NIE PYTA „dlaczego nie": powód jest OFERTĄ, '
+  + 'a werdykt leży w bazie, zanim ten krok w ogóle się pokaże',
+  !/Dlaczego (nie|się nie)/i.test(ekran) && /KROK_POWOD/.test(cialoKrokow),
+  'prośba o powód stała się warunkiem zapisu');
+
+check('(10) ⭐ brzmienia kroków są STAŁYMI Z MODUŁU, nie napisami w JSX',
+  /KROK_CZAS_I_RPE/.test(cialoKrokow) && /KROK_BOL/.test(cialoKrokow)
+  && /POLE_CZAS/.test(cialoKrokow) && /POLE_RPE/.test(cialoKrokow),
+  'ekran wymyślił własne napisy kroków');
+
+check('(10) ⛔ ZERO NOWYCH MIEJSC BÓLU — ekran bierze `BODY_LOCATIONS` z `lib/labels.ts`',
+  /BODY_LOCATIONS\.map\(/.test(cialoKrokow) && /from '\.\.\/\.\.\/lib\/labels'/.test(ekran),
+  'powstał drugi słownik miejsc bólu');
+
+console.log('\n═══ GRUPA 11 — OSIEM MUTACJI (⛔ COFNIĘCIE STRUKTURALNE) ═══');
+//
+// ⚠️ PIĘĆ PIERWSZYCH MUTACJI ŻYJE W OBIEKCIE `ZasadyOceny`, TRZY OSTATNIE
+// W KOPII TEKSTU ŹRÓDŁA TRZYMANEJ W PAMIĘCI. ⛔ ANI JEDNA nie dotyka dysku —
+// `md5` obu plików przed baterią i po niej jest na to DOWODEM, a nie
+// zapewnieniem. Produkcyjny wołający drugiego argumentu nie podaje (asercja
+// niżej), więc mutacja nie ma jak wejść na ekran zawodnika.
+
+/** Bateria reguły — ⛔ ta sama treść na prawdziwych zasadach musi być zielona. */
+function bateriaO1(z: ZasadyOceny): number {
+  let bledy = 0;
+  if (rpePoczatkowe(z) !== null) bledy += 1;
+  if (podpowiedzCzasu(45, z).jest !== true) bledy += 1;
+  const p = zbudujPayloadIZrodla([{ klucz: 'rpe', liczba: 6, zrodlo: 'zawodnik' }], z);
+  if (Object.keys(p.payload).length !== Object.keys(p.data_sources).length) bledy += 1;
+  const wpis = wierszWpisuPoTreningu({ idZawodnika: 'x', idWydarzenia: 16, eventType: 'micro_session', wartosci: [] }, z);
+  if (wpis.calendar_event_id !== 16) bledy += 1;
+  const zobowiazanie = rozpoznajRodzajPozycji({ idWydarzenia: 1, eventType: 'club_training', source: 'player', maSesjeTrenera: false });
+  if (sciezkaUsuniecia(zobowiazanie, z).jest !== false) bledy += 1;
+  const wlasna = rozpoznajRodzajPozycji({ idWydarzenia: 1, eventType: 'own_training', source: 'player', maSesjeTrenera: false });
+  if (sciezkaUsuniecia(wlasna, z).jest !== true) bledy += 1;
+  if (rozstrzygnijPowod(null, z).waga !== 'nie_wiemy') bledy += 1;
+  return bledy;
+}
+
+/** Bateria tekstu — te same pytania, co grupa 10, na PODANEJ kopii źródła. */
+function bateriaTekstu(zrodlo: string): number {
+  const kroki = cialo(zrodlo, 'function renderKrokiOceny');
+  const szczegoly = cialo(zrodlo, 'async function zapiszSzczegolyOceny');
+  const zapis = cialo(zrodlo, 'async function odpowiedzNaWystapienie');
+  const usuniecie = cialo(zrodlo, 'async function zdejmijZPlanu');
+  const sciezka = `${zapis}\n${szczegoly}\n${usuniecie}`;
+  let bledy = 0;
+  if (!/RPE_WARTOSCI\.map\(/.test(kroki)) bledy += 1;
+  if (/Slider|slider/.test(zrodlo)) bledy += 1;
+  const wywolan = (sciezka.match(/await supabase/g) ?? []).length;
+  const odczytow = (sciezka.match(/error: \w+/g) ?? []).length;
+  if (wywolan === 0 || wywolan !== odczytow) bledy += 1;
+  if (!/idWydarzenia: p\.idWydarzenia/.test(szczegoly)) bledy += 1;
+  return bledy;
+}
+
+const NA_PRAWDZIWYCH_O1 = bateriaO1(ZASADY_PRAWDZIWE_OCENY) + bateriaTekstu(ekran);
+
+const MUTACJE_O1: { nazwa: string; zasady?: ZasadyOceny; tekst?: (z: string) => string }[] = [
+  {
+    nazwa: 'MO1 · ⛔⭐ RPE DOSTAJE WARTOŚĆ POCZĄTKOWĄ — produkt mierzy własny plan zamiast zawodnika',
+    zasady: { ...ZASADY_PRAWDZIWE_OCENY, rpeBezPodpowiedzi: false },
+  },
+  {
+    nazwa: 'MO2 · ⛔ SUWAK ZAMIAST PRZYCISKÓW — uchwyt stoi gdzieś i to „gdzieś" staje się pomiarem',
+    tekst: (z) => z.replace(/RPE_WARTOSCI\.map\(/g, 'Slider(').replace('renderKrokiOceny', 'renderKrokiOceny'),
+  },
+  {
+    nazwa: 'MO3 · ⛔ `data_sources` PRZESTAJE BYĆ WYPEŁNIANE — po roku nie odróżnimy propozycji od odpowiedzi',
+    zasady: { ...ZASADY_PRAWDZIWE_OCENY, zrodloPrzyKazdejWartosci: false },
+  },
+  {
+    nazwa: 'MO4 · ⛔ `error` PRZESTAJE BYĆ ODCZYTYWANY — klient Supabase nie rzuca, więc awaria milczy (O83)',
+    tekst: (z) => z.replace(/error: bladWpisu/g, ''),
+  },
+  {
+    nazwa: 'MO5 · ⛔ ZOBOWIĄZANIE DA SIĘ USUNĄĆ — znika jedyny ślad tego, że coś było umówione',
+    zasady: { ...ZASADY_PRAWDZIWE_OCENY, zobowiazaniaNieUsuwalne: false },
+  },
+  {
+    nazwa: 'MO6 · ⛔ BRAK POWODU LICZY SIĘ JAK „INNY" — milczenie staje się oświadczeniem (R5)',
+    zasady: { ...ZASADY_PRAWDZIWE_OCENY, brakPowoduToNieWiemy: false },
+  },
+  {
+    nazwa: 'MO7 · ⛔ WPIS PRZESTAJE WSKAZYWAĆ WYDARZENIE — wracamy do 0 z 10 (D5)',
+    zasady: { ...ZASADY_PRAWDZIWE_OCENY, wpisWskazujeWydarzenie: false },
+  },
+  {
+    nazwa: 'MO8 · ⛔ CZAS TRACI PODPOWIEDŹ — „nic nie podpowiadamy" spełnione przez wyłączenie wszystkiego',
+    zasady: { ...ZASADY_PRAWDZIWE_OCENY, czasMaPodpowiedz: false },
+  },
+];
+
+let mutacjeO1Ok = 0;
+for (const m of MUTACJE_O1) {
+  const bledy = m.zasady !== undefined
+    ? bateriaO1(m.zasady) + bateriaTekstu(ekran)
+    : bateriaO1(ZASADY_PRAWDZIWE_OCENY) + bateriaTekstu((m.tekst ?? ((x: string) => x))(ekran));
+  console.log(`\n   „${m.nazwa}"`);
+  console.log(`   FAIL-i przy tej mutacji: ${bledy}`);
+  if (bledy > 0) mutacjeO1Ok += 1;
+}
+
+check(`(11) ⭐ KAŻDA z ${MUTACJE_O1.length} mutacji zapala strażnika`,
+  mutacjeO1Ok === MUTACJE_O1.length, `zapaliło ${mutacjeO1Ok} z ${MUTACJE_O1.length}`);
+
+check('(11) ⭐⭐ ASERCJA ODWROTNA — na PRAWDZIWYCH zasadach bateria jest ZIELONA. '
+  + 'Bez niej „każda mutacja zapala" spełniłby strażnik zapalony zawsze',
+  NA_PRAWDZIWYCH_O1 === 0, `${NA_PRAWDZIWYCH_O1} FAIL-i na prawdziwym kodzie`);
+
+check('(11) ⭐ po ośmiu mutacjach PRAWDZIWE ZASADY SĄ NIETKNIĘTE',
+  ZASADY_PRAWDZIWE_OCENY.rpeBezPodpowiedzi && ZASADY_PRAWDZIWE_OCENY.czasMaPodpowiedz
+  && ZASADY_PRAWDZIWE_OCENY.zrodloPrzyKazdejWartosci && ZASADY_PRAWDZIWE_OCENY.wpisWskazujeWydarzenie
+  && ZASADY_PRAWDZIWE_OCENY.zobowiazaniaNieUsuwalne && ZASADY_PRAWDZIWE_OCENY.brakPowoduToNieWiemy,
+  'mutacja przeciekła do prawdziwych zasad');
+
+check('(11) ⛔ PRODUKCYJNY WOŁAJĄCY NIE PODAJE ZASAD OCENY — mutacja nie ma drogi na ekran',
+  !/ZASADY_PRAWDZIWE_OCENY/.test(ekran) && !/ZasadyOceny/.test(ekran),
+  'ekran podaje drugi argument regule oceny');
+
+// ⭐ `md5` PO BATERII — DOWÓD, ŻE MUTACJE NIE DOTKNĘŁY DYSKU.
+{
+  const poRegula = md5(existsSync(PLIK_REGULY_O1) ? readFileSync(PLIK_REGULY_O1, 'utf8') : '');
+  const poEkran = md5(readFileSync(join(root, 'app', '(tabs)', 'dzis.tsx'), 'utf8'));
+  check('(11) ⭐⭐ `md5` OBU PLIKÓW PRZED I PO BATERII JEST TEN SAM — cofnięcie jest '
+    + 'STRUKTURALNE, bo nie ma czego cofać',
+    poRegula === MD5_REGULY_PRZED && poEkran === MD5_EKRANU_PRZED,
+    `reguła ${MD5_REGULY_PRZED} → ${poRegula} · ekran ${MD5_EKRANU_PRZED} → ${poEkran}`);
+}
+
 // ── SANITY: brzmienia, które ten pas OBIECAŁ zostawić w spokoju ─────
 check('⛔ plakietki nie zmieniły się co do znaku (pas C1/D1)',
   PLAKIETKI_WYKONANIA.odbylo_sie === 'Zrobione'

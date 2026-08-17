@@ -288,6 +288,11 @@ import { czytajStanDostepu, RPC_STAN_DOSTEPU } from '../../lib/dostepKonta';
 // zamontowanego w app/_layout.tsx. Zero drugiego egzemplarza.
 import { otworzPunktPomocy } from '../../components/PunktPomocy';
 import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
+// ⭐ PLAN-D-O1 — MIEJSCA BÓLU BIERZEMY Z ISTNIEJĄCEGO SŁOWNIKA, nie z nowego.
+// To ten sam `BODY_LOCATIONS`, z którego rysuje Dziennik i wgląd WT-25:
+// drugi słownik na to samo rozjechałby się przy pierwszej poprawce, a oba
+// wyglądałyby poprawnie z osobna.
+import { BODY_LOCATIONS } from '../../lib/labels';
 // PLAN-D 14.08.2026 — RODZAJ, KTÓREGO NIE ZNAMY, MA SIĘ NAZWAĆ.
 // Pas A7 domknął to w `kalendarz.tsx` i postawił tam strażnika. Ten sam wzorzec
 // (`EVENT_TYPE_LABELS[e.event_type] || e.event_type`) żył dalej TUTAJ, na ekranie,
@@ -471,6 +476,55 @@ import {
   type WystapienieDoPytania,
 } from '../../lib/pytanieOWystapienie';
 import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-O1 08.2026 (17.08.2026) — OCENA NALEŻY DO KAFLA W DNIU (D1).
+//
+// ⛔ POMIAR, KTÓRY TO UZASADNIA (17.08.2026, produkcja): `session_verdicts`
+// 1 wiersz — pierwszy w historii produktu, zapisany DZIŚ ścieżką pasa D2.
+// Droga zapisu WERDYKTU działa. Nie działa nic poza nią: `daily_logs`
+// z `calendar_event_id` 0 z 10 · `data_sources` używane w 0 miejscach kodu ·
+// `absence_reason` (kolumna dodana 17.08) 0 wypełnień · 7 wydarzeń przeszłych
+// bez werdyktu u 1 zawodnika.
+//
+// ⭐ CO TEN PAS DOKŁADA: trzy kroki ZWINIĘTE pod odpowiedzią „zrobiłeś?" —
+// czas i RPE, ból, powód nieobecności. ⛔ WSZYSTKIE OPCJONALNE. Lepszy jeden
+// werdykt bez RPE niż trzy pola bez ani jednej odpowiedzi (D2).
+//
+// ⛔ REGUŁA STOI W `lib/ocenaZKafla.ts`, TEN PLIK JĄ RYSUJE — tak samo jak
+// pytanie stoi w `lib/pytanieOWystapienie.ts`. Ekran, który sam rozstrzyga,
+// czy powód liczy się przeciwko zawodnikowi, jest drugą kopią decyzji D7.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  krokiOceny,
+  rpePoczatkowe,
+  podpowiedzCzasu,
+  rozstrzygnijPowod,
+  rozpoznajRodzajPozycji,
+  sciezkaUsuniecia,
+  wierszWerdyktu,
+  wierszWpisuPoTreningu,
+  wierszBolu,
+  opisOcenyDoLogu,
+  zbudujPayloadIZrodla,
+  RPE_WARTOSCI,
+  POWODY_NIEOBECNOSCI,
+  POWOD_NAPIS,
+  KROK_CZAS_I_RPE,
+  KROK_BOL,
+  KROK_POWOD,
+  POLE_CZAS,
+  POLE_RPE,
+  RESZTA_DOBROWOLNA,
+  BEZ_USUNIECIA,
+  ZAPISZ_SZCZEGOL,
+  ZDEJMIJ_Z_PLANU,
+  MINUTY_DO_WYBORU,
+  type IdKroku,
+  type PowodNieobecnosci,
+  type FaktyPozycji,
+  type WartoscRpe,
+  type WartoscZeZrodlem,
+} from '../../lib/ocenaZKafla';
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-C4 08.2026 (15.08.2026), zadanie C4.3 — NAGRODA ZA WYKONANĄ PRACĘ.
 //
@@ -1033,6 +1087,34 @@ export default function DzisScreen() {
    * gdzie zawodnik nie połączy jej z przyciskiem, który przed chwilą dotknął.
    */
   const [bladWerdyktu, setBladWerdyktu] = useState<string | null>(null);
+  /**
+   * ⭐ PLAN-D-O1 — KTÓRY KROK OCENY JEST ROZWINIĘTY. Klucz wystąpienia + id
+   * kroku, `null` = wszystkie zwinięte. ⛔ Jeden stan na cały ekran, a nie
+   * flaga per krok: dwa rozwinięte kroki naraz to znowu formularz, a formularz
+   * jest tym, przed czym stoi decyzja D2.
+   */
+  const [krokOtwarty, setKrokOtwarty] = useState<string | null>(null);
+  /**
+   * ⭐⛔ PLAN-D-O1, D3 — RPE STARTUJE PUSTE I NIE MA TU LICZBY.
+   * Wartość początkowa bierze się z `rpePoczatkowe()`, która oddaje `null`.
+   * ⛔ Nie `useState(5)`, nie `useState(RPE_WARTOSCI[4])`, nie suwak: RPE mierzy
+   * wyłącznie subiektywny stan zawodnika, więc podpowiedziana wartość nie jest
+   * punktem odniesienia — ONA STAJE SIĘ POMIAREM, a produkt zmierzyłby własny
+   * plan zamiast zawodnika i nie miałby jak tego zauważyć.
+   */
+  const [rpeWybrane, setRpeWybrane] = useState<WartoscRpe | null>(rpePoczatkowe());
+  /**
+   * ⭐ PLAN-D-O1, D3 strona odwrotna — CZAS TRWANIA PODPOWIADAMY.
+   * `null` znaczy „zawodnik nic nie wpisał", a podpowiedź z planu wchodzi
+   * przy rozwinięciu kroku. Czas jest faktem zewnętrznym: zawodnik zna go
+   * niezależnie i umie poprawić — i to jest cała różnica wobec RPE.
+   */
+  const [czasWybrany, setCzasWybrany] = useState<number | null>(null);
+  const [czasZPlanu, setCzasZPlanu] = useState<boolean>(false);
+  /** ⭐ PLAN-D-O1 — ból: miejsce i natężenie. ⛔ Bez wartości początkowej. */
+  const [bolMiejsce, setBolMiejsce] = useState<string | null>(null);
+  /** ⭐ PLAN-D-O1 — powód nieobecności. ⛔ `null` to „nie wiemy", nie „bez powodu". */
+  const [powodWybrany, setPowodWybrany] = useState<PowodNieobecnosci | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
@@ -1332,8 +1414,14 @@ export default function DzisScreen() {
       // w kalendarzu" i pasek postępu Bloku. Każdy z tych konsumentów
       // policzyłby odwołane wydarzenie jako pracę do zrobienia. To jest ten
       // sam wybór, który B5 uzasadnił, zakładając to zapytanie.
+      // ⭐ PLAN-D-O1 17.08.2026 — DOSZŁA JEDNA KOLUMNA `coach_session_id`.
+      // ⚠️ To jest ROZSZERZENIE istniejącego zapytania, nie nowe zapytanie.
+      // Po co: decyzja D6 każe rozpoznawać rodzaj pozycji Z DANYCH, a nie
+      // z listy nazw (O84). `coach_session_id` jest jedynym polem, które mówi
+      // „tę pozycję wiąże ktoś poza zawodnikiem" NIEZALEŻNIE od tego, ile
+      // rodzajów wydarzeń przybędzie w `chk_calendar_events_event_type`.
       supabase.from('calendar_events')
-        .select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,source,focus_block_id')
+        .select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,source,focus_block_id,coach_session_id')
         .eq('user_id', currentUser.id),
       // ⭐ PLAN-D-B5, NOWE ZAPYTANIE nr 2 — WERDYKTY ZAWODNIKA (pas D1).
       // Ten sam wąski kształt co w `app/(tabs)/kalendarz.tsx` — cztery kolumny,
@@ -2068,6 +2156,45 @@ export default function DzisScreen() {
 
   if (pytania !== null) console.log(`dzis: [PLAN-D-D2] ${opisPytanDoLogu(pytania)}`);
 
+  /**
+   * ⭐ PLAN-D-O1, D6 — FAKTY O POZYCJI, Z KTÓRYCH LICZY SIĘ JEJ RODZAJ.
+   *
+   * ⛔ ZERO TYTUŁU W TEJ MAPIE i to jest cała jej treść. Tytuł jest napisem
+   * zawodnika: „Trening klubowy" wpisany ręcznie w nazwę własnego treningu
+   * zamieniłby własną pracę w zobowiązanie i odebrał prawo do usunięcia.
+   * Rozstrzygają wyłącznie kolumny — `coach_session_id`, `source`, `event_type`.
+   *
+   * ⚠️ `coach_session_id` czytane przez indeks, a nie przez pole typu:
+   * `WierszWydarzenia` mieszka w `lib/widokTygodnia.ts` i ten pas świadomie
+   * nie zmienia jego kształtu, bo stoją na nim trzy inne konsumenty.
+   */
+  const faktyWydarzen = useMemo(() => {
+    const m = new Map<number, FaktyPozycji>();
+    const surowe = dane === null ? null : dane.wydarzeniaTygodnia;
+    if (surowe === null) return m;
+    for (const w of surowe) {
+      const kolumny = w as unknown as Record<string, unknown>;
+      m.set(w.id, {
+        idWydarzenia: w.id,
+        eventType: typeof w.event_type === 'string' ? w.event_type : null,
+        source: typeof w.source === 'string' ? w.source : null,
+        maSesjeTrenera: kolumny.coach_session_id !== null && kolumny.coach_session_id !== undefined,
+      });
+    }
+    return m;
+  }, [dane]);
+
+  /**
+   * ⛔ WARTOWNIK PRZY BRAKU WIERSZA JEST CELOWO NAJOSTROŻNIEJSZY, JAKI MOŻE BYĆ:
+   * `eventType: null` daje rozpoznanie „nie wiem", a „nie wiem" nie ma ścieżki
+   * usunięcia. Pozycja, której nie odczytaliśmy, ma zostać w planie.
+   */
+  function faktyPozycji(idWydarzenia: number): FaktyPozycji {
+    const znane = faktyWydarzen.get(idWydarzenia);
+    if (znane !== undefined) return znane;
+    return { idWydarzenia, eventType: null, source: null, maSesjeTrenera: false };
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // ⭐ PLAN-D-D2 — ZAPIS ODPOWIEDZI. JEDNO DOTKNIĘCIE, ODWRACALNE.
   //
@@ -2092,19 +2219,43 @@ export default function DzisScreen() {
   // `verdict: 'nie_odbylo_sie'` i dlatego `odbylo_sie` nie miało w całym
   // produkcie ani jednej drogi zapisu.
   // ═══════════════════════════════════════════════════════════════════
-  async function odpowiedzNaWystapienie(p: Pytanie, werdykt: WartoscWerdyktu) {
+  async function odpowiedzNaWystapienie(
+    p: Pytanie,
+    werdykt: WartoscWerdyktu,
+    powod: PowodNieobecnosci | null = null,
+  ) {
     if (!currentUser) return;
     setBladWerdyktu(null);
     setZapisWerdyktu(p.klucz);
+    // ⭐ PLAN-D-O1 — POWÓD PRZECHODZI PRZEZ REGUŁĘ, NIE PRZEZ EKRAN.
+    // `wierszWerdyktu` zna CHECK `session_verdicts_powod_tylko_przy_nieodbyciu`
+    // i przy „zrobione" oddaje `absence_reason: null`. ⛔ To NIE jest ostrożność
+    // na zapas: bez tego zawodnik, który najpierw powiedział „nie odbyło się"
+    // z powodem, a potem zmienił zdanie (D9), dostałby od bazy kod `23514`
+    // przy ruchu, do którego ma pełne prawo — bo `upsert` zostawiłby stary powód.
+    const doZapisu = wierszWerdyktu({
+      idZawodnika: currentUser.id,
+      idWydarzenia: p.idWydarzenia,
+      dzien: p.dzien,
+      werdykt,
+      powod,
+    });
+    // ⚠️ KSZTAŁT WYPISANY POLE PO POLU, choć `doZapisu` niesie go w całości.
+    // Powód jest policzalny, nie estetyczny: DWA strażniki czytają to miejsce
+    // JAKO TEKST i pytają, czy `verdict` jest ZMIENNĄ (a nie literałem
+    // „zrobione") i czy `withdrawn_at` na pewno wraca do `null`. Po podmianie
+    // obiektu na rozwinięcie wywołania oba pytania straciłyby na czym stanąć,
+    // a strażnik przestałby pilnować, nie zapalając się ani razu (O88).
     const { data: zapisane, error: err } = await supabase
       .from('session_verdicts')
       .upsert({
-        user_id: currentUser.id,
-        calendar_event_id: p.idWydarzenia,
-        occurred_on: p.dzien,
+        user_id: doZapisu.user_id,
+        calendar_event_id: doZapisu.calendar_event_id,
+        occurred_on: doZapisu.occurred_on,
         verdict: werdykt,
         origin: 'player',
         withdrawn_at: null,
+        absence_reason: doZapisu.absence_reason,
       }, { onConflict: 'calendar_event_id,occurred_on' })
       .select('id');
     setZapisWerdyktu(null);
@@ -2126,6 +2277,150 @@ export default function DzisScreen() {
     }
     // ⛔ ZERO ZDANIA PO ZAPISIE i zero pochwały za samo odpowiedzenie (N1).
     // Zmienia się to, co pytanie pokazuje — i to jest cała odpowiedź produktu.
+    await load();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-O1 — KROKI 2 i 3: CZAS, RPE I BÓL. ⛔ WSZYSTKO OPCJONALNE.
+  //
+  // ⚠️ TO JEST OSOBNY ZAPIS I OSOBNE DOTKNIĘCIE, nie druga połowa poprzedniego.
+  // Werdykt jest już w bazie, zanim ta funkcja w ogóle ma szansę się wykonać —
+  // i to jest cała decyzja D2: zawodnik, który zamknie appkę po pierwszym
+  // przycisku, ZOSTAWIA PO SOBIE ODPOWIEDŹ, a nie porzucony formularz.
+  //
+  // ⭐ D4 — `data_sources` POWSTAJE Z TEJ SAMEJ LISTY, CO `payload`.
+  // Nie ma tu drogi, którą wartość weszłaby do wpisu bez zapisania, skąd
+  // pochodzi: obie mapy buduje `zbudujPayloadIZrodla` w jednej pętli.
+  //
+  // ⭐ D5 — `calendar_event_id` WCHODZI ZAWSZE. 17.08.2026 takich wpisów było
+  // 0 z 10, i przez to licznik pracy nie umiał powiązać wpisu z sesją.
+  //
+  // ⛔ D10 — `error` ODCZYTANY PRZY KAŻDYM WYWOŁANIU. Klient Supabase NIE
+  // RZUCA (O83): zignorowany `error` w destrukturyzacji jest cichym brakiem,
+  // a nie awarią, którą ktoś kiedyś zauważy.
+  // ═══════════════════════════════════════════════════════════════════
+  async function zapiszSzczegolyOceny(p: Pytanie) {
+    if (!currentUser) return;
+    setBladWerdyktu(null);
+    setZapisWerdyktu(p.klucz);
+
+    const wartosci: WartoscZeZrodlem[] = [];
+    if (czasWybrany !== null) {
+      // ⭐ ŹRÓDŁO JEST FAKTEM O TEJ WARTOŚCI, nie etykietą dopisaną z rozpędu:
+      // czas nietknięty przez zawodnika został podpowiedziany przez plan.
+      wartosci.push({ klucz: 'duration_minutes', liczba: czasWybrany, zrodlo: czasZPlanu ? 'plan' : 'zawodnik' });
+    }
+    if (rpeWybrane !== null) {
+      // ⛔ RPE MOŻE POCHODZIĆ WYŁĄCZNIE OD ZAWODNIKA i to nie jest wybór
+      // zapisu, tylko wynik tego, że nie ma go skąd podpowiedzieć (D3).
+      wartosci.push({ klucz: 'rpe', liczba: rpeWybrane, zrodlo: 'zawodnik' });
+    }
+
+    const wpis = wierszWpisuPoTreningu({
+      idZawodnika: currentUser.id,
+      idWydarzenia: p.idWydarzenia,
+      eventType: faktyPozycji(p.idWydarzenia).eventType,
+      wartosci,
+    });
+
+    const { data: wpisany, error: bladWpisu } = await supabase
+      .from('daily_logs')
+      .insert(wpis)
+      .select('id');
+    if (bladWpisu) {
+      setZapisWerdyktu(null);
+      setBladWerdyktu(toJestBrakDostepu(bladWpisu)
+        ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+        : 'Nie udało się zapisać: ' + bladWpisu.message);
+      return;
+    }
+    // ⚠️ O61 — ZERO WIERSZY BEZ BŁĘDU TO PORAŻKA. Zapis odrzucony przez RLS
+    // wraca jako sukces z pustą listą i wygląda dokładnie jak zapisany wpis.
+    const idWpisu = Array.isArray(wpisany) && wpisany.length > 0 ? Number(wpisany[0].id) : null;
+    if (idWpisu === null || !Number.isFinite(idWpisu)) {
+      setZapisWerdyktu(null);
+      setBladWerdyktu('Nie udało się zapisać: baza nie przyjęła tego wpisu.');
+      console.warn('[PLAN-D-O1] insert daily_logs dotknął ZERO wierszy '
+        + `(wydarzenie ${p.idWydarzenia}, dzień ${p.dzien}) — najpewniej RLS.`);
+      return;
+    }
+
+    // ⛔ BÓL WISI NA WPISIE, NIE OBOK NIEGO. Polityka `pain_entries_owner`
+    // wymaga `daily_log_id` wskazującego wpis tego samego zawodnika — wpis
+    // bólu bez tego zostałby odrzucony, a zawodnik zobaczyłby błąd po tym,
+    // jak reszta odpowiedzi już się zapisała.
+    const bol = bolMiejsce === null ? null : wierszBolu({
+      idZawodnika: currentUser.id,
+      idWpisu,
+      miejsce: bolMiejsce,
+      strona: null,
+      natezenie: rpeWybrane ?? 1,
+      wykluczaZTreningu: false,
+    });
+    if (bol !== null) {
+      const { error: bladBolu } = await supabase.from('pain_entries').insert(bol);
+      if (bladBolu) {
+        setZapisWerdyktu(null);
+        setBladWerdyktu('Zapisałem odpowiedź, ale nie zapisałem bólu: ' + bladBolu.message);
+        return;
+      }
+    }
+
+    console.log(`dzis: [PLAN-D-O1] ${opisOcenyDoLogu({
+      werdykt: p.stan.rodzaj === 'odpowiedziane' ? p.stan.werdykt : null,
+      payload: zbudujPayloadIZrodla(wartosci),
+      powod: rozstrzygnijPowod(powodWybrany),
+      rodzaj: rozpoznajRodzajPozycji(faktyPozycji(p.idWydarzenia)),
+    })}`);
+
+    setZapisWerdyktu(null);
+    setKrokOtwarty(null);
+    setCzasWybrany(null);
+    setCzasZPlanu(false);
+    setRpeWybrane(rpePoczatkowe());
+    setBolMiejsce(null);
+    await load();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-O1, D6 — ŚCIEŻKA USUNIĘCIA ISTNIEJE WYŁĄCZNIE DLA WŁASNEJ PRACY.
+  //
+  // ⛔ ZOBOWIĄZANIE (trening klubowy, mecz) NIE MA TU CZEGO SZUKAĆ i to nie
+  // jest surowość wobec zawodnika: rzecz, której nie było, ma zostać w planie
+  // jako NIEOBECNOŚĆ Z POWODEM, a nie zniknąć razem z pytaniem. Usunięcie
+  // zobowiązania kasuje jedyny ślad tego, że coś było umówione.
+  //
+  // ⛔ RODZAJ, KTÓREGO NIE ZNAMY, ZACHOWUJE SIĘ JAK ZOBOWIĄZANIE — bo z dwóch
+  // możliwych pomyłek ta druga jest nieodwracalna (`ON DELETE CASCADE`
+  // zabiera ze sobą werdykt).
+  // ═══════════════════════════════════════════════════════════════════
+  async function zdejmijZPlanu(p: Pytanie) {
+    if (!currentUser) return;
+    const wolno = sciezkaUsuniecia(rozpoznajRodzajPozycji(faktyPozycji(p.idWydarzenia)));
+    if (!wolno.jest) {
+      setBladWerdyktu(BEZ_USUNIECIA);
+      console.warn(`[PLAN-D-O1] odmowa usunięcia ${p.klucz} — ${wolno.powod}`);
+      return;
+    }
+    setBladWerdyktu(null);
+    setZapisWerdyktu(p.klucz);
+    const { data: usuniete, error: bladUsuniecia } = await supabase
+      .from('calendar_events')
+      .delete()
+      .eq('id', p.idWydarzenia)
+      .select('id');
+    setZapisWerdyktu(null);
+    if (bladUsuniecia) {
+      setBladWerdyktu(toJestBrakDostepu(bladUsuniecia)
+        ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+        : 'Nie udało się zdjąć z planu: ' + bladUsuniecia.message);
+      return;
+    }
+    if (!usuniete || usuniete.length === 0) {
+      setBladWerdyktu('Nie udało się zdjąć z planu: baza nie zmieniła ani jednego wiersza.');
+      return;
+    }
+    setKrokOtwarty(null);
     await load();
   }
 
@@ -2579,6 +2874,140 @@ export default function DzisScreen() {
   //     i wychodzi jako „Nie udało się sprawdzić." + „Pociągnij w dół…" —
   //     te same dwa zdania, co przy pustkach pasa C3.
   // ═══════════════════════════════════════════════════════════════════
+  /**
+   * ⭐ PLAN-D-O1 — TRZY KROKI ZWINIĘTE POD ODPOWIEDZIĄ (D2).
+   *
+   * ⛔ ROZWINIĘTY MOŻE BYĆ NAJWYŻEJ JEDEN i to nie jest oszczędność miejsca.
+   * Trzy pola otwarte naraz to formularz, a formularz się porzuca — dokładnie
+   * to zrobiło z pytaniem „ZROBIŁEŚ?" 2,3 ekranu przewijania.
+   *
+   * ⛔ KROKI 2–4 NIE MAJĄ WŁASNEGO PRZYCISKU „ZAPISZ WSZYSTKO". Werdykt jest
+   * już w bazie; te kroki DOKŁADAJĄ do niego, a nie warunkują go.
+   */
+  function renderKrokiOceny(p: Pytanie) {
+    if (p.stan.rodzaj !== 'odpowiedziane') return null;
+    const rodzaj = rozpoznajRodzajPozycji(faktyPozycji(p.idWydarzenia));
+    const usuniecie = sciezkaUsuniecia(rodzaj);
+    const leci = zapisWerdyktu === p.klucz;
+    const otwarty = (id: IdKroku) => krokOtwarty === `${p.klucz}:${id}`;
+    const przelacz = (id: IdKroku) => setKrokOtwarty(otwarty(id) ? null : `${p.klucz}:${id}`);
+    // ⛔ D3 — PODPOWIEDŹ CZASU BIERZE SIĘ Z PLANU, A PLAN DZIŚ JEJ NIE MA.
+    // Zmierzone 17.08.2026: w całej bazie NIE ISTNIEJE ani jedna kolumna
+    // z planowanym czasem trwania (`information_schema.columns`, wzorce
+    // `%duration%` i `%minut%` — wracają wyłącznie `match_contexts.minutes_played`
+    // i `player_school_slots.minutes_range`, oba o czymś innym). Mechanizm
+    // podpowiedzi ISTNIEJE i jest sprawdzany uruchomieniowo; danych nie ma
+    // i ekran mówi to wprost, zamiast wstawiać wypełniacz.
+    const podpowiedz = podpowiedzCzasu(null);
+    return (
+      <View style={styles.ocenaKroki}>
+        {krokiOceny(p.stan.werdykt).filter((k) => k.widoczny && !k.obowiazkowy).map((k) => (
+          <View key={k.id}>
+            <TouchableOpacity style={styles.ocenaKrokNaglowek} disabled={leci} onPress={() => przelacz(k.id)}>
+              <Text style={styles.ocenaKrokTytul}>
+                {k.id === 'czas_i_rpe' ? KROK_CZAS_I_RPE : (k.id === 'bol' ? KROK_BOL : KROK_POWOD)}
+              </Text>
+            </TouchableOpacity>
+            {otwarty(k.id) && k.id === 'czas_i_rpe' ? (
+              <View>
+                <Text style={styles.licznikPodpis}>{POLE_CZAS}</Text>
+                <View style={styles.pytanieOdpowiedzi}>
+                  {MINUTY_DO_WYBORU.map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      disabled={leci}
+                      style={[styles.pytanieBtn, czasWybrany === m && styles.pytanieBtnWybrany]}
+                      onPress={() => { setCzasWybrany(m); setCzasZPlanu(podpowiedz.jest && podpowiedz.minuty === m); }}
+                    >
+                      <Text style={[styles.pytanieBtnTxt, czasWybrany === m && styles.pytanieBtnTxtWybrany]}>{`${m} min`}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {podpowiedz.jest ? null : <Text style={styles.licznikPodpis}>{podpowiedz.powod}</Text>}
+                <Text style={styles.licznikPodpis}>{POLE_RPE}</Text>
+                {/* ⛔⭐ D3 — DZIESIĘĆ PRZYCISKÓW I ANI JEDEN NIE JEST WSTĘPNIE
+                    ZAZNACZONY. Zaznaczenie bierze się WYŁĄCZNIE z `rpeWybrane`,
+                    które startuje z `rpePoczatkowe()`, czyli z pustki. ⛔ Nie ma
+                    tu suwaka i nie będzie: suwak ma uchwyt, uchwyt gdzieś stoi,
+                    a to „gdzieś" jest podpowiedzią, choćby nikt jej tak nie nazwał. */}
+                <View style={styles.pytanieOdpowiedzi}>
+                  {RPE_WARTOSCI.map((r) => (
+                    <TouchableOpacity
+                      key={r}
+                      disabled={leci}
+                      style={[styles.pytanieBtn, rpeWybrane === r && styles.pytanieBtnWybrany]}
+                      onPress={() => setRpeWybrane(r)}
+                    >
+                      <Text style={[styles.pytanieBtnTxt, rpeWybrane === r && styles.pytanieBtnTxtWybrany]}>{String(r)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={styles.pytanieBtn} disabled={leci} onPress={() => zapiszSzczegolyOceny(p)}>
+                  <Text style={styles.pytanieBtnTxt}>{ZAPISZ_SZCZEGOL}</Text>
+                </TouchableOpacity>
+                <Text style={styles.licznikPodpis}>{RESZTA_DOBROWOLNA}</Text>
+              </View>
+            ) : null}
+            {otwarty(k.id) && k.id === 'bol' ? (
+              <View>
+                {/* ⛔ ZERO NOWYCH BRZMIEŃ MIEJSC BÓLU — `BODY_LOCATIONS`
+                    z `lib/labels.ts` jest w produkcie od dawna i to ten sam
+                    słownik, którym opisuje je Dziennik i wgląd WT-25. */}
+                <View style={styles.pytanieOdpowiedzi}>
+                  {BODY_LOCATIONS.map(([id, napis]) => (
+                    <TouchableOpacity
+                      key={id}
+                      disabled={leci}
+                      style={[styles.pytanieBtn, bolMiejsce === id && styles.pytanieBtnWybrany]}
+                      onPress={() => setBolMiejsce(bolMiejsce === id ? null : id)}
+                    >
+                      <Text style={[styles.pytanieBtnTxt, bolMiejsce === id && styles.pytanieBtnTxtWybrany]}>{napis}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={styles.pytanieBtn} disabled={leci} onPress={() => zapiszSzczegolyOceny(p)}>
+                  <Text style={styles.pytanieBtnTxt}>{ZAPISZ_SZCZEGOL}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {otwarty(k.id) && k.id === 'powod' ? (
+              <View>
+                {/* ⛔ TO JEST OFERTA, NIE WARUNEK ZAPISU. Werdykt „nie odbyło się"
+                    leży już w bazie i zostanie tam, choćby zawodnik nie dotknął
+                    ani jednego z tych przycisków. Prośba o powód jako warunek
+                    byłaby konfrontacją (M1) i obniżałaby wypełnialność u tych,
+                    którzy odpadają najbardziej. */}
+                <View style={styles.pytanieOdpowiedzi}>
+                  {POWODY_NIEOBECNOSCI.map((r) => (
+                    <TouchableOpacity
+                      key={r}
+                      disabled={leci}
+                      style={[styles.pytanieBtn, powodWybrany === r && styles.pytanieBtnWybrany]}
+                      onPress={() => { setPowodWybrany(r); odpowiedzNaWystapienie(p, p.stan.rodzaj === 'odpowiedziane' ? p.stan.werdykt : 'nie_odbylo_sie', r); }}
+                    >
+                      <Text style={[styles.pytanieBtnTxt, powodWybrany === r && styles.pytanieBtnTxtWybrany]}>{POWOD_NAPIS[r]}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.licznikPodpis}>{rozstrzygnijPowod(powodWybrany).powod}</Text>
+              </View>
+            ) : null}
+          </View>
+        ))}
+        {/* ⭐ D6 — ŚCIEŻKA USUNIĘCIA ALBO ZDANIE, DLACZEGO JEJ NIE MA. ⛔ Nigdy
+            wyszarzony przycisk: przycisk, który nic nie robi, uczy, że dotykanie
+            nic nie daje, i psuje wszystkie pozostałe. */}
+        {usuniecie.jest ? (
+          <TouchableOpacity style={styles.pytanieBtn} disabled={leci} onPress={() => zdejmijZPlanu(p)}>
+            <Text style={styles.pytanieBtnTxt}>{ZDEJMIJ_Z_PLANU}</Text>
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.licznikPodpis}>{BEZ_USUNIECIA}</Text>
+        )}
+      </View>
+    );
+  }
+
   function renderPytaniaOWystapienia() {
     if (pytania === null) return null;
 
@@ -2644,6 +3073,13 @@ export default function DzisScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+              {/* ⭐ PLAN-D-O1 — TU JEST CAŁA RÓŻNICA WOBEC PASA D2. Do dziś
+                  pytanie kończyło się na dwóch przyciskach; teraz pod
+                  odpowiedzią stoją trzy kroki, wszystkie zwinięte i wszystkie
+                  dobrowolne. ⛔ Zawodnik, który zamknie appkę po pierwszym
+                  dotknięciu, zostawia po sobie ODPOWIEDŹ, nie porzucony
+                  formularz — i to jest decyzja D2, a nie układ ekranu. */}
+              {renderKrokiOceny(p)}
             </View>
           );
         })}
@@ -3596,6 +4032,13 @@ const styles = StyleSheet.create({
   pytanieBtnTxt: { ...typography.bodyMedium, fontSize: 13, color: colors.textSecondary },
   pytanieBtnTxtWybrany: { color: colors.textPrimary },
   pytanieBlad: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.error, marginTop: 8 },
+  // ⭐ PLAN-D-O1 — KROKI 2–4 SĄ WCIĘTE I ODDZIELONE KRESKĄ Z LEWEJ. To nie
+  // jest ozdoba: wcięcie mówi, że należą DO ODPOWIEDZI wyżej, a nie stoją
+  // obok niej jako osobne pytania. ⛔ Bez tego zawodnik czyta trzy nowe
+  // pytania zamiast trzech dobrowolnych dopisków do jednej odpowiedzi.
+  ocenaKroki: { marginTop: 8, paddingLeft: 10, borderLeftWidth: 1, borderLeftColor: colors.border },
+  ocenaKrokNaglowek: { minHeight: minTouchHeight, justifyContent: 'center' },
+  ocenaKrokTytul: { ...typography.bodyMedium, fontSize: 13, color: colors.textSecondary },
   // ⭐ PLAN-D-C4 — DOROBEK. Trzy style, wszystkie w istniejącej skali karty.
   nagrodaPodnaglowek: { ...typography.bodySemiBold, fontSize: 12, lineHeight: 18, letterSpacing: 0.4, color: colors.textSecondary, marginTop: 10, textTransform: 'uppercase' },
   // ⛔ CELOWO PEŁNY ROZMIAR TEKSTU, A NIE PRZYPIS. Zdanie „za jaką pracę"

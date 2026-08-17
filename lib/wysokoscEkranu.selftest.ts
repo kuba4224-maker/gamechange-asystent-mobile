@@ -226,10 +226,11 @@ const ZAPADKA_DZIS = {
    * a nie jedną, a zakładka „Tydzień" w karcie kalendarza rysuje siedem
    * wierszy dni, których poprzednia miara nie widziała w ogóle.
    */
-  wysokoscDp: 5724,
+  wysokoscDp: 6650,
   ustawiona: '17.08.2026',
-  powod: 'pas M2 — miara przestała gubić listy; liczba jest wyższa, bo była zaniżona, '
-    + 'a nie dlatego, że ktoś coś dołożył do ekranu',
+  powod: 'pas O1 — trzy kroki oceny (czas i RPE, ból, powód) pod pytaniem „ZROBIŁEŚ?”. '
+    + 'Ekran UROSŁ naprawdę, o 926 dp; miara nie zmieniła zdania. Kierunek jest przeciwny '
+    + 'do makiety (850 dp) i należy do fazy hierarchii, nie do tego pasa',
 };
 
 /**
@@ -542,11 +543,11 @@ const ZAPADKA_NIEWYPROWADZALNE = {
    * ⭐ Ustawiona 17.08.2026 przez pas M2: 1 → 17. Przed tym pasem lista
    * miała jedną pozycję (`Checkbox`), bo wszystko inne wypadało BEZ ŚLADU.
    */
-  ile: 17,
+  ile: 18,
   ustawiona: '17.08.2026',
-  powod: 'pas M2 — pierwszy pomiar, w którym niepoliczona lista trafia na tę listę '
-    + 'zamiast znikać; 15 z 17 pozycji to listy o długości zależnej od danych zawodnika, '
-    + 'dwie to klocki spoza repozytorium (Checkbox, DateTimePicker)',
+  powod: 'pas O1 — doszła lista krokiOceny(...).filter(...).map(...), której miara nie '
+    + 'umie wyprowadzić; jest NAZWANA, a nie zgubiona; 16 z 18 pozycji to listy o długości '
+    + 'zależnej od danych zawodnika, dwie to klocki spoza repozytorium',
 };
 {
   const ramka = (srodek: string) => `
