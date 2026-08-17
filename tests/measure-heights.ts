@@ -480,10 +480,22 @@ for (const p of dzis.pozycje) {
   for (const c of p.czesci) console.log(`    ${opiszPozycje(c)}`);
 }
 
+// ⛔ PLAN-D-M2 17.08.2026 — TE DWIE LISTY SĄ CZĘŚCIĄ ODPOWIEDZI, A NIE PRZYPISEM.
+// Miara, która gubi rzecz i milczy, uspokaja tego, kto pyta: do tego pasa
+// „Kalendarz" oddawał 536 dp i „14 z 14 widocznych" o ekranie, na którym nad
+// zgięciem mieszczą się dwa dni z siedmiu. Zaniżona liczba jest gorsza niż
+// brak liczby, więc wszystko, czego pomiar NIE obejmuje, ma tu stać z nazwy.
 const niewyprowadzalne = new Set<string>();
 for (const e of EKRANY_ZAKLADEK) pomiary[e].niewyprowadzalne.forEach((n) => niewyprowadzalne.add(n));
 console.log(`\n  Czego NIE DA SIĘ wyprowadzić z repozytorium (liczone szacunkiem, nie ciszą): `
   + `${niewyprowadzalne.size ? [...niewyprowadzalne].sort().join(', ') : 'nic'}`);
+
+for (const e of EKRANY_ZAKLADEK) {
+  const pom = pomiary[e].pominieteGalezie;
+  if (pom.length === 0) continue;
+  console.log(`  ⚠️ Czego liczba dla ekranu „${e}" NIE OPISUJE — gałęzie pominięte jako niższe `
+    + `(mierzymy najgorszy przypadek): ${pom.join(', ')}`);
+}
 
 // ⛔ D4 — OSTRZEŻENIE Z LICZBĄ, NIE AWARIA.
 if (dzis.wysokoscRazemDp > WIDOCZNE_NAD_ZGIECIEM_DP) {

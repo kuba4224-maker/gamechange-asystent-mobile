@@ -44,8 +44,19 @@
 //   • GAŁĄŹ WARUNKOWA LICZY SIĘ NAJGORSZYM PRZYPADKIEM. `{a ? <X/> : <Y/>}`
 //     to wyższy z dwóch, `{a && <X/>}` to <X/> pokazany. Ekran, który
 //     „czasem" ma dwadzieścia pozycji, MA dwadzieścia pozycji.
-//   • LISTA (`.map`) LICZY SIĘ JAKO JEDEN ELEMENT. Ekran z listą jest
-//     zawsze co najmniej tak wysoki, jak pokazuje ten moduł, nigdy niższy.
+//   • ⭐ PLAN-D-M2 17.08.2026: LISTA LICZY SIĘ TYLE RAZY, ILE MÓWI JEJ ŹRÓDŁO.
+//     Do 17.08.2026 każda lista liczyła się jako JEDEN wiersz, a lista, której
+//     procedura rysująca była przekazana po nazwie (`dni.map(renderDzien)`) —
+//     jako ZERO wierszy i wypadała bez śladu. Dziś liczba powtórzeń pochodzi
+//     ze stałej produktu, z literału w kodzie albo z JAWNEGO ZAŁOŻENIA
+//     z powodem (`POWTORZENIA_LIST`). ⛔ Lista, której długości NIE DA SIĘ
+//     wyprowadzić, liczy się jednym wierszem — ale jej nazwa trafia na listę
+//     „nie da się wyprowadzić" i jest wypisywana w raporcie. Cisza jest defektem.
+//   • ⛔ ZIELONY WYNIK NIE ZNACZY „POLICZONO WSZYSTKO". Mutacja dowodzi
+//     WRAŻLIWOŚCI („dołóż kartę → liczba rośnie"), nie KOMPLETNOŚCI. Tamten
+//     dowód miara M1 przeszła, mając zaniżone dwa ekrany z pięciu (O97).
+//     Kompletność sprawdza się osobno: czy każda rzecz, którą ekran rysuje,
+//     jest w wyniku ALBO na liście nieznanych.
 //
 // ⛔ Wniosek, który musi zostać wypowiedziany: zielony wynik tego modułu
 // NIE ZNACZY „ekran jest dobry". Znaczy „liczba rzeczy nad zgięciem nie
@@ -53,6 +64,10 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+// ⭐ PLAN-D-M2 17.08.2026 — liczba pozycji kolejki podania na „Dziś" jest
+// CZYTANA Z PRODUKTU NA ŻYWO, a nie przepisana tutaj. Przepisana zestarzałaby
+// się dokładnie tak, jak zestarzał się model ręczny z 08.08.2026 (O84).
+import { DOMYSLNA_LICZBA } from './kolejkaPodania';
 
 // ═════════════════════════════════════════════════════════════════════
 // ⭐ D5 — MIARA „NAD ZGIĘCIEM" STOI W JEDNYM MIEJSCU
@@ -96,6 +111,154 @@ const ZNAKI_NA_WYRAZENIE = 12;
 const NIEWYPROWADZALNY_DP = 120;
 /** Bezpiecznik przed pętlą przy komponentach wołających się nawzajem. */
 const MAKS_ZAGNIEZDZENIE = 6;
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-M2 17.08.2026 — ILE RAZY LISTA RYSUJE SWÓJ WIERSZ (D3)
+// ═════════════════════════════════════════════════════════════════════
+// Do 17.08.2026 KAŻDA lista liczyła się jako JEDEN wiersz, a lista, której
+// procedura rysująca była przekazana PO NAZWIE (`tydzien.dni.map(renderDzien)`)
+// — jako ZERO wierszy, i wypadała z pomiaru bez śladu. Skutek zmierzony:
+// „Kalendarz" oddawał 536 dp (0,66 ekranu) zamiast ponad tysiąca, czyli
+// zdanie „mieści się w całości" o ekranie, na którym nad zgięciem mieszczą
+// się trzy dni z siedmiu. ⛔ Zaniżona liczba jest gorsza niż brak liczby:
+// uspokaja tego, kto pyta.
+//
+// ⛔ ZASADA (O84): liczba powtórzeń NIE MOŻE być zgadnięta ani wpisana
+// na sztywno bez wskazania, skąd pochodzi. Każdy wpis niżej ma pole `zrodlo`
+// i jest to pole OBOWIĄZKOWE — pilnuje tego asercja w strażniku.
+// Są dwa dopuszczalne rodzaje źródła:
+//   • STAŁA PRODUKTU — czytana z modułu produktu na żywo (nie da się rozjechać),
+//   • JAWNE ZAŁOŻENIE — liczba nazwana tutaj, z powodem i wskazaniem miejsca
+//     w produkcie, z którego wynika.
+//
+// ⛔ Czego w tym rejestrze NIE MA, ląduje na liście „nie da się wyprowadzić"
+// (D2) — liczone jednym wierszem, ale WYMIENIONE Z NAZWY. Cisza jest defektem.
+
+/** Tydzień ma siedem dni. `lib/widokTygodnia.ts` buduje dokładnie tyle wierszy. */
+export const ZALOZENIE_DNI_W_TYGODNIU = 7;
+/** Historia (mecze, wpisy dziennika): oba ekrany czytają ją z `.limit(20)`. */
+export const ZALOZENIE_HISTORIA_MECZOW = 20;
+/** Pytania segmentowe meczu: `[first, second]` + trzecie z `loadThirdQuestion`. */
+export const ZALOZENIE_SLOTY_SEGMENTOW = 3;
+/**
+ * ⛔ Lista, której długości NIE DA SIĘ wyprowadzić z repozytorium (zależy
+ * od danych zawodnika). Liczymy jeden wiersz — błąd idzie W DÓŁ, więc ekran
+ * jest zawsze CO NAJMNIEJ tak wysoki — ale nazwa takiej listy trafia
+ * na listę „nie da się wyprowadzić" i jest wypisywana w raporcie.
+ */
+export const ZALOZENIE_LISTA_NIEZNANEJ_DLUGOSCI = 1;
+
+export type ZrodloPowtorzen = {
+  /** Jak rozpoznać tę listę — po TREŚCI wyrażenia stojącego przed `.map(` (O88). */
+  wzorzec: RegExp;
+  /** Ile razy ta lista rysuje swój wiersz. */
+  ile: number;
+  /** ⛔ SKĄD TA LICZBA. Puste pole = defekt, nie „jeszcze nie wiem". */
+  zrodlo: string;
+};
+
+export const POWTORZENIA_LIST: ZrodloPowtorzen[] = [
+  {
+    wzorzec: /(^|\.)dni$/,
+    ile: ZALOZENIE_DNI_W_TYGODNIU,
+    zrodlo: `JAWNE ZAŁOŻENIE ZALOZENIE_DNI_W_TYGODNIU = ${ZALOZENIE_DNI_W_TYGODNIU}: `
+      + 'tydzień ma siedem dni, a `lib/widokTygodnia.ts` buduje dokładnie siedem wierszy '
+      + '(siedem dat liczonych od poniedziałku). Krótszy tydzień nie istnieje.',
+  },
+  {
+    wzorzec: /^pozycjeNaDzis$/,
+    ile: DOMYSLNA_LICZBA.dzis ?? ZALOZENIE_LISTA_NIEZNANEJ_DLUGOSCI,
+    zrodlo: 'STAŁA PRODUKTU `DOMYSLNA_LICZBA.dzis` z `lib/kolejkaPodania.ts` — czytana '
+      + 'na żywo przez import, więc nie da się jej tu rozjechać z produktem.',
+  },
+  {
+    wzorzec: /^history$/,
+    ile: ZALOZENIE_HISTORIA_MECZOW,
+    zrodlo: `JAWNE ZAŁOŻENIE ZALOZENIE_HISTORIA_MECZOW = ${ZALOZENIE_HISTORIA_MECZOW}: `
+      + 'ekrany `app/(tabs)/mecz.tsx` i `app/(tabs)/dziennik.tsx` czytają swoją historię '
+      + 'zapytaniem zakończonym `.limit(20)` — sprawdzone w obu — więc więcej wierszy '
+      + 'żaden z nich nie narysuje.',
+  },
+  {
+    wzorzec: /^segmentSlots$/,
+    ile: ZALOZENIE_SLOTY_SEGMENTOW,
+    zrodlo: `JAWNE ZAŁOŻENIE ZALOZENIE_SLOTY_SEGMENTOW = ${ZALOZENIE_SLOTY_SEGMENTOW}: `
+      + 'ekran `app/(tabs)/mecz.tsx` buduje sloty z pary `[first, second]` i dokłada '
+      + 'trzeci w `loadThirdQuestion` — najgorszy przypadek to trzy pytania.',
+  },
+];
+
+/** Co miara odpowiada o długości konkretnej listy — zawsze z podanym źródłem. */
+export type Powtorzenie = { nazwa: string; ile: number; zrodlo: string; wyprowadzone: boolean };
+
+/**
+ * ⛔ Ile wierszy rysuje lista `nazwa` — i SKĄD to wiadomo.
+ * Nigdy nie oddaje samej liczby: liczba bez źródła jest zgadywaniem (O84).
+ */
+export function powtorzeniaListy(nazwa: string, tablice: Record<string, number> = {}): Powtorzenie {
+  // 1. literał tablicy w kodzie ekranu — długość wyprowadzalna wprost z treści
+  const literal = policzLiteralTablicy(nazwa);
+  if (literal !== null) {
+    return {
+      nazwa,
+      ile: literal,
+      zrodlo: `LITERAŁ TABLICY w kodzie ekranu — ${literal} pozycji policzonych z jego treści.`,
+      wyprowadzone: true,
+    };
+  }
+  // 2. stała tablicowa zadeklarowana w tym samym pliku — też widać, nie zakładamy
+  const stala = dlugoscStalejTablicy(nazwa, tablice);
+  if (stala !== null && stala > 0) {
+    return {
+      nazwa,
+      ile: stala,
+      zrodlo: `STAŁA \`const ${nazwa} = […]\` z repozytorium — ${stala} pozycji policzonych `
+        + 'z jej treści, przemiecionych, nie przepisanych.',
+      wyprowadzone: true,
+    };
+  }
+  // 3. rejestr wyżej
+  for (const r of POWTORZENIA_LIST) {
+    if (r.wzorzec.test(nazwa)) return { nazwa, ile: r.ile, zrodlo: r.zrodlo, wyprowadzone: true };
+  }
+  // 4. ⛔ nie wiadomo — mówimy to głośno, zamiast wpisać jedynkę w ciszy
+  return {
+    nazwa,
+    ile: ZALOZENIE_LISTA_NIEZNANEJ_DLUGOSCI,
+    zrodlo: 'NIE DA SIĘ WYPROWADZIĆ z repozytorium — długość zależy od danych zawodnika. '
+      + `Liczona jednym wierszem (błąd W DÓŁ), nazwa wypisana na liście „nie da się wyprowadzić".`,
+    wyprowadzone: false,
+  };
+}
+
+/** Długość literału tablicy `['a','b']` — albo `null`, gdy to nie literał. */
+function policzLiteralTablicy(tekst: string): number | null {
+  let t = tekst.trim();
+  // ⚠️ Kolejność: najpierw nawias, potem `as const` — `(['a','b'] as const)`
+  // ma `as const` W ŚRODKU nawiasu, więc odcinanie go pierwsze nic nie robi.
+  for (let i = 0; i < 3; i++) {
+    const przed = t;
+    t = t.replace(/^\(([\s\S]*)\)$/, '$1').trim().replace(/\s+as\s+const$/, '').trim();
+    if (t === przed) break;
+  }
+  if (!t.startsWith('[') || !t.endsWith(']')) return null;
+  const srodek = t.slice(1, -1).trim();
+  if (srodek === '') return 0;
+  // ⚠️ Liczymy NIEPUSTE człony, a nie przecinki: `[a, b, c,]` ma trzy pozycje,
+  // nie cztery. Przecinek na końcu listy jest w tym repozytorium regułą,
+  // a nie wyjątkiem — `DAYS_OF_WEEK` ma siedem dni i taki właśnie przecinek.
+  let g = 0;
+  let od = 0;
+  const człony: string[] = [];
+  for (let i = 0; i < srodek.length; i++) {
+    const c = srodek[i];
+    if ('([{'.includes(c)) g++;
+    else if (')]}'.includes(c)) g--;
+    else if (c === ',' && g === 0) { człony.push(srodek.slice(od, i)); od = i + 1; }
+  }
+  człony.push(srodek.slice(od));
+  return człony.filter((x) => x.trim() !== '').length;
+}
 
 // ═════════════════════════════════════════════════════════════════════
 // 1. LEKSER — jedno przejście po pliku, świadome trybu JSX
@@ -343,6 +506,39 @@ function zbierzObiekty(
   return out;
 }
 
+/**
+ * ⭐ PLAN-D-M2 (D3) — DŁUGOŚCI STAŁYCH TABLICOWYCH, także tych importowanych.
+ * `LEGENDA_KROPEK.map(…)` rysuje tyle wierszy, ile pozycji ma
+ * `export const LEGENDA_KROPEK = […]` w `lib/widokTygodnia.ts`. To jest liczba
+ * WIDOCZNA W KODZIE — przepisanie jej tutaj byłoby dokładnie tym modelem
+ * ręcznym, który ten moduł zastąpił (O84). Chodzimy po importach tak samo,
+ * jak po stylach, bo to ta sama potrzeba.
+ */
+function zbierzTablice(
+  src: string, katalog: string, glebokosc = 0, widziane = new Set<string>(),
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of src.matchAll(/(?:export\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=\n]{0,200}?)?=\s*\[/g)) {
+    const otw = src.indexOf('[', m.index + m[0].length - 1);
+    const ciało = zbalansowane(src, otw, '[', ']');
+    if (ciało === null) continue;
+    const n = policzLiteralTablicy(`[${ciało}]`);
+    if (n !== null && out[m[1]] === undefined) out[m[1]] = n;
+  }
+  if (glebokosc < 2) {
+    for (const m of src.matchAll(/from\s+'(\.[^']+)'/g)) {
+      for (const ext of ['.ts', '.tsx', '/index.ts']) {
+        const p = resolve(join(katalog, m[1] + ext));
+        if (widziane.has(p) || !existsSync(p)) continue;
+        widziane.add(p);
+        Object.assign(out, zbierzTablice(readFileSync(p, 'utf8'), dirname(p), glebokosc + 1, widziane), out);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 function wlasciwosci(plaski: string): Styl {
   const styl: Styl = {};
   for (const p of plaski.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?\d+(?:\.\d+)?|'[^']*'|"[^"]*")/g)) {
@@ -399,9 +595,20 @@ const num = (s: Styl | undefined, ...klucze: string[]): number => {
 type Kontekst = {
   src: string;
   style: Record<string, Styl>;
-  komponent: (nazwa: string) => { src: string; korzen: Wezel | null; style: Record<string, Styl> } | null;
+  komponent: (nazwa: string) => Znaleziony | null;
   niewyprowadzalne: Set<string>;
   glebokosc: number;
+  /** ⭐ M2 (D3): długości stałych tablicowych z pliku ekranu i jego importów. */
+  tablice: Record<string, number>;
+  /**
+   * ⭐ M2 (O97): gałęzie, które PRZEGRAŁY porównanie najgorszego przypadku.
+   * Zakładka „Tydzień" Kalendarza nie jest w wyniku nie dlatego, że miara jej
+   * nie widzi, tylko dlatego, że zakładka „Listy" jest wyższa. ⛔ Bez tej
+   * listy jedno i drugie wygląda w raporcie identycznie — jak cisza.
+   */
+  pominiete: Set<string>;
+  /** Gałęzie, które gdziekolwiek WYGRAŁY — z nich powstaje różnica poniżej. */
+  wybrane: Set<string>;
 };
 
 /** Style przypisane elementowi przez `style={styles.x}` / `style={[styles.x, …]}`. */
@@ -474,8 +681,12 @@ function wysokoscWezla(w: Wezel, ctx: Kontekst, szer: number): number {
   if (w.nazwa === '{}') {
     // Wyrażenie: bierzemy NAJWYŻSZĄ gałąź (worst case) — `a ? <X/> : <Y/>`.
     const dz = dzieciWyrazenia(w, ctx);
-    if (dz.length === 0) return 0;
-    return Math.max(...dz.map((d) => wysokoscWezla(d.w, d.ctx, szer)));
+    if (dz.length === 0) { zglosNierozwiniete(w, ctx); return 0; }
+    // ⭐ D3: lista rysuje swój wiersz tyle razy, ile mówi jej ŹRÓDŁO —
+    // i dotyczy to zarówno listy rozpoznanej z głowy wyrażenia, jak i tej,
+    // która przyszła z gałęzi stojącej obok JSX.
+    const jeden = Math.max(...dz.map((d) => wysokoscWezla(d.w, d.ctx, szer) * (d.powt?.ile ?? 1)));
+    return jeden * (listaWyrazenia(w, ctx)?.ile ?? 1);
   }
   if (PUSTE.has(w.nazwa)) return 0;
 
@@ -575,8 +786,14 @@ export type Pozycja = {
   nadZgieciem: boolean;
   /** Rozpis wnętrza — jeden poziom w głąb, materiał dla fazy hierarchii. */
   czesci: Pozycja[];
-  /** Czy to jeden wiersz listy — wtedy prawdziwa wysokość jest WIĘKSZA. */
+  /** Czy to wiersz listy. */
   lista: boolean;
+  /**
+   * ⭐ PLAN-D-M2 (D3) — ile razy ta lista rysuje swój wiersz i SKĄD to wiadomo.
+   * ⛔ `null` wyłącznie dla pozycji, która listą nie jest. Lista bez źródła
+   * to liczba zgadnięta, a takiej ten moduł nie oddaje.
+   */
+  powtorzenia: Powtorzenie | null;
 };
 
 export type PomiarEkranu = {
@@ -589,6 +806,12 @@ export type PomiarEkranu = {
   wysokoscRazemDp: number;
   /** Nazwy komponentów, których wysokości NIE dało się wyprowadzić z repozytorium. */
   niewyprowadzalne: string[];
+  /**
+   * ⭐ M2 (O97): gałęzie rysujące, które przegrały porównanie najgorszego
+   * przypadku — czyli TREŚĆ, KTÓREJ TA LICZBA NIE OPISUJE. Dla „Kalendarza"
+   * stoi tu `renderTydzien()`: pomiar opisuje zakładkę „Listy", bo jest wyższa.
+   */
+  pominieteGalezie: string[];
 };
 
 function znajdzKorzenRender(src: string): { korzen: Wezel | null; drzewo: Wezel[] } {
@@ -625,7 +848,95 @@ function znajdzKorzenRender(src: string): { korzen: Wezel | null; drzewo: Wezel[
  *   • fragment `<>` / `<Fragment>` — rozkładamy na dzieci,
  *   • `{/* komentarz *\/}` — znika, bo nic nie rysuje.
  */
-export type Kandydat = { w: Wezel; ctx: Kontekst; lista?: boolean };
+export type Kandydat = { w: Wezel; ctx: Kontekst; lista?: boolean; powt?: Powtorzenie; zNazwy?: string };
+
+// ─────────────────────────────────────────────────────────────────────
+// ⭐ PLAN-D-M2 17.08.2026 — ROZPOZNANIE LISTY (D1 + D3)
+// ─────────────────────────────────────────────────────────────────────
+/**
+ * GŁOWA wyrażenia `{…}` — wszystko od klamry do pierwszego znacznika JSX.
+ * Tam stoi `X.map(`, jeżeli to wyrażenie jest listą. ⛔ Szukanie `.map(`
+ * w CAŁYM wyrażeniu oznaczałoby jako listę wszystko, co gdziekolwiek głębiej
+ * ma pętlę — a zagnieżdżona lista jest osobnym wyrażeniem i policzy się sama.
+ */
+function glowaWyrazenia(tekst: string): string {
+  const m = /<[A-Za-z/]/.exec(tekst);
+  return m ? tekst.slice(0, m.index) : tekst;
+}
+
+/**
+ * Wyrażenie, po którym wołane jest `.map(` — czyli SAMA LISTA.
+ * `{tydzien.dni.map(renderDzien)}` → `tydzien.dni`.
+ * `{(['a','b'] as const).map(…)}` → `['a','b'] as const`.
+ */
+function nazwaListy(glowa: string): string | null {
+  const trafienia = [...glowa.matchAll(/\.\s*(?:map|flatMap)\s*\(/g)];
+  if (trafienia.length === 0) return null;
+  let koniec = trafienia[trafienia.length - 1].index;
+  while (koniec > 0 && /\s/.test(glowa[koniec - 1])) koniec--;
+  let i = koniec - 1;
+  let g = 0;
+  while (i >= 0) {
+    const c = glowa[i];
+    if (')]}'.includes(c)) { g++; i--; continue; }
+    if ('([{'.includes(c)) { if (g === 0) break; g--; i--; continue; }
+    if (g > 0) { i--; continue; }
+    // ⚠️ Poza nawiasami wolno tylko to, z czego zbudowana jest ŚCIEŻKA
+    // do listy: `a.b`, `a?.b`, `a!.b`. Spacja i `?` warunku kończą wyrażenie —
+    // bez tego `{osWidoczna ? punkty.map(…)}` nazywałoby się „osWidoczna ? punkty".
+    if (/[A-Za-z0-9_$.]/.test(c)) { i--; continue; }
+    if ((c === '?' || c === '!') && glowa[i + 1] === '.') { i--; continue; }
+    break;
+  }
+  const surowe = glowa.slice(i + 1, koniec).trim();
+  return surowe.length > 0 ? surowe.replace(/\s+/g, ' ') : null;
+}
+
+/**
+ * ⭐ D3, źródło najmocniejsze z możliwych: STAŁA TABLICOWA Z REPOZYTORIUM.
+ * `LEGENDA_KROPEK.map(…)` rysuje dokładnie tyle wierszy, ile pozycji ma
+ * `const LEGENDA_KROPEK = […]` w pliku ekranu. Tego nie trzeba zakładać —
+ * to widać w kodzie, a przemiecenie starzeje się razem z produktem (O84).
+ */
+function dlugoscStalejTablicy(nazwa: string, tablice: Record<string, number>): number | null {
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(nazwa)) return null;
+  return tablice[nazwa] ?? null;
+}
+
+/** Czy to wyrażenie jest listą — a jeżeli tak, ile wierszy rysuje i skąd to wiadomo. */
+function listaWyrazenia(w: Wezel, ctx: Kontekst): Powtorzenie | null {
+  if (w.nazwa !== '{}') return null;
+  const nazwa = nazwaListy(glowaWyrazenia(ctx.src.slice(w.poz, w.koniec)));
+  if (nazwa === null) return null;
+  const p = powtorzeniaListy(nazwa, ctx.tablice);
+  // ⛔ D2: lista, której długości nie umiemy wyprowadzić, ma być NAZWANA,
+  // a nie policzona jedynką w ciszy.
+  if (!p.wyprowadzone) ctx.niewyprowadzalne.add(`lista ${nazwa}.map(…) — ile wierszy`);
+  return p;
+}
+
+/**
+ * ⛔ D2 — WYRAŻENIE, KTÓREGO MIARA NIE UMIAŁA ROZWINĄĆ, TRAFIA NA LISTĘ.
+ * Do 17.08.2026 takie wyrażenie po prostu znikało: `{lista.map(renderDzien)}`
+ * dawało zero wierszy i nie zostawiało po sobie ani jednej litery w raporcie.
+ * ⚠️ Zwykłe wstawki tekstowe (`{imie}`, `{' '}`) NIE są tu zgłaszane — one nie
+ * znikają, tylko liczą się jako tekst w węźle nadrzędnym.
+ */
+function zglosNierozwiniete(w: Wezel, ctx: Kontekst): void {
+  // ⚠️ `{/* … */}` nic nie rysuje, więc niczego nie gubi — a bez tej bramki
+  // każdy komentarz cytujący znacznik trafiał na listę jako „zgubiony JSX".
+  if (tylkoKomentarz(w, ctx.src)) return;
+  const tekst = ctx.src.slice(w.poz, w.koniec);
+  const nazwa = nazwaListy(glowaWyrazenia(tekst));
+  if (nazwa !== null) {
+    ctx.niewyprowadzalne.add(`lista ${nazwa}.map(…) — wiersza NIE DA SIĘ wyprowadzić`);
+    return;
+  }
+  if (/<[A-Za-z]/.test(tekst)) {
+    const skrot = tekst.replace(/\s+/g, ' ').slice(0, 60);
+    ctx.niewyprowadzalne.add(`wyrażenie ${skrot}… — JSX poza zasięgiem miary`);
+  }
+}
 
 function rozbij(k: Kandydat, szer: number): Kandydat[] {
   const { w, ctx } = k;
@@ -633,21 +944,37 @@ function rozbij(k: Kandydat, szer: number): Kandydat[] {
   if (czystyPojemnik(w, ctx)) return w.dzieci.flatMap((d) => rozbij({ w: d, ctx }, szer));
   if (w.nazwa === '{}') {
     const dz = dzieciWyrazenia(w, ctx);
-    if (dz.length === 0) return [];
+    if (dz.length === 0) { zglosNierozwiniete(w, ctx); return []; }
     let best = dz[0];
     let bestH = -1;
     for (const d of dz) {
       const h = wysokoscWezla(d.w, d.ctx, szer);
       if (h > bestH) { bestH = h; best = d; }
     }
-    // ⚠️ `{cos.map(...)}` — z drzewa da się wyprowadzić JEDEN wiersz listy,
-    // nie ich liczbę. Nie zgadujemy jej: pozycja dostaje znacznik LISTA
-    // i wiadomo, że prawdziwy ekran jest WYŻSZY, nigdy niższy.
-    // ⚠️ Tylko PRZEDROSTEK wyrażenia — tekst przed wybraną gałęzią JSX.
-    // Szukanie `.map(` w całym poddrzewie oznaczałoby jako listę wszystko,
-    // co gdziekolwiek głębiej ma pętlę.
-    const czyLista = /\.map\s*\(/.test(ctx.src.slice(w.poz, best.w.poz));
-    return rozbij(best, szer).map((r) => (czyLista ? { ...r, lista: true } : r));
+    // ⭐ M2 (O97): gałąź, która przegrała, ma zostać NAZWANA. Inaczej „nie ma
+    // jej w wyniku, bo jest niższa" wygląda tak samo jak „nie ma jej w wyniku,
+    // bo miara jej nie widzi" — a to jest różnica między wyborem a cichym brakiem.
+    if (best.zNazwy) ctx.wybrane.add(`${best.zNazwy}()`);
+    for (const d of dz) if (d !== best && d.zNazwy) ctx.pominiete.add(`${d.zNazwy}()`);
+    // ⭐ `{cos.map(…)}` — z drzewa da się wyprowadzić JEDEN wiersz listy.
+    // Ile razy się powtarza, mówi rejestr `POWTORZENIA_LIST` (D3): albo
+    // stała produktu, albo jawne założenie z powodem. Czego rejestr nie zna,
+    // liczy się jednym wierszem i trafia na listę „nie da się wyprowadzić".
+    const powt = listaWyrazenia(w, ctx);
+    if (!powt) {
+      // Gałąź obok JSX mogła sama być listą — jej `powt` przechodzi dalej.
+      const dalej = rozbij(best, szer);
+      return best.powt ? dalej.map((r) => ({ ...r, lista: true, powt: r.powt ?? best.powt })) : dalej;
+    }
+    return rozbij(best, szer).map((r) => ({
+      ...r,
+      lista: true,
+      // ⚠️ MNOŻYMY, nie nadpisujemy: lista w liście powtarza się iloczyn razy.
+      powt: r.powt
+        ? { ...r.powt, ile: r.powt.ile * powt.ile, nazwa: `${powt.nazwa} › ${r.powt.nazwa}`,
+            zrodlo: `${powt.zrodlo} × ${r.powt.zrodlo}`, wyprowadzone: r.powt.wyprowadzone && powt.wyprowadzone }
+        : powt,
+    }));
   }
   if (w.nazwa === '' || w.nazwa === 'Fragment') {
     return w.dzieci.flatMap((d) => rozbij({ w: d, ctx }, szer));
@@ -665,7 +992,7 @@ function rozbij(k: Kandydat, szer: number): Kandydat[] {
  * lądują w `niewyprowadzalne` — z nazwy.
  */
 function dzieciWyrazenia(w: Wezel, ctx: Kontekst): Kandydat[] {
-  if (w.dzieci.length > 0) return w.dzieci.map((d) => ({ w: d, ctx }));
+  if (w.dzieci.length > 0) return [...w.dzieci.map((d) => ({ w: d, ctx })), ...gałęzieObokJSX(w, ctx)];
   if (ctx.glebokosc >= MAKS_ZAGNIEZDZENIE) return [];
   const tresc = ctx.src.slice(w.poz, w.koniec);
   const out: Kandydat[] = [];
@@ -675,15 +1002,85 @@ function dzieciWyrazenia(w: Wezel, ctx: Kontekst): Kandydat[] {
   // wiersza menu. Identyfikator, którego nie da się rozwinąć do drzewa JSX,
   // jest po prostu pomijany (to zwykłe `Math.round(` i podobne).
   const widziane = new Set<string>();
-  for (const m of tresc.matchAll(/\b([a-zA-Z_][A-Za-z0-9_]*)\s*\(/g)) {
-    if (widziane.has(m[1] + m.index)) continue;
-    widziane.add(m[1] + m.index);
-    const k = ctx.komponent(m[1]);
+  const dodaj = (nazwa: string, jak: string) => {
+    if (widziane.has(nazwa)) return;
+    widziane.add(nazwa);
+    const k = ctx.komponent(nazwa);
     if (k?.korzen) {
-      out.push({ w: k.korzen, ctx: { ...ctx, src: k.src, style: k.style, glebokosc: ctx.glebokosc + 1 } });
-    } else if (/^render[A-Z]/.test(m[1])) {
-      ctx.niewyprowadzalne.add(`${m[1]}()`);
+      const pod = { ...ctx, src: k.src, style: k.style, glebokosc: ctx.glebokosc + 1 };
+      for (const kor of (k.korzenie.length > 0 ? k.korzenie : [k.korzen])) out.push({ w: kor, ctx: pod, zNazwy: nazwa });
+    } else if (/^render[A-Z]/.test(nazwa)) {
+      ctx.niewyprowadzalne.add(`${nazwa}()${jak}`);
     }
+  };
+
+  // ⭐ PLAN-D-M2 17.08.2026 (D1) — PROCEDURA PRZEKAZANA PO NAZWIE.
+  // `lista.map(renderDzien)` i `lista.map((d) => renderDzien(d))` to dla
+  // zawodnika TO SAMO siedem wierszy. Do 17.08.2026 miara rozwijała tylko
+  // drugą postać, bo szukała wyłącznie identyfikatorów z nawiasem `(` tuż
+  // za nazwą — a w pierwszej postaci nawias należy do `map`. Lista wypadała
+  // z pomiaru jako ZERO wierszy i nie zostawiała śladu. To musi być pierwsze,
+  // bo `map(` też pasuje do wzorca niżej i bez tego zjadłoby swój argument.
+  for (const m of tresc.matchAll(/\.\s*(?:map|flatMap)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]/g)) {
+    dodaj(m[1], ' — procedura rysująca przekazana liście po nazwie');
+  }
+
+  for (const m of tresc.matchAll(/\b([a-zA-Z_][A-Za-z0-9_]*)\s*\(/g)) dodaj(m[1], '');
+  return out;
+}
+
+/**
+ * ⭐ PLAN-D-M2 17.08.2026 — GAŁĄŹ RYSOWANA PROCEDURĄ, KTÓRA STOI OBOK JSX.
+ *
+ * Ekran „Dziś" pisze `{zakres === 'dzis' ? (<>…</>) : renderTydzienNaKarcie()}`.
+ * Do 17.08.2026 miara widziała w tym wyrażeniu wyłącznie dziecko JSX i CAŁA
+ * druga gałąź — zakładka „Tydzień" z siedmioma wierszami dni — znikała bez
+ * śladu. ⛔ Reguła „gałąź warunkowa liczy się najgorszym przypadkiem" była
+ * wtedy nieprawdziwa: najgorszy przypadek nie brał udziału w porównaniu.
+ *
+ * Dlatego przy dzieciach JSX dokładamy WYŁĄCZNIE wywołania `render…()`
+ * stojące POZA nimi. Zawężenie jest świadome: każdy inny identyfikator
+ * z nawiasem w takim miejscu to `Math.round(`, `String(` i podobne.
+ */
+function gałęzieObokJSX(w: Wezel, ctx: Kontekst): Kandydat[] {
+  if (ctx.glebokosc >= MAKS_ZAGNIEZDZENIE) return [];
+  const zakresy = w.dzieci.map((d) => [d.poz, d.koniec] as const);
+  const poza = (i: number) => !zakresy.some(([a, b]) => i >= a - w.poz && i < b - w.poz);
+  const tresc = ctx.src.slice(w.poz, w.koniec);
+  const out: Kandydat[] = [];
+  const widziane = new Set<string>();
+  // ⛔ D1 obowiązuje TAKŻE tutaj. Kalendarz pisze
+  // `{showCancelled && (cancelled.length === 0 ? <Text/> : cancelled.map(renderEventCard))}`
+  // — jedno dziecko JSX i lista przekazana po nazwie w drugiej gałęzi.
+  // Bez tego wiersza cała sekcja „Odwołane" wypadała z pomiaru, mimo że
+  // reguła D1 była już naprawiona w gałęzi bez JSX. Znalazła to asercja
+  // kompletności (O97), nie lektura kodu.
+  const trafienia = [
+    ...tresc.matchAll(/\brender[A-Z][A-Za-z0-9_]*\s*\(/g),
+    ...tresc.matchAll(/\.\s*(?:map|flatMap)\s*\(\s*(render[A-Z][A-Za-z0-9_]*)\s*[,)]/g),
+  ].sort((a, b) => a.index - b.index);
+  for (const m of trafienia) {
+    const nazwa = (m[1] ?? m[0].slice(0, m[0].indexOf('('))).trim();
+    if (!poza(m.index) || widziane.has(nazwa)) continue;
+    widziane.add(nazwa);
+    // Gdy trafienie pochodzi z `.map(nazwa)`, ta gałąź JEST listą — i musi
+    // dostać swoją liczbę powtórzeń razem ze źródłem (D3), tak samo jak lista
+    // rozpoznana z głowy wyrażenia.
+    let powt: Powtorzenie | undefined;
+    if (m[1]) {
+      const lista = nazwaListy(tresc.slice(0, m.index + m[0].length));
+      if (lista !== null) {
+        powt = powtorzeniaListy(lista, ctx.tablice);
+        if (!powt.wyprowadzone) ctx.niewyprowadzalne.add(`lista ${lista}.map(…) — ile wierszy`);
+      }
+    }
+    const k = ctx.komponent(nazwa);
+    if (k?.korzen) {
+      const pod = { ...ctx, src: k.src, style: k.style, glebokosc: ctx.glebokosc + 1 };
+      for (const kor of (k.korzenie.length > 0 ? k.korzenie : [k.korzen])) {
+        out.push({ w: kor, ctx: pod, zNazwy: nazwa, lista: powt !== undefined, powt });
+      }
+    } else ctx.niewyprowadzalne.add(`${nazwa}() — gałąź obok JSX`);
   }
   return out;
 }
@@ -734,14 +1131,20 @@ export function zmierzEkran(sciezka: string): PomiarEkranu {
 export function zmierzEkranZTekstu(nazwaPliku: string, src: string, katalog: string): PomiarEkranu {
   const obiekty = zbierzObiekty(src, katalog);
   const style = czytajStyle(src, obiekty);
+  const tablice = zbierzTablice(src, katalog);
   const niewyprowadzalne = new Set<string>();
-  const cacheKomponentow = new Map<string, { src: string; korzen: Wezel | null; style: Record<string, Styl> } | null>();
+  const pominiete = new Set<string>();
+  const wybrane = new Set<string>();
+  const cacheKomponentow = new Map<string, Znaleziony | null>();
 
   const ctx: Kontekst = {
     src,
     style,
     niewyprowadzalne,
+    pominiete,
+    wybrane,
     glebokosc: 0,
+    tablice,
     komponent: (nazwa) => szukajKomponentu(nazwa, src, katalog, cacheKomponentow),
   };
 
@@ -770,6 +1173,9 @@ export function zmierzEkranZTekstu(nazwaPliku: string, src: string, katalog: str
     podZgieciem: pozycje.length - nad,
     wysokoscRazemDp: koniecDp,
     niewyprowadzalne: [...niewyprowadzalne].sort(),
+    // ⛔ Gałąź, która gdzie indziej wygrała, NIE jest pominięta — jej treść
+    // jest w wyniku. Bez tego odjęcia lista straszyłaby na wyrost.
+    pominieteGalezie: [...pominiete].filter((n) => !wybrane.has(n)).sort(),
   };
 }
 
@@ -786,7 +1192,8 @@ function pozycjeZDzieci(
   let kursor = odDp;
   let nr = 0;
   for (const k of dzieci.flatMap((x) => rozbij(x, szer))) {
-    const h = Math.round(wysokoscWezla(k.w, k.ctx, szer) * 10) / 10;
+    // ⭐ D3: wiersz listy zajmuje na ekranie tyle miejsca, ile razy się powtarza.
+    const h = Math.round(wysokoscWezla(k.w, k.ctx, szer) * (k.powt?.ile ?? 1) * 10) / 10;
     if (h === 0) continue;
     nr++;
     const gora = Math.round(kursor * 10) / 10;
@@ -800,20 +1207,33 @@ function pozycjeZDzieci(
     pozycje.push({
       nr, nazwa: nazwijPozycje(k.w, k.ctx), wysokoscDp: h, goraDp: gora, dolDp: dol,
       nadZgieciem: dol <= WIDOCZNE_NAD_ZGIECIEM_DP, czesci, lista: !!k.lista,
+      powtorzenia: k.powt ?? null,
     });
     kursor += h;
   }
   return { pozycje, koniecDp: Math.round(kursor * 10) / 10 };
 }
 
+/**
+ * ⭐ PLAN-D-M2 17.08.2026 — `korzenie` (liczba mnoga) NIE JEST OZDOBĄ.
+ * Funkcja rysująca z kilkoma `return` to kilka GAŁĘZI, a nie jedna.
+ * `renderTydzienNaKarcie()` na ekranie „Dziś" zaczyna się od `return <Text>`
+ * dla nieudanego odczytu, a dopiero dalej zwraca siedem wierszy tygodnia —
+ * branie pierwszego korzenia oddawało 28 dp zamiast całej zakładki
+ * i gubiło ją w ciszy, bo pierwsza gałąź przegrywała porównanie z sąsiadem.
+ * Reguła „najgorszy przypadek" wymaga, żeby WSZYSTKIE gałęzie stanęły
+ * do porównania.
+ */
+type Znaleziony = { src: string; korzen: Wezel | null; korzenie: Wezel[]; style: Record<string, Styl> };
+
 function szukajKomponentu(
   nazwa: string,
   src: string,
   katalog: string,
-  cache: Map<string, { src: string; korzen: Wezel | null; style: Record<string, Styl> } | null>,
-): { src: string; korzen: Wezel | null; style: Record<string, Styl> } | null {
+  cache: Map<string, Znaleziony | null>,
+): Znaleziony | null {
   if (cache.has(nazwa)) return cache.get(nazwa) ?? null;
-  let wynik: { src: string; korzen: Wezel | null; style: Record<string, Styl> } | null = null;
+  let wynik: Znaleziony | null = null;
 
   // 1. funkcja zdefiniowana w tym samym pliku
   const lokalna = new RegExp(`(?:function\\s+${nazwa}\\s*\\(|const\\s+${nazwa}\\s*=\\s*\\()`).exec(src);
@@ -829,7 +1249,12 @@ function szukajKomponentu(
     if (ciało) {
       const tok = tokenizuj(ciało, 0, ciało.length);
       const drzewo = zbudujDrzewo(tok, ciało);
-      wynik = { src: ciało, korzen: drzewo[0] ?? null, style: czytajStyle(src, zbierzObiekty(src, katalog)) };
+      wynik = {
+        src: ciało,
+        korzen: drzewo[0] ?? null,
+        korzenie: drzewo,
+        style: czytajStyle(src, zbierzObiekty(src, katalog)),
+      };
     }
   }
 
@@ -843,7 +1268,10 @@ function szukajKomponentu(
         if (existsSync(p)) {
           const tekst = readFileSync(p, 'utf8');
           const { korzen } = znajdzKorzenRender(tekst);
-          wynik = { src: tekst, korzen, style: czytajStyle(tekst, zbierzObiekty(tekst, dirname(p))) };
+          wynik = {
+            src: tekst, korzen, korzenie: korzen ? [korzen] : [],
+            style: czytajStyle(tekst, zbierzObiekty(tekst, dirname(p))),
+          };
           break;
         }
       }
@@ -905,7 +1333,18 @@ export function opiszPozycje(p: Pozycja): string {
   const znak = p.nadZgieciem ? '👁' : (p.goraDp < WIDOCZNE_NAD_ZGIECIEM_DP ? '✂' : '↓');
   return `  ${znak} ${String(p.nr).padStart(2)}. ${String(Math.round(p.wysokoscDp)).padStart(5)} dp  `
     + `(${String(Math.round(p.goraDp)).padStart(5)}–${String(Math.round(p.dolDp)).padStart(5)})  `
-    + `${p.nazwa}${p.lista ? '  [LISTA — 1 wiersz z wielu]' : ''}`;
+    + `${p.nazwa}${opiszListe(p)}`;
+}
+
+/**
+ * ⭐ PLAN-D-M2 (D3) — obok liczby stoi ŹRÓDŁO liczby powtórzeń.
+ * ⛔ Sama liczba bez źródła jest zgadywaniem i nie ma prawa się tu pojawić.
+ */
+export function opiszListe(p: Pozycja): string {
+  if (!p.lista || !p.powtorzenia) return '';
+  const { ile, nazwa, wyprowadzone } = p.powtorzenia;
+  const skad = wyprowadzone ? 'źródło znane' : '⛔ długości NIE DA SIĘ wyprowadzić';
+  return `  [LISTA ${nazwa} × ${ile} — ${skad}]`;
 }
 
 /** Ile pozycji przecina zgięcie: zaczyna się nad nim, kończy pod. */
