@@ -97,10 +97,40 @@ function surowe(wzgledna: string): string {
   return readFileSync(p, 'utf8');
 }
 
+/**
+ * ⭐ PLAN-D-S1 18.08.2026 — GDZIE MIESZKA DZIŚ TRZECIA CZĘŚĆ WGLĄDU.
+ *
+ * Do 18.08.2026 rysował ją `app/(tabs)/dzis.tsx` i wszystkie asercje (B4-2)
+ * i (B4-4) czytały TAMTEN plik. Pas A1 zdjął z „Dziś" komponent `WgladPozycji`
+ * razem z 330 dp — i przez jedną rundę wgląd kończył się na WIEDZY, czyli
+ * łamał M4, mimo że producent (`lib/wgladyZAlgorytmu.ts`, 81 asercji) liczył
+ * wszystkie trzy części poprawnie. ⛔ To był CICHY BRAK: nota A1 §3 wiersz 10
+ * kierowała ten blok na „Profil → Skąd to wiemy" i nazywała go „najdroższą
+ * rzeczą na tej liście i pierwszą do odzyskania", a nikt go tam nie postawił.
+ *
+ * ⭐ PAS S1 PRZYWRÓCIŁ RZECZ, a nie osłabił strażnika: rysowanie zostało
+ * wyprowadzone do `components/WgladPozycji.tsx` (JEDNA kopia — dokładnie tak,
+ * jak zapowiadał nagłówek `components/ListaZadan.tsx`) i wpięte w listę
+ * „Moje zadania", czyli WEWNĄTRZ pętli po pozycjach wydanych przez rankera.
+ * Lista jest `Modal`-em montowanym z ekranu „Profil", więc kosztuje ZERO dp.
+ *
+ * ⛔ ASERCJE NIŻEJ SĄ RÓWNIE MOCNE: pytają o te same kształty (`<Text>` z
+ * `doZrobienia`, montaż karmiony `wgladDlaPozycji`, oś z datą, wartością
+ * i jednostką, zakaz przepisywania zdań producenta) — tylko w miejscu,
+ * w którym te kształty dziś stoją.
+ */
+const PLIK_RYSUJACY = 'components/WgladPozycji.tsx';
+/** Ekran, który MONTUJE rysowanie wewnątrz pętli po pozycjach rankera. */
+const PLIK_MONTUJACY = 'components/ListaZadan.tsx';
+
 const dzisSurowe = surowe(PLIK_DZIS);
 const dzis = bezKomentarzy(dzisSurowe);
 const wejsciaSurowe = surowe(PLIK_WEJSC);
 const wejscia = bezKomentarzy(wejsciaSurowe);
+const rysujacySurowe = surowe(PLIK_RYSUJACY);
+const rysujacy = bezKomentarzy(rysujacySurowe);
+const montujacySurowe = surowe(PLIK_MONTUJACY);
+const montujacy = bezKomentarzy(montujacySurowe);
 
 /**
  * Sekcja budowania SZEŚCIU WEJŚĆ WGLĄDÓW, wycięta z SUROWEGO źródła (znaczniki
@@ -205,13 +235,26 @@ function check(label: string, cond: boolean, detail: string) {
 // dokładnie M4 („żaden materiał nie kończy się na wiedzy"), dziś złamane
 // w 114 z 297 podpowiedzi.
 {
-  check('(B4-2) `dzis.tsx` woła `wgladDlaPozycji`',
-    /\bwgladDlaPozycji\(/.test(dzis),
-    'trzecia część wglądu nie ma jak wyjść z producenta — wgląd kończy się na wiedzy (M4)');
+  check('(B4-2) ekran, który rysuje pozycje kolejki, woła `wgladDlaPozycji`',
+    /\bwgladDlaPozycji\(/.test(montujacy),
+    `trzecia część wglądu nie ma jak wyjść z producenta — wgląd kończy się na wiedzy (M4). `
+    + `Szukane w ${PLIK_MONTUJACY}`);
 
   check('(B4-2) `wgladDlaPozycji` pyta o pozycję Z LISTY, po jej `id` — nie o wgląd wybrany na sztywno',
-    /wgladDlaPozycji\(\s*wglady\s*,\s*p\.id\s*\)/.test(dzis),
+    /wgladDlaPozycji\(\s*wglady\s*,\s*p\.id\s*\)/.test(montujacy),
     'ekran nie łączy wglądu z POZYCJĄ, którą właśnie rysuje — pokaże trzecią część przy cudzym wierszu');
+
+  // ⛔ ZAPADKA NA RÓWNOŚĆ: rysowanie trzeciej części ma w produkcie DOKŁADNIE
+  // JEDNĄ kopię. Dwie kopie rozjeżdżają się przy pierwszej poprawce brzmienia,
+  // a zero kopii to stan sprzed tego pasa.
+  const KOPII_RYSOWANIA_18_08_2026 = 1;
+  const kopieRysowania = ['app/(tabs)/dzis.tsx', 'components/ListaZadan.tsx',
+    'components/PozycjaKolejkiCard.tsx', 'components/WgladPozycji.tsx', 'app/(tabs)/ja.tsx']
+    .filter((f) => /\{\s*wglad\.doZrobienia\s*\}/.test(bezKomentarzy(surowe(f))));
+  check(`(B4-2) ⭐ trzecia część wglądu ma DOKŁADNIE ${KOPII_RYSOWANIA_18_08_2026} kopię rysowania (O73)`,
+    kopieRysowania.length === KOPII_RYSOWANIA_18_08_2026,
+    `rysują ją: ${kopieRysowania.join(', ') || 'ŻADEN PLIK'} — zero znaczy, że wgląd znowu kończy `
+    + 'się na wiedzy; dwa znaczą dwie kopie brzmienia, które rozjadą się po cichu');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -290,24 +333,41 @@ function check(label: string, cond: boolean, detail: string) {
 // wglądu naprawdę stała w drzewie JSX.
 {
   check('(B4-4) ⭐ istnieje komponent, który rysuje TRZECIĄ CZĘŚĆ wglądu w `<Text>`',
-    /<Text[^>]*>\s*\{wglad\.doZrobienia\}\s*<\/Text>/.test(dzis),
-    'trzecia część wglądu nie trafia do drzewa JSX — wgląd kończy się na wiedzy mimo zielonych asercji (M4)');
+    /<Text[^>]*>\s*\{wglad\.doZrobienia\}\s*<\/Text>/.test(rysujacy),
+    `trzecia część wglądu nie trafia do drzewa JSX (${PLIK_RYSUJACY}) — wgląd kończy się `
+    + 'na wiedzy mimo zielonych asercji (M4)');
 
   check('(B4-4) ⭐ ekran NAPRAWDĘ montuje ten komponent, karmiąc go wynikiem `wgladDlaPozycji`',
-    /<WgladPozycji\s+wglad=\{wgladDlaPozycji\(/.test(dzis),
+    /<WgladPozycji\s+wglad=\{wgladDlaPozycji\(/.test(montujacy),
     'komponent istnieje, ale nikt go nie renderuje — martwy kod, który przechodzi każdą asercję na tekst');
 
+  // ⛔ WEWNĄTRZ PĘTLI PO POZYCJACH RANKERA, a nie obok niej. Wgląd rysowany
+  // poza pętlą jest siódmym producentem: nie podlega ani wyciszeniu przy
+  // kontuzji, ani hamulcowi bólu, ani ścieżce wyjścia.
+  // ⚠️ Pętla i montaż stoją w tym samym pliku, ale w DWÓCH funkcjach:
+  // `pozycje.map((p) => renderPozycja(p, dzisStr))` woła `renderPozycja`,
+  // a montaż stoi w JEJ CIELE. Sprawdzamy więc ciało tej funkcji, a nie
+  // odległość znaków — inaczej strażnik pilnowałby układu pliku, nie reguły.
+  const cialoWiersza = (() => {
+    const od = montujacy.indexOf('const renderPozycja =');
+    if (od < 0) return null;
+    const koniec = montujacy.indexOf('\n  };', od);
+    return koniec < 0 ? null : montujacy.slice(od, koniec);
+  })();
   check('(B4-4) ⭐ komponent stoi WEWNĄTRZ pętli po pozycjach kolejki, a nie obok niej',
-    /pozycjeNaDzis\.map\(/.test(dzis)
-    && dzis.indexOf('pozycjeNaDzis.map(') < dzis.indexOf('<WgladPozycji')
-    && dzis.indexOf('<WgladPozycji') < dzis.indexOf('</ScrollView>'),
-    'wgląd wyszedł z pozycji kolejki i stoi jako osobna karta — czyli jako siódmy producent');
+    cialoWiersza !== null
+    && /<WgladPozycji/.test(cialoWiersza)
+    && /pozycje\.map\(\s*\(p\)\s*=>\s*renderPozycja\(/.test(montujacy)
+    && /<WgladPozycji/.test(montujacy.slice(0, montujacy.indexOf('</Modal>'))),
+    cialoWiersza === null
+      ? 'nie znajduję ciała `renderPozycja` — nie da się powiedzieć, czy wgląd stoi w pętli'
+      : 'wgląd wyszedł z pozycji kolejki i stoi jako osobna karta — czyli jako siódmy producent');
 
   // WG-34 — oś pomiarów na GŁĘBOKOŚCI 1. ⛔ Punkt bez czytelnej daty nie jest
   // rysowany: „2026-13-45" na ekranie jest gorsze niż brak punktu.
   check('(B4-4) oś pomiarów (WG-34) rysuje się po rozwinięciu i odrzuca punkty bez czytelnej daty',
-    /osWidoczna/.test(dzis) && /dataPoPolsku\(/.test(dzis)
-    && /\.filter\(\(p\)[\s\S]{0,120}p\.data !== null\)/.test(dzis),
+    /osWidoczna/.test(rysujacy) && /dataPoPolsku\(/.test(rysujacy)
+    && /\.filter\(\(p\)[\s\S]{0,120}p\.data !== null\)/.test(rysujacy),
     'oś stoi na głębokości 0 (hałas przy każdej pozycji) albo wypisuje surowe daty z bazy');
 
   // ⛔ Powody techniczne („2 pomiary RPE, próg 3") mówią o STANIE NASZYCH
@@ -330,12 +390,16 @@ function check(label: string, cond: boolean, detail: string) {
 // i czekają na decyzję Kuby. Ekran dokłada TRZY własne (nagłówek trzeciej
 // części i dwa stany przełącznika osi) — i one też czekają.
 {
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S1): znacznik i trzy własne brzmienia pasa
+  // B4 przeprowadziły się razem z rysowaniem do `components/WgladPozycji.tsx`.
+  // ⚠️ W `dzis.tsx` została ICH MARTWA KOPIA (plik jest dla pasa S1 tylko
+  // do odczytu) — dlatego pytamy o plik, który te zdania NAPRAWDĘ rysuje.
   check('znacznik „do przejrzenia przez Kubę" stoi w pliku razem z brzmieniami pasa B4',
-    /BRZMIENIE_DO_PRZEJRZENIA_B4\s*=\s*'DO PRZEJRZENIA PRZEZ KUBĘ \(PLAN-D-B4/.test(dzis),
+    /BRZMIENIE_DO_PRZEJRZENIA_B4\s*=\s*'DO PRZEJRZENIA PRZEZ KUBĘ \(PLAN-D-B4/.test(rysujacy),
     'zniknął znacznik brzmień — nie da się już powiedzieć, które zdania czekają na decyzję');
 
   check('ekran NIE PRZEPISUJE zdań wglądu — bierze `doZrobienia` z producenta, nie z własnej stałej',
-    /\{wglad\.doZrobienia\}/.test(dzis) && !/const WGLAD_[A-Z_]*TRESC/.test(dzis),
+    /\{wglad\.doZrobienia\}/.test(rysujacy) && !/const WGLAD_[A-Z_]*TRESC/.test(rysujacy),
     'ktoś podmienił brzmienie wglądu na ekranie — decyzja o brzmieniu należy do Kuby, nie do wołającego');
 }
 

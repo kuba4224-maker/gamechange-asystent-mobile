@@ -12,6 +12,8 @@ import {
   trafnoscSesji,
   ocenPraceWlasna,
   MAPA_PRACY_WLASNEJ,
+  RODZAJE_PRACY_WLASNEJ_DO_WYBORU,
+  RODZAJE_PRACY_WLASNEJ_HISTORYCZNE,
   WAGA_TIERU,
   PROG_PODLOGI_WYNIKU,
   ILE_NAJWYZSZYCH_ZWROTOW,
@@ -147,9 +149,41 @@ console.log('\nW4-D. PRACA WŁASNA ZADEKLAROWANA W DIAGNOZIE');
     ocenPraceWlasna({ zwrot: z, rodzaje: null }).rodzaj === 'nie_wiemy'
     && ocenPraceWlasna({ zwrot: z, rodzaje: '  ' }).rodzaj === 'nie_wiemy',
     'pusta deklaracja policzona jako zero trafień');
-  check('⛔ (W4) mapa pracy własnej pokrywa DOKŁADNIE pięć rodzajów z ankiety diagnostycznej',
-    Object.keys(MAPA_PRACY_WLASNEJ).sort().join(',') === 'bieganie,mental,silownia,stretching,technika',
+  check('⛔ (M1) mapa pracy własnej pokrywa DOKŁADNIE te rodzaje — pięć do wyboru + jeden historyczny',
+    Object.keys(MAPA_PRACY_WLASNEJ).sort().join(',') === 'bieganie,mental,odnowa,silownia,stretching,technika',
     Object.keys(MAPA_PRACY_WLASNEJ).sort().join(','));
+
+  // ═══ M1 — DECYZJA KUBY 18.08.2026 ═══════════════════════════════
+  check('⭐ (M1) siłownia celuje TAKŻE w tolerancję obciążeń — decyzja Kuby 18.08',
+    (MAPA_PRACY_WLASNEJ.silownia ?? []).includes('tolerancja'),
+    (MAPA_PRACY_WLASNEJ.silownia ?? []).join(' · '));
+  check('⭐ (M1) `odnowa` istnieje i celuje WYŁĄCZNIE w regenerację — ⛔ bez odporności „na wszelki wypadek"',
+    (MAPA_PRACY_WLASNEJ.odnowa ?? []).join(',') === 'regeneracja',
+    (MAPA_PRACY_WLASNEJ.odnowa ?? []).join(' · '));
+  check('⛔ (M1) `stretching` NIE JEST proponowany zawodnikowi — jest wyłącznie aliasem historycznym',
+    !RODZAJE_PRACY_WLASNEJ_DO_WYBORU.includes('stretching')
+    && RODZAJE_PRACY_WLASNEJ_HISTORYCZNE.includes('stretching'),
+    RODZAJE_PRACY_WLASNEJ_DO_WYBORU.join(' · '));
+  check('⭐⛔ (M1, B3) alias liczy DOKŁADNIE TO SAMO co `odnowa` — 12 zawodników w bazie ma wpisany `stretching` i nie wolno im tej pracy odebrać po cichu',
+    (MAPA_PRACY_WLASNEJ.stretching ?? []).join(',') === (MAPA_PRACY_WLASNEJ.odnowa ?? []).join(','),
+    `stretching=[${(MAPA_PRACY_WLASNEJ.stretching ?? []).join()}] odnowa=[${(MAPA_PRACY_WLASNEJ.odnowa ?? []).join()}]`);
+  check('⛔ (M1) KAŻDY rodzaj do wyboru ma swoje obszary w mapie — lista wyboru nie może wskazywać w pustkę',
+    RODZAJE_PRACY_WLASNEJ_DO_WYBORU.every((r) => (MAPA_PRACY_WLASNEJ[r] ?? []).length > 0),
+    RODZAJE_PRACY_WLASNEJ_DO_WYBORU.filter((r) => !(MAPA_PRACY_WLASNEJ[r] ?? []).length).join(' · '));
+  check('⛔ (M1) rodzaj historyczny i rodzaj do wyboru to ROZŁĄCZNE zbiory',
+    !RODZAJE_PRACY_WLASNEJ_HISTORYCZNE.some((r) => RODZAJE_PRACY_WLASNEJ_DO_WYBORU.includes(r))
+    && RODZAJE_PRACY_WLASNEJ_HISTORYCZNE.every((r) => r in MAPA_PRACY_WLASNEJ),
+    'rodzaj stoi w obu listach naraz — czyli „wywalony" i „proponowany" jednocześnie');
+  check('⭐⛔ (M1) zawodnik z `odnowa` i zawodnik z `stretching` dostają IDENTYCZNY wynik — sprawdzone WYWOŁANIEM, nie lekturą mapy',
+    (() => {
+      const stary = ocenPraceWlasna({ zwrot: z, rodzaje: 'silownia,bieganie,stretching,technika' });
+      const nowy = ocenPraceWlasna({ zwrot: z, rodzaje: 'silownia,bieganie,odnowa,technika' });
+      if (stary.rodzaj !== 'jest' || nowy.rodzaj !== 'jest') return false;
+      return stary.trafiaja.join(',') === nowy.trafiaja.join(',')
+        && stary.trafneBezPokrycia.join(',') === nowy.trafneBezPokrycia.join(',')
+        && stary.nieznaneRodzaje.length === 0 && nowy.nieznaneRodzaje.length === 0;
+    })(),
+    'przemianowanie zmieniło komuś wynik — czyli nie było przemianowaniem');
   check('⛔ (W4) każdy obszar z mapy istnieje w profilach pozycji — mapa nie wskazuje w próżnię',
     Object.values(MAPA_PRACY_WLASNEJ).flat()
       .every((obszar) => Object.values(POSITION_PROFILES).some((p) => obszar in p.tiers)),

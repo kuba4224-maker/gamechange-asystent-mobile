@@ -942,9 +942,21 @@ console.log('\n11. ⭐ PLAN-D-K1 — JEDEN FAKT MA W PRODUKCIE JEDNĄ NAZWĘ');
   // a nie do rozstrzygnięcia wystąpienia. Moduł NIE ROZGAŁĘZIA SIĘ po wartości
   // `StanWykonania` — potwierdza to asercja D7 niżej, która przeszła. Liczba
   // podniesiona świadomie, z nazwą pliku i z powodem (O73).
-  const KONSUMENTOW_16_08_2026 = 13;
-  check(`⭐ O73 — konsumentów \`StanWykonania\` jest DOKŁADNIE ${KONSUMENTOW_16_08_2026} (zapadka na RÓWNOŚĆ, nie na „≥1")`,
-    konsumenci.length === KONSUMENTOW_16_08_2026,
+  // ⭐ AKTUALIZACJA 18.08.2026, PAS S1: 13 → 15. Doszły `lib/ekranProfilu.ts`
+  // i `lib/ekranProfilu.selftest.ts` (pas A3, ekran „Profil") i ⚠️ ŻADEN
+  // Z NICH NIE JEST konsumentem `StanWykonania` — wpadają tu przez człon
+  // `nie_odczytano` wzorca wyżej, który w tamtym module nazywa NIEODCZYTANE
+  // ŹRÓDŁO PRACY (`OdczytTabeli`), a nie rozstrzygnięcie wystąpienia. Żaden
+  // z nich nie rozgałęzia się po wartości `StanWykonania` — potwierdza to
+  // asercja D7 niżej, która przechodzi. Podniesione dokładnie tym samym
+  // wzorcem, którym pas L1 podniósł 11 → 12, i o DWA, nie o trzy: pas A3
+  // przeniósł rozpoznanie nieudanego odczytu z `ja.tsx` do `odczytTabeli()`,
+  // więc ekran nie ma już literału `'nie_odczytano'`.
+  // ⚠️ Nowe pliki pasa S1 (`components/WgladPozycji.tsx`) NIE SĄ na tej liście
+  // — sprawdzone uruchomieniem 18.08.2026.
+  const KONSUMENTOW_18_08_2026 = 15;
+  check(`⭐ O73 — konsumentów \`StanWykonania\` jest DOKŁADNIE ${KONSUMENTOW_18_08_2026} (zapadka na RÓWNOŚĆ, nie na „≥1")`,
+    konsumenci.length === KONSUMENTOW_18_08_2026,
     `${konsumenci.length}: ${konsumenci.join(', ')}`);
   check('⛔ na liście konsumentów są OBA ekrany, które rysują plakietkę',
     konsumenci.includes('app/(tabs)/kalendarz.tsx') && konsumenci.includes('app/(tabs)/dzis.tsx'),

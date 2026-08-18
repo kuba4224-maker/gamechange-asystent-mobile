@@ -53,6 +53,44 @@
 // ⚠️ WAŻNE PRZY DOKŁADANIU EKRANU: Expo Router pokazuje w pasku KAŻDY plik
 // z tego katalogu, także ten, którego tu nie wymieniono. Nowy plik w
 // `app/(tabs)/` bez wpisu `href: null` poniżej pojawi się jako piąta zakładka.
+//
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PLAN-D-A1 08.2026 (18.08.2026) — DWIE ZAKŁADKI (A4)
+//
+//                      Dziś  ·  Profil
+//
+// DECYZJA KUBY (17/18.08.2026, makieta v3 „dwie miary"): produkt ma DWA
+// ekrany. Wszystko inne wchodzi z nich — dotknięciem kafla, przyciskiem „+"
+// albo wierszem w „Profilu".
+//
+// ⛔ KOLEJNOŚĆ TEJ ZMIANY BYŁA NIENEGOCJOWALNA: NAJPIERW WEJŚCIE ZASTĘPCZE,
+// POTEM ZDJĘCIE ZAKŁADKI. Odwrotnie to jest cicha utrata dostępu. Dwa ekrany
+// były o jedno wejście od zniknięcia:
+//
+//   • `mecz.tsx` (961 linii) miał 18.08 rano **ZERO `router.push('/mecz')`
+//     w całym repozytorium** — jedynym wejściem była ta zakładka. Razem z nim
+//     zniknęłoby jedyne wejście do `match_contexts` i `match_context_answers`.
+//     ⭐ WEJŚCIE ZASTĘPCZE: arkusz „powiedz więcej o tym meczu", otwierany
+//     z kafla meczu na „Dziś" (`app/(tabs)/dzis.tsx`, `MECZ_WIECEJ_OTWORZ`).
+//   • `dziennik.tsx` był osiągalny WYŁĄCZNIE przez `TRASA_POZYCJI` — czyli
+//     tylko wtedy, gdy ranker postawił pozycję Dziennika na PIERWSZYM miejscu
+//     kolejki. Wejście, które bywa, nie jest wejściem.
+//     ⭐ WEJŚCIE ZASTĘPCZE: kafel „Zapisz dzisiejszy wpis" w „Twoim dniu".
+//
+// ⛔ `centrum-decyzji` ZOSTAJE BEZ WEJŚCIA Z „DZIŚ" — to jest świadoma decyzja
+// Kuby z 18.08, nie przeoczenie. Pilnuje tego zapadka w `lib/nawigacja.selftest.ts`,
+// żeby cisza nie zamieniła się w przypadek.
+//
+// ⭐ „Ja" ZMIENIA WYŁĄCZNIE NAPIS na „Profil". ⛔ Nazwa TRASY zostaje `ja`,
+// bo `app/(tabs)/wiecej.tsx` przekierowuje na `/ja` i przemianowanie zerwałoby
+// to wejście. Zawartość ekranu buduje pas A3, nie ten pas.
+//
+// ⭐ OD 18.08 PILNUJE TEGO ASERCJA, NIE KOMENTARZ: `lib/nawigacja.selftest.ts`
+// sprawdza, że widocznych zakładek są DOKŁADNIE DWIE, że każdy plik z tego
+// katalogu ma wpis, i że każda chowana trasa ma wejście spoza własnego pliku.
+// ⛔ Komentarz nie jest asercją — ten plik miał ostrzeżenie o piątej zakładce
+// od 08.08.2026 i przez dziesięć dni nikt nie sprawdził, czy ono obowiązuje.
+// ═══════════════════════════════════════════════════════════════════
 import { Tabs } from 'expo-router';
 // W1: 08.2026 — pasek dostaje język wizualny z koncepcji identyfikacji
 // (komponent 6): aktywna zakładka = WYPEŁNIONA ikona + kolor marki,
@@ -79,13 +117,20 @@ export default function TabsLayout() {
         tabBarStyle: { backgroundColor: colors.background, borderTopColor: colors.border },
       }}
     >
-      {/* ── Cztery zakładki widoczne ─────────────────────────────── */}
+      {/* ── ⭐ DWIE ZAKŁADKI WIDOCZNE (A4, 18.08.2026) ────────────── */}
       <Tabs.Screen name="dzis" options={{ title: 'Dziś', tabBarIcon: tabIcon('today', 'today-outline') }} />
-      <Tabs.Screen name="dziennik" options={{ title: 'Dziennik', tabBarIcon: tabIcon('book', 'book-outline') }} />
-      <Tabs.Screen name="mecz" options={{ title: 'Mecz', tabBarIcon: tabIcon('football', 'football-outline') }} />
-      <Tabs.Screen name="ja" options={{ title: 'Ja', tabBarIcon: tabIcon('person', 'person-outline') }} />
+      {/* ⭐ NAPIS „Profil", TRASA nadal `ja` — patrz nagłówek pliku. */}
+      <Tabs.Screen name="ja" options={{ title: 'Profil', tabBarIcon: tabIcon('person', 'person-outline') }} />
 
-      {/* ── Trasy chowane: żyją, otwierane z linku ───────────────── */}
+      {/* ── Trasy chowane: żyją, otwierane z linku ─────────────────
+          ⭐ 18.08.2026 doszły DWIE: `dziennik` i `mecz`. Obie mają wejście
+          z ekranu „Dziś" i obie je dostały ZANIM straciły zakładkę. */}
+      {/* ⛔ Wejście: kafel „Zapisz dzisiejszy wpis" w „Twoim dniu" (dzis.tsx). */}
+      <Tabs.Screen name="dziennik" options={{ title: 'Dziennik', href: null }} />
+      {/* ⛔⛔ Wejście: arkusz „powiedz więcej o tym meczu" z kafla meczu
+          (dzis.tsx). Bez niego ten wpis kasuje 961 linii i jedyną drogę
+          do `match_contexts` — sprawdza to `lib/nawigacja.selftest.ts`. */}
+      <Tabs.Screen name="mecz" options={{ title: 'Mecz', href: null }} />
       <Tabs.Screen name="kalendarz" options={{ title: 'Kalendarz', href: null }} />
       {/* PLAN-D-A 08.2026 — nazwa TRASY (`cele`) zostaje, zmienia się tylko
           tytuł widoczny dla zawodnika. */}

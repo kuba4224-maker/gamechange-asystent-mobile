@@ -149,6 +149,30 @@ const PLIK_LIB = 'lib/nagrodaZaPrace.ts';
 const PLIK_OBCIAZENIE = 'lib/obciazenieOstatnichDni.ts';
 const dzisSurowe = readFileSync(join(root, PLIK_DZIS), 'utf8');
 const dzis = bezKomentarzy(dzisSurowe);
+/**
+ * ⭐ PLAN-D-S1 18.08.2026 — GDZIE STOI DZIŚ DOROBEK.
+ *
+ * Do 18.08.2026 karta „TWÓJ DOROBEK" stała na ekranie „Dziś" i wszystkie
+ * asercje renderu czytały `app/(tabs)/dzis.tsx`. Decyzja D4/O92 uśmierciła
+ * słowo „punktów pracy", a pas A1 zdjął kartę z „Dziś" (nota A1 §3, wiersz 8:
+ * „karta mówiła `punktów pracy` — słowo uśmiercone decyzją D4/O92 → Profil
+ * jako ROZWÓJ, brzmienie do PRZEPISANIA, nie do przeniesienia").
+ * Pas A3 postawił ją na ekranie „Profil": liczba w panelu dwóch miar
+ * (`app/(tabs)/ja.tsx`), odznaki i progi w arkuszu
+ * (`components/ArkuszeProfilu.tsx`), arytmetyka i brzmienia w `lib/ekranProfilu.ts`.
+ *
+ * ⛔ PRZECELOWANIE, NIE OSŁABIENIE: każda z sześciu asercji niżej pyta
+ * o tę samą rzecz, co dotąd — liczba narysowana, odznaki z uzasadnieniem,
+ * następny próg wyrażony PRACĄ, „nie udało się policzyć" osobnym zdaniem,
+ * to, czego nie umiemy policzyć, wypisane z powodem — tylko w miejscu,
+ * w którym te rzeczy dziś stoją.
+ */
+const PLIK_PROFIL_EKRAN = 'app/(tabs)/ja.tsx';
+const PLIK_PROFIL_ARKUSZ = 'components/ArkuszeProfilu.tsx';
+const PLIK_PROFIL_LIB = 'lib/ekranProfilu.ts';
+const profilEkran = bezKomentarzy(readFileSync(join(root, PLIK_PROFIL_EKRAN), 'utf8'));
+const profilArkusz = bezKomentarzy(readFileSync(join(root, PLIK_PROFIL_ARKUSZ), 'utf8'));
+const profilLib = bezKomentarzy(readFileSync(join(root, PLIK_PROFIL_LIB), 'utf8'));
 const libSurowe = readFileSync(join(root, PLIK_LIB), 'utf8');
 const lib = bezKomentarzy(libSurowe);
 const obciazenieSurowe = readFileSync(join(root, PLIK_OBCIAZENIE), 'utf8');
@@ -748,26 +772,63 @@ console.log('\nG6. EKRAN — app/(tabs)/dzis.tsx');
 
   // ⭐ CZTERY RZECZY Z C4.3 SĄ NARYSOWANE. Bez tej grupy strażnik świeci
   // na zielono przy funkcji, której zawodnik nigdy nie zobaczy.
-  const render = dzis.slice(dzis.indexOf('function renderNagrodaZaPrace'));
-  const cialoRenderu = render.slice(0, render.indexOf('\n  const allRecsLinkLabel'));
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S1) — Z „DZIŚ" NA „PROFIL". Powód i cytat
+  // decyzji stoją przy stałych `PLIK_PROFIL_*` na górze tego pliku.
+  // ⛔ Ciało arkusza wycinamy, a nie czytamy całego pliku — inaczej asercje
+  // przechodziłyby na komentarzach i na cudzych arkuszach (O71).
+  const cialoOdznak = (() => {
+    const od = profilArkusz.indexOf('function Odznaki(');
+    if (od < 0) return null;
+    const koniec = profilArkusz.indexOf('\nfunction ', od + 10);
+    return koniec < 0 ? profilArkusz.slice(od) : profilArkusz.slice(od, koniec);
+  })();
+  const cialoPanelu = (() => {
+    const od = profilEkran.indexOf('styles.panelMiar');
+    if (od < 0) return null;
+    const koniec = profilEkran.indexOf('styles.pracaDodatkowa', od);
+    return koniec < 0 ? null : profilEkran.slice(od, koniec);
+  })();
+
+  check('⭐ (0) da się wskazać MIEJSCE, w którym dorobek jest dziś rysowany',
+    cialoOdznak !== null && cialoPanelu !== null,
+    `panel dwóch miar w ${PLIK_PROFIL_EKRAN}: ${cialoPanelu === null ? 'NIE ZNAJDUJĘ' : 'jest'} · `
+    + `arkusz „Odznaki i progi" w ${PLIK_PROFIL_ARKUSZ}: ${cialoOdznak === null ? 'NIE ZNAJDUJĘ' : 'jest'} `
+    + '— dopóki tego nie ma, sześć asercji niżej czyta pustkę i nie znaczy nic');
+
   check('⭐ (1) łączna praca jest narysowana',
-    /NAGRODA_PUNKTY\(/.test(cialoRenderu), 'brak liczby łącznej pracy');
+    cialoPanelu !== null && /<Text style=\{styles\.miaraLiczba\}>/.test(cialoPanelu)
+    && /rozwoj\.punkty/.test(cialoPanelu) && /NAZWA_ROZWOJU/.test(cialoPanelu),
+    'brak liczby łącznej pracy — miara ROZWÓJ nie wchodzi do żadnego `<Text>`');
+
   check('⭐ (2) odznaki są narysowane RAZEM ZE ZDANIEM „za jaką pracę"',
-    /\.odznaki\.map\(/.test(cialoRenderu) && /zaJakaPrace/.test(cialoRenderu),
+    cialoOdznak !== null && /\.odznaki\.map\(/.test(cialoOdznak) && /zaJakaPrace/.test(cialoOdznak),
     'odznaki bez uzasadnienia to naklejki (M4)');
+
   check('⭐ (3) następny próg jest narysowany',
-    /NAGRODA_NASTEPNY\(/.test(cialoRenderu) && /nastepnyProg/.test(cialoRenderu),
+    cialoOdznak !== null && /nastepnyProg/.test(cialoOdznak) && /Brakuje Ci /.test(cialoOdznak),
     'brak następnego progu');
+
   check('⭐ (4) „nie udało się policzyć" ma WŁASNĄ stałą, inną niż „jeszcze nic"',
-    /NAGRODA_NIE_POLICZONA\(/.test(cialoRenderu) && /NAGRODA_JESZCZE_NIC/.test(cialoRenderu)
-    && /nie_policzona/.test(cialoRenderu),
+    cialoPanelu !== null && /ROZWOJ_NIE_POLICZONE\(/.test(cialoPanelu)
+    && /ROZWOJ_JESZCZE_NIC/.test(cialoPanelu)
+    && cialoOdznak !== null && /nie_policzona/.test(cialoOdznak)
+    && /ROZWOJ_NIE_POLICZONE\s*=/.test(profilLib) && /ROZWOJ_JESZCZE_NIC\s*=/.test(profilLib),
     'awaria odczytu i zero pracy rysują się tym samym zdaniem (R5)');
-  check('⭐ następny próg wyrażony jest w PRACY — bierze `brakuje` i nazwę miary',
-    /nastepnyProg\.brakuje/.test(cialoRenderu) && /NAGRODA_MIARA\[/.test(cialoRenderu),
-    'próg wyrażony inaczej niż pracą');
+
+  // ⛔ PRÓG WYRAŻONY PRACĄ, NIGDY CZASEM. To jest sedno tej asercji, więc
+  // sprawdzamy je DWUSTRONNIE: miara pracy musi paść, a słowa o dniach
+  // i tygodniach nie mają prawa.
+  check('⭐ następny próg wyrażony jest w PRACY — bierze braki z `nastepnyProg` i nazwę miary',
+    cialoOdznak !== null && /nastepnyProg/.test(cialoOdznak) && /NAZWA_MIARY\[/.test(cialoOdznak)
+    && !/\bdni\b|\btygod|\bcodzienn|z\s+rzędu/i.test(cialoOdznak),
+    'próg wyrażony inaczej niż pracą — albo zniknęła nazwa miary, albo weszło zdanie o czasie');
+
   check('⭐ R5 — to, czego ekran nie umie policzyć, jest wypisane z powodem',
-    /nieumiemPoliczyc\.map\(/.test(cialoRenderu),
+    cialoOdznak !== null && /nieumiemPoliczyc\.map\(/.test(cialoOdznak)
+    && /Nie umiem tego policzyć/.test(cialoOdznak),
     'odznaka nie do policzenia znika po cichu');
+
+  const cialoRenderu = `${cialoOdznak ?? ''}\n${cialoPanelu ?? ''}`;
 
   // ⛔ ZERO POWIADOMIEŃ. Nagroda jest DO ZOBACZENIA, gdy zawodnik wejdzie —
   // nie do zawołania go z powrotem.
@@ -1648,7 +1709,7 @@ console.log('\nW1-M. ⭐ BATERIA MUTACJI');
     ['MW3 ⛔ odpowiedź kontrolna wraca z wagą 2', () => ileFail(bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY, odpowiedz_kontrolna: 2 }))],
     ['MW4 ⛔ sesja bez dowodu dostaje wagę z DEKLARACJI', () => ileFail(bateria(
       (f) => (f.minutyZmierzone ?? f.minutyZPlanu ?? 0) >= PROG_DLUGOSCI_SESJI_MIN
-        ? { punkty: 2, pochodzenie: 'zaplanowany' } : wagaSesji(f), wagaMeczu, { ...WAGI_PRACY }))],
+        ? { punkty: 2, pochodzenie: 'bez_dowodu' } : wagaSesji(f), wagaMeczu, { ...WAGI_PRACY }))],
     ['MW5 ⛔ pomiar MOŻE obniżyć wagę treningu klubowego', () => ileFail(bateria(
       (f) => (typeof f.minutyZmierzone === 'number'
         ? { punkty: f.minutyZmierzone >= PROG_DLUGOSCI_SESJI_MIN ? 2 : 1, pochodzenie: 'zmierzony' }

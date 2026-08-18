@@ -189,9 +189,16 @@ import {
 // ═════════════════════════════════════════════════════════════════════
 import {
   policzWglady,
+  wgladDlaPozycji,
   type WejsciaWgladow,
   type WynikiWgladow,
 } from '../lib/wgladyZAlgorytmu';
+// ⭐ PLAN-D-S1 18.08.2026 — JEDYNA KOPIA RYSOWANIA TRZECIEJ CZĘŚCI WGLĄDU.
+// Do 18.08 mieszkała wewnątrz `app/(tabs)/dzis.tsx`; pas A1 zdjął ją stamtąd
+// razem z 330 dp i wgląd przestał kończyć się rzeczą do zrobienia (M4).
+// Wyprowadzona do `components/` dokładnie tak, jak zapowiadał nagłówek tego
+// pliku — importowana, nie przepisana.
+import WgladPozycji from './WgladPozycji';
 import {
   zbudujWejsciaWgladow,
   TABELA_MECZOW, SELECT_MECZOW,
@@ -635,6 +642,12 @@ export default function ListaZadan({ visible, onClose, userId }: Props) {
       )}
       <View style={{ flex: 1 }}>
         <PozycjaKolejkiCard pozycja={p} dzis={dzisStr} />
+        {/* ⭐ PLAN-D-S1 18.08.2026 — TRZECIA CZĘŚĆ WGLĄDU („jedna rzecz do
+            zrobienia", M4). ⛔ Stoi WEWNĄTRZ pętli po pozycjach wydanych przez
+            rankera, a nie obok niej: wgląd nie jest siódmym producentem i nie
+            dostaje własnej karty. `wgladDlaPozycji` oddaje `null` dla pozycji,
+            która wglądem nie jest — i wtedy nie rysuje się nic. */}
+        {wglady === null ? null : <WgladPozycji wglad={wgladDlaPozycji(wglady, p.id)} />}
         {/* WT-28 — podniesienie do „Teraz". Zapis idzie do `player_tasks.raised_at`,
             a kubełek przelicza RANKER (`kubelekDla`), nie ten ekran. */}
         {mozliwePodniesienie(p) ? (

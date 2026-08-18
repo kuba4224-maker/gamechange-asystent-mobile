@@ -158,12 +158,48 @@ const posrednik = bezKomentarzy(surowe(PLIK_POSREDNIK));
   // Karta musi być gdzieś ZAMONTOWANA w JSX — inaczej cała kaskada jest
   // kodem, którego zawodnik nie ma jak dotknąć.
   const montujacy = EKRANY.filter((p) => /<\s*LivingDiagnosisPulseCard[\s/>]/.test(trescEkranu.get(p) ?? ''));
-  const rm = rowneZbiory(montujacy, [PLIK_DZIS]);
-  check('⭐ (I2-0) kartę pulsu montuje DOKŁADNIE `dzis.tsx` — zmierzone 16.08, nie „≥ 1" (O73)',
+
+  // ⭐ PRZESTAWIONA 18.08.2026 (pas S1): 1 montaż → 0, I ZWIĄZANA Z FLAGĄ.
+  //
+  // JEDNO ZDANIE, CO JĄ ZMIENIŁO: pas A1 zdjął `<LivingDiagnosisPulseCard />`
+  // z ekranu „Dziś", bo miara liczy najgorszy przypadek i karta niosła 442 dp
+  // z budżetu 850 — ponad połowę ekranu na komponent, który od 06.08.2026
+  // rysuje `null` przy każdym uruchomieniu.
+  // CYTAT Z NOTY A1 (§3, wiersz 6): „zamrożona od 06.08 (`LIVING_DIAGNOSIS_
+  // PULSE_ENABLED = false`) — rysuje `null`, ale miara liczy najgorszy przypadek
+  // i 442 dp z budżetu 850 to ponad połowa ekranu za rzecz, której nikt nie widzi".
+  //
+  // ⛔ ZAPADKA NIE JEST ZDJĘTA — JEST ZWIĄZANA Z ZAMROŻENIEM, czyli MOCNIEJSZA
+  // niż była. Dopóki flaga stoi na `false`, montaży ma być DOKŁADNIE ZERO
+  // (kod martwy nie zajmuje dp). W dniu, w którym ktoś przestawi flagę na
+  // `true`, oczekiwaniem staje się DOKŁADNIE JEDEN montaż na „Dziś" — więc
+  // odmrożenie bez konsumenta zapali tę linię, zamiast przejść w ciszy.
+  // ⚠️ Wersja poprzednia tego nie umiała: przy odmrożeniu i przy zamrożeniu
+  // żądała tego samego, więc jedna z tych dwóch sytuacji zawsze była fałszywa.
+  const zamrozony = /const\s+LIVING_DIAGNOSIS_PULSE_ENABLED\s*=\s*false\s*;/.test(karta);
+  const OCZEKIWANE_MONTAZE_18_08_2026 = zamrozony ? [] : [PLIK_DZIS];
+  const rm = rowneZbiory(montujacy, OCZEKIWANE_MONTAZE_18_08_2026);
+  check('⭐ (I2-0) montaży karty pulsu jest DOKŁADNIE tyle, ile pozwala flaga zamrożenia '
+    + '— zapadka 18.08.2026, nie „≥ 1" (O73)',
     rm.ok,
-    `MONTUJĄ: ${montujacy.join(', ') || 'ŻADEN EKRAN'} (oczekiwany dokładnie: ${PLIK_DZIS}) `
-    + '→ ZERO montaży znaczy, że kaskada jest producentem bez konsumenta: policzona bezbłędnie '
-    + 'i nienarysowana nigdzie; dwa montaże znaczą dwa pytania tego samego dnia.');
+    `MONTUJĄ: ${montujacy.join(', ') || 'ŻADEN EKRAN'} · flaga zamrożenia: `
+    + `${zamrozony ? 'false (puls ZAMROŻONY)' : 'true (puls WŁĄCZONY)'} · oczekiwane: `
+    + `${OCZEKIWANE_MONTAZE_18_08_2026.join(', ') || 'ŻADEN EKRAN'} `
+    + '→ przy WŁĄCZONYM pulsie zero montaży znaczy, że kaskada jest producentem bez konsumenta: '
+    + 'policzona bezbłędnie i nienarysowana nigdzie, a dwa montaże znaczą dwa pytania tego samego '
+    + 'dnia. Przy ZAMROŻONYM pulsie każdy montaż to 442 dp budżetu ekranu wydane na komponent, '
+    + 'który rysuje `null` — i to jest dokładnie to, co pas A1 zdjął 18.08.2026.');
+
+  // ⛔ ZAPADKA NA STAN „KOD BEZ WIDZA", NAZWANY WPROST.
+  // Zero montaży przy zamrożonej fladze jest STANEM ŚWIADOMYM, ale zostaje
+  // stanem, w którym 13 asercji niżej opisuje kod, którego zawodnik nie ma jak
+  // zobaczyć. Ta linia nie pozwala o tym zapomnieć: mówi to na głos przy
+  // każdym przebiegu, zamiast pozwolić ciszy udawać, że wszystko jest wpięte.
+  check('⛔ (I2-0) stan „kaskada bez ani jednego widza" jest NAZWANY, a nie przemilczany',
+    zamrozony === (montujacy.length === 0),
+    `flaga zamrożenia ${zamrozony ? 'false' : 'true'}, montaży ${montujacy.length} — `
+    + 'puls WŁĄCZONY i niezamontowany albo ZAMROŻONY i zamontowany: jedno z dwóch '
+    + 'jest kodem bez widza, a drugie dp wydanym na nic');
 
   // ── ⭐ HAMULEC: ZAMROŻENIE ZMIERZONE, NIE ZAŁOŻONE ──
   // Karta zwraca `null` bezwarunkowo, dopóki flaga jest `false`. To NIE jest

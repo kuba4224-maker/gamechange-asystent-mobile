@@ -196,19 +196,58 @@ export function trafnoscSesji(args: {
  * ⛔ DECYZJA PRODUKTOWA, NIE BADANIE. Uogólnienie, tak jak w wielu innych
  * miejscach tego produktu.
  *
- * ⚠️ NAJSŁABSZE OGNIWO TEJ MAPY, NAZWANE PRZEZ KUBĘ 18.08.2026:
- * `stretching → regeneracja` ma SŁABE DANE naukowe. Zostaje jako uogólnienie
- * na teraz i jest pierwszą pozycją do dopracowania. ⛔ Produkt nie wolno mu
- * na tej podstawie powiedzieć „stretching nic ci nie daje" — wolno mu tylko
- * policzyć, ile z zadeklarowanej pracy trafia w obszary o najwyższym zwrocie.
+ * ═══ DECYZJA KUBY 18.08.2026 (M1) — DWIE ZMIANY ═══════════════════
+ *
+ * 1. ⭐ `silownia` dostaje TRZECI obszar: `tolerancja`. Praca siłowa buduje
+ *    nie tylko moc i fizyczność, ale i to, ile obciążenia zawodnik zniesie.
+ *
+ * 2. ⛔ `stretching` PRZESTAJE BYĆ RODZAJEM PRACY. Powód nazwał Kuba:
+ *    „stretching ma słabe dane naukowe odnośnie regeneracji". W jego miejsce
+ *    wchodzi `odnowa` — ODNOWA BIOLOGICZNA, czyli kategoria pojemna:
+ *    rolowanie, masaż, zimna kąpiel, sauna. ⭐ To nie jest przemianowanie
+ *    ozdobne: rozciąganie samo w sobie miało cienki dowód, a odnowa
+ *    biologiczna jako CAŁOŚĆ ma znacznie mocniejszy.
+ *
+ * ⚠️ `odnowa` celuje WYŁĄCZNIE w `regeneracja`. ⛔ `odpornosc`, które nosił
+ * stretching, ZDJĘTE ŚWIADOMIE — nie mam dowodu, żeby rolowanie i zimna
+ * kąpiel budowały odporność na urazy, a obszar dołożony „na wszelki wypadek"
+ * podnosi szansę na premię 1,5 bez pokrycia. ⛔ Premia bez pokrycia to jest
+ * dokładnie ta nierzetelność, którą Kuba kazał usunąć z punktacji.
+ *
+ * ⚠️ `stretching` ZOSTAJE JAKO ALIAS HISTORYCZNY i to NIE jest niezdecydowanie.
+ * ZMIERZONE W BAZIE 18.08: słowo `stretching` stoi w `own_training_types`
+ * u 12 zawodników. Wyrzucenie go z mapy zamieniłoby ich deklarację w
+ * „nieznany rodzaj" — czyli produkt PO CICHU przestałby liczyć pracę, którą
+ * ci zawodnicy zgłosili (B3). Alias znika dopiero razem z ostatnim takim
+ * wierszem w bazie.
+ *
+ * ⛔ LISTA WYBORU, KTÓRĄ WIDZI ZAWODNIK, NIE MIESZKA W TYM REPOZYTORIUM.
+ * `own_training_types` jest tu wyłącznie CZYTANE (`dzis.tsx`). Zmiana
+ * napisu „stretching" na „odnowa biologiczna" należy do formularza diagnozy
+ * i jest osobną pozycją — dopóki jej nie ma, nowe konta nadal wpisują
+ * `stretching`, a alias jest jedyną rzeczą, która trzyma to razem.
  */
 export const MAPA_PRACY_WLASNEJ: Readonly<Record<string, readonly string[]>> = {
-  silownia: ['moc', 'fizycznosc'],
+  silownia: ['moc', 'fizycznosc', 'tolerancja'],
   bieganie: ['wytrzymalosc', 'tolerancja'],
   technika: ['techFund', 'techSpec'],
   mental: ['mental', 'koncentracja'],
-  stretching: ['regeneracja', 'odpornosc'],
+  /** ⭐ Odnowa biologiczna: rolowanie, masaż, zimna kąpiel, sauna. */
+  odnowa: ['regeneracja'],
+  /** ⚠️ ALIAS HISTORYCZNY — 12 wierszy w bazie na 18.08.2026. Patrz komentarz wyżej. */
+  stretching: ['regeneracja'],
 };
+
+/**
+ * ⭐ Rodzaje, które produkt ma dziś PROPONOWAĆ zawodnikowi.
+ * ⛔ `stretching` NIE JEST na tej liście — jest tylko odczytywany wstecz.
+ */
+export const RODZAJE_PRACY_WLASNEJ_DO_WYBORU: readonly string[] = [
+  'silownia', 'bieganie', 'technika', 'mental', 'odnowa',
+];
+
+/** ⚠️ Rodzaje czytane wyłącznie z danych historycznych. ⛔ Nie proponować ich nikomu. */
+export const RODZAJE_PRACY_WLASNEJ_HISTORYCZNE: readonly string[] = ['stretching'];
 
 export type OcenaPracyWlasnej =
   | {

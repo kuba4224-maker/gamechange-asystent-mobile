@@ -66,6 +66,13 @@ const bezKomentarzy = (s: string): string => s
 
 const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
 const PLIK_KOMPONENT = 'components/PozycjaKolejkiCard.tsx';
+/**
+ * ⭐ PLAN-D-S1 18.08.2026 — DRUGIE MIEJSCE, W KTÓRYM RYSUJE SIĘ KOLEJKA.
+ * Od pasa A1 „Dziś" pokazuje JEDNĄ pozycję, a pełna lista (druga głębokość,
+ * kubełki, wglądy) stoi tutaj. ⛔ Strażnik, który czytałby dalej tylko
+ * `dzis.tsx`, przepuściłby zniknięcie całej listy bez jednego czerwonego pliku.
+ */
+const PLIK_LISTA = 'components/ListaZadan.tsx';
 
 /**
  * ⭐ PAS I1 16.08.2026 — CHOROBA K1 (ograniczenie O69).
@@ -91,6 +98,7 @@ const zrodlo = (wzgledna: string): string => bezKomentarzy(surowe(wzgledna));
 const dzisSurowe = surowe(PLIK_DZIS);
 const dzis = zrodlo(PLIK_DZIS);
 const komponent = zrodlo(PLIK_KOMPONENT);
+const lista = zrodlo(PLIK_LISTA);
 
 /**
  * Sekcja budowania wejść kolejki, wycięta z SUROWEGO źródła (znaczniki stoją
@@ -281,14 +289,32 @@ function check(label: string, cond: boolean, detail: string) {
 // zielono, a zawodnik nie widzi ani jednej pozycji. Ta asercja wymaga, żeby
 // ekran NAPRAWDĘ rysował obie głębokości i pole „skąd to wiemy".
 {
-  check('(B2-5) ekran renderuje pozycje jednym, wspólnym komponentem',
-    /<PozycjaKolejkiCard/.test(dzis) && /pozycjeNaDzis\.map\(/.test(dzis),
-    'kolejka nie trafia na ekran — cztery poprzednie asercje są wtedy spełnione przez usunięcie funkcji');
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S1) — REGUŁA TA SAMA, DWA MIEJSCA ZAMIAST
+  // JEDNEGO. Do 18.08 obie asercje niżej czytały WYŁĄCZNIE `dzis.tsx`, bo tam
+  // stała cała kolejka: cztery pozycje, pierwsza rozwinięta, reszta zwinięta.
+  // Pas A1 zostawił na „Dziś" JEDNĄ pozycję (makieta v3: „na Dziś jedna
+  // odpowiedź i kafle dnia”), a PEŁNA LISTA — z drugą głębokością — żyje dalej
+  // w `components/ListaZadan.tsx` („Moje zadania"), wołanym z ekranu „Profil".
+  // ⛔ Reguła NIE ZOSTAŁA POLUZOWANA: nadal żądamy JEDNEJ KOPII RYSOWANIA
+  // i OBU GŁĘBOKOŚCI — tylko pytamy o nie tam, gdzie dziś stoją. Zapadka jest
+  // MOCNIEJSZA o jedno miejsce: zniknięcie pozycji z KTÓREGOKOLWIEK z dwóch
+  // ekranów zapala tę linię.
+  check('(B2-5) ekran „Dziś" renderuje pozycję kolejki WSPÓLNYM komponentem, nie własnym kodem',
+    /<PozycjaKolejkiCard/.test(dzis) && /pozycjeNaDzis\[0\]/.test(dzis),
+    'kolejka nie trafia na „Dziś" — cztery poprzednie asercje są wtedy spełnione przez usunięcie funkcji');
+
+  check('(B2-5) ⭐ PEŁNA LISTA pozycji też idzie TYM SAMYM komponentem — jedna kopia rysowania',
+    /<PozycjaKolejkiCard/.test(lista) && /pozycje\.map\(/.test(lista),
+    'lista „Moje zadania" przestała rysować pozycje albo rysuje je własnym kodem — '
+    + 'wtedy kolejka ma dwie kopie rysowania i pierwsza poprawka wejdzie do jednej z nich');
 
   check('(B2-5) pierwsza pozycja jest PODANA (rozwinięta), reszta zwinięta — dwie głębokości',
-    /pierwsza=\{i === 0\}/.test(dzis) && /pierwsza\s*=\s*false/.test(komponent)
-    && /useState\(pierwsza\)/.test(komponent),
-    'obie głębokości zniknęły — rzecz ważna wymaga dotknięcia (złamane P0) albo nie da się jej zwinąć');
+    /pierwsza\b/.test(dzis) && /pierwsza\s*=\s*false/.test(komponent)
+    && /useState\(pierwsza\)/.test(komponent)
+    && !/pierwsza/.test(lista.slice(lista.indexOf('<PozycjaKolejkiCard'), lista.indexOf('<PozycjaKolejkiCard') + 120)),
+    'obie głębokości zniknęły — rzecz ważna wymaga dotknięcia (złamane P0) albo nie da się jej zwinąć: '
+    + '„Dziś" ma podać pozycję ROZWINIĘTĄ (`pierwsza`), a lista „Moje zadania" ZWINIĘTĄ '
+    + '(bez `pierwsza`, czyli na domyślnym `false` komponentu)');
 
   // ⚠️ TA ASERCJA BYŁA ZA SŁABA I ZŁAPAŁ TO DOPIERO TEST MUTACYJNY (mutacja M5,
   // 14.08.2026): sprawdzała obecność `rozwinieta ?` gdziekolwiek w pliku —

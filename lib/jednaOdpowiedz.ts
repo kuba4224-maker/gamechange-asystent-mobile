@@ -357,16 +357,56 @@ export type ElementDzis = {
   wJednejOdpowiedzi: boolean;
 };
 
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ PRZEPISANY 18.08.2026 (PAS S1) — EKRAN „DZIŚ" PO PRZEBUDOWIE PASA A1
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ NIC NIE ZNIKNĘŁO PO CICHU. Każdy wpis zdjęty niżej ma NAGROBEK z datą,
+// powodem i adresem, pod którym rzecz stoi dziś (albo z decyzją, że nie stoi
+// nigdzie). Rejestr ma opisywać ekran, jaki JEST — martwy wpis znaczy, że
+// strażnik pilnuje ekranu sprzed roku i nie zapali się na niczym.
+//
+// ── CZTERY WPISY ZDJĘTE 18.08.2026 ─────────────────────────────────
+//  1. `styles.heroGoal` — kafelek wąskiego gardła (190 dp).
+//     ZDJĘTY przez pas A1: makieta v3 NIE MA na „Dziś" żadnego kafla celu —
+//     „Dziś" odpowiada na „co dziś zrobić", nie „nad czym pracujesz".
+//     GDZIE JEST: wąskie gardło → ekran „Profil" (`app/(tabs)/ja.tsx`,
+//     `deficitLabels` + arkusz „Skąd bierze się trafność").
+//  2. `styles.glosCard` — karta głosu tygodnia (83 dp).
+//     ⭐ NIE ZNIKNĘŁA — ZOSTAŁA WCHŁONIĘTA: `glos.tytul` i `glos.tresc` rysują
+//     się co do znaku WEWNĄTRZ `styles.odpowiedzCard`, bo to ten sam gatunek
+//     zdania co „co dziś najważniejsze", a makieta ma tu JEDEN blok, nie dwa.
+//     Pilnuje tego asercja (T3) w `lib/jednaOdpowiedz.selftest.ts`.
+//  3. `styles.pomocCard` — punkt pomocy (96 dp).
+//     ZDJĘTY DECYZJĄ KUBY z 17.08.2026, cytat:
+//       „najważniejsza jest prostota. Nie chcę, żebyś nawrzucał mi tam rzeczy
+//        takich jak jakaś linia telefoniczna pomocy. Czyste «mięcho» sportowe."
+//     GDZIE JEST: ścieżka kryzysowa żyje z tyłu, uruchamiana danymi; jedyne
+//     wejście z ekranu stoi w „Profilu" (`otworzPunktPomocy` w `ja.tsx`).
+//     ⛔ Na „Dziś" nie ma go i nie ma prawa wrócić.
+//  4. `LivingDiagnosisPulseCard` — karta pulsu diagnozy żywej (442 dp).
+//     ZDJĘTA przez pas A1: zamrożona od 06.08.2026
+//     (`LIVING_DIAGNOSIS_PULSE_ENABLED = false`), rysuje `null`, a miara liczy
+//     najgorszy przypadek — 442 dp z budżetu 850 na rzecz, której nikt nie widzi.
+//     GDZIE JEST: nigdzie; pilnuje tego zapadka w `lib/livingDiagnosisCascade.selftest.ts`,
+//     związana z flagą zamrożenia.
+//
+// ── CO DOSZŁO ──────────────────────────────────────────────────────
+// `styles.naglowekDnia`, `styles.seg`, `styles.sectionLabel`, `styles.kafel`,
+// `styles.inlineLink`, `styles.licznikPodpis` — sześć wpisów opisujących
+// kształt ekranu po przebudowie. ⚠️ Dwa dawne wpisy opisowe („Dziennik",
+// „Dziś w kalendarzu") zastąpione znacznikiem `styles.kafel`, bo tamte
+// pasowały do KOMENTARZY w pliku, a nie do żadnego bloku ekranu — czyli
+// nie rozpoznawały niczego.
 export const REJESTR_ELEMENTOW_DZIS: ElementDzis[] = [
+  { znacznik: 'styles.naglowekDnia', coTo: 'Nagłówek dnia: tytuł ekranu i dzisiejsza data, jeden blok.', wJednejOdpowiedzi: false },
   { znacznik: 'styles.eyebrow', coTo: 'Dzisiejsza data nad tytułem.', wJednejOdpowiedzi: false },
-  { znacznik: 'styles.title', coTo: 'Tytuł ekranu „Dziś".', wJednejOdpowiedzi: false },
-  { znacznik: 'styles.heroGoal', coTo: 'Kafelek wąskiego gardła: nazwa, licznik pracy, pasek. ⚠️ Od pasa T BEZ wezwań do pracy — zeszły do jednej odpowiedzi.', wJednejOdpowiedzi: false },
-  { znacznik: 'styles.glosCard', coTo: 'Karta głosu tygodnia — jedyne miejsce, które MÓWI o wyciszeniu, więc stoi NAD tym, co wycisza.', wJednejOdpowiedzi: false },
-  { znacznik: 'styles.pomocCard', coTo: 'Punkt pomocy, podniesiony przy kontuzji i ścieżce wyjścia (ZADANIE E2).', wJednejOdpowiedzi: false },
-  { znacznik: 'styles.odpowiedzCard', coTo: 'JEDNA ODPOWIEDŹ: co dziś zrobić · dlaczego akurat to · co to zmieni.', wJednejOdpowiedzi: true },
+  { znacznik: 'styles.title', coTo: 'Tytuł ekranu — „Dziś" albo „Tydzień", zależnie od przełącznika.', wJednejOdpowiedzi: false },
+  { znacznik: 'styles.seg', coTo: 'Przełącznik Dziś / Tydzień. ⭐ Od 18.08.2026 stoi NA GÓRZE EKRANU — do tej pory był zakładką wewnątrz karty, 4 663 dp w głąb, więc zawodnik nie wiedział, że widok tygodnia istnieje.', wJednejOdpowiedzi: false },
+  { znacznik: 'styles.odpowiedzCard', coTo: 'JEDNA ODPOWIEDŹ: co dziś zrobić · dlaczego akurat to · co to zmieni. ⭐ Od 18.08.2026 wchłania też głos tygodnia — ten sam gatunek zdania, jeden blok zamiast dwóch.', wJednejOdpowiedzi: true },
   { znacznik: 'RecommendationCard', coTo: 'Treść i przyciski rekomendacji — WEWNĄTRZ jednej odpowiedzi, gdy to ona jest źródłem.', wJednejOdpowiedzi: true },
   { znacznik: 'styles.hintBox', coTo: 'Treść ZAWSZE WIDOCZNA (bezpieczeństwo, telefon zaufania). ⚠️ NIE jest podpowiedzią dnia — ta weszła do jednej odpowiedzi. Zostaje osobno, bo jest funkcją bezpieczeństwa, nie treścią o pracy.', wJednejOdpowiedzi: false },
-  { znacznik: 'LivingDiagnosisPulseCard', coTo: 'Diagnoza żywa — ZAMROŻONA 06.08.2026, renderuje się w null.', wJednejOdpowiedzi: false },
-  { znacznik: 'Dziennik', coTo: 'Sekcja Dziennika — wejście do wpisu dnia.', wJednejOdpowiedzi: false },
-  { znacznik: 'Dziś w kalendarzu', coTo: 'Sekcja kalendarza — JEDYNE wejście do Kalendarza po zabraniu jego zakładki.', wJednejOdpowiedzi: false },
+  { znacznik: 'styles.sectionLabel', coTo: 'Etykieta sekcji „Twój dzień" — nad kaflami dnia.', wJednejOdpowiedzi: false },
+  { znacznik: 'styles.kafel', coTo: 'Kafle dnia: wpis do Dziennika (JEDYNE wejście do Dziennika po zdjęciu jego zakładki) i wydarzenia z kalendarza, każde z informacją, czy czeka na ocenę.', wJednejOdpowiedzi: false },
+  { znacznik: 'styles.inlineLink', coTo: 'Wiersz „Bez oceny: N rzeczy →" oraz wyjścia z pustki dnia — jedno dotknięcie do arkusza oceny albo do Kalendarza.', wJednejOdpowiedzi: false },
+  { znacznik: 'styles.licznikPodpis', coTo: 'Przypis: „Ocena należy do rzeczy: dotykasz kafla i mówisz, jak poszło."', wJednejOdpowiedzi: false },
 ];

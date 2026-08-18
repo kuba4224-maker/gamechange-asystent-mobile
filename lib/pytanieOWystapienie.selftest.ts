@@ -453,11 +453,25 @@ check('(8) ekran ma render pytania',
 check('(8) ⭐ render jest WOŁANY w JSX, a nie tylko zdefiniowany',
   /\{renderPytaniaOWystapienia\(\)\}/.test(ekran), 'render zdefiniowany i nieużyty');
 
+// ⭐ PRZECELOWANE 18.08.2026 (pas S2) — REGUŁA TA SAMA, DWA EKRANY ZAMIAST
+// JEDNEGO. GDZIE PYTAŁA: kolejność dwóch bloków w `app/(tabs)/dzis.tsx`
+// (pytanie miało stać NAD licznikiem). GDZIE PYTA: o to, że licznik pracy
+// NIE STOI JUŻ NA TYM EKRANIE WCALE, a pytanie stoi.
+// DLACZEGO: pas A1 zdjął licznik z „Dziś" (makieta v3, 807 dp przy zgięciu
+// 808), a pas S2 postawił go na „Profilu" → „Skąd to wiemy". Zawodnik spotyka
+// więc PYTANIE na pierwszym ekranie, a ODPOWIEDŹ „N z M" o ekran dalej —
+// czyli pytanie nadal poprzedza odpowiedź, tylko w czasie, nie w pikselach.
+// ⛔ RÓWNIE MOCNA, a w jedną stronę MOCNIEJSZA: powrót licznika na ekran
+// „Dziś" — w JAKIEKOLWIEK miejsce, także pod pytanie — zapala ją tak samo,
+// a dodatkowo zapala, gdy licznik zniknie z pliku, który go dziś rysuje.
 const iPytanie = ekran.indexOf('{renderPytaniaOWystapienia()}');
-const iLicznik = ekran.indexOf('{renderLicznikPracy()}');
-check('(8) ⭐ PYTANIE STOI NAD LICZNIKIEM PRACY — pytanie przed odpowiedzią',
-  iPytanie > 0 && iLicznik > 0 && iPytanie < iLicznik,
-  `pytanie @${iPytanie}, licznik @${iLicznik}`);
+const iLicznikNaDzis = ekran.indexOf('{renderLicznikPracy()}');
+const blokPracy = zywy(zrodloAlboNull('components', 'PracaWLiczbach.tsx') ?? '');
+const iLicznikWBloku = blokPracy.indexOf('{renderLicznikPracy()}');
+check('(8) ⭐ PYTANIE JEST NA EKRANIE 1, A LICZNIK PRACY O EKRAN DALEJ — pytanie przed odpowiedzią',
+  iPytanie > 0 && iLicznikNaDzis === -1 && iLicznikWBloku > 0,
+  `pytanie @${iPytanie} (dzis.tsx) · licznik na „Dziś" @${iLicznikNaDzis} `
+  + `(ma być −1) · licznik w bloku pracy @${iLicznikWBloku} (Profil → „Skąd to wiemy")`);
 
 check('(8) ⭐ ZDANIE PYTAJĄCE NAPRAWDĘ TRAFIA DO <Text>, nie jest tylko policzone',
   /<Text style=\{styles\.licznikLiczba\}>\{p\.zdanie\}<\/Text>/.test(cialoRenderu),
@@ -658,6 +672,7 @@ import {
   STAN_SPOZA_OCENY,
   ZASADY_PRAWDZIWE_OCENY,
   POWODY_NIEOBECNOSCI,
+  czyZnanyPowod,
   RPE_WARTOSCI,
   MINUTY_DO_WYBORU,
   MAKS_MINUT,
@@ -943,6 +958,10 @@ check('(9) ⛔ reguła NIE CZYTA ZEGARA ani bazy — inaczej nie da się jej spr
     ['szkola', 'nie_liczy_sie'],
     ['rodzina', 'nie_liczy_sie'],
     ['inny', 'liczy_sie'],
+    // ⭐ SZÓSTY POWÓD — decyzja Kuby 18.08.2026. ⛔ ANI `liczy_sie` (karałoby za
+    // skorzystanie z przycisku, który produkt sam podstawił), ANI `nie_liczy_sie`
+    // (twierdziłoby, że powód był niezależny — a tego NIE WIEMY, Z0).
+    ['nie_podam', 'nie_wiemy'],
     [null, 'nie_wiemy'],
     ['', 'nie_wiemy'],
     ['cos_spoza_checka', 'nie_wiemy'],
@@ -969,11 +988,28 @@ check('(9) ⛔ reguła NIE CZYTA ZEGARA ani bazy — inaczej nie da się jej spr
     rozstrzygnijPowod(null).powod !== '' && rozstrzygnijPowod('cos_spoza_checka').powod.includes('cos_spoza_checka'),
     JSON.stringify(rozstrzygnijPowod(null)));
 
-  check('(9) ⭐ pięć powodów co do znaku jak `session_verdicts_absence_reason_enum` '
-    + '(⛔ `szkola` BEZ polskich znaków — skrót przy przepisywaniu nie rzuca błędem, '
-    + 'tylko po cichu rozjeżdża dopasowanie)',
-    POWODY_NIEOBECNOSCI.join(',') === 'kontuzja,choroba,szkola,rodzina,inny',
+  check('(9) ⭐ sześć powodów co do znaku jak `session_verdicts_absence_reason_enum` '
+    + '(⛔ `szkola` BEZ polskich znaków, ⛔ `nie_podam` z PODKREŚLNIKIEM — skrót albo '
+    + '„poprawka" przy przepisywaniu nie rzuca błędem, tylko po cichu rozjeżdża dopasowanie)',
+    POWODY_NIEOBECNOSCI.join(',') === 'kontuzja,choroba,szkola,rodzina,inny,nie_podam',
     POWODY_NIEOBECNOSCI.join(','));
+
+  // ═══ „NIE PODAM" — decyzja Kuby 18.08.2026 ═══════════════════════
+  check('(9) ⭐⭐ „nie podam" NIE LICZY SIĘ PRZECIWKO ZAWODNIKOWI — ⛔ przycisk, '
+    + 'który kosztuje, przestaje być wyjściem i staje się pułapką',
+    rozstrzygnijPowod('nie_podam').waga !== 'liczy_sie',
+    rozstrzygnijPowod('nie_podam').waga);
+  check('(9) ⭐⭐ …ale TEŻ NIE UDAJE, że wie, iż powód był niezależny (Z0) — oddaje „nie wiemy"',
+    rozstrzygnijPowod('nie_podam').waga === 'nie_wiemy',
+    rozstrzygnijPowod('nie_podam').waga);
+  check('(9) ⛔ ŚWIADOMA ODMOWA i MILCZENIE to DWA RÓŻNE FAKTY — ta sama waga, ale INNY powód. '
+    + 'Bez tego rozróżnienia baza nie odpowie, czy w ogóle zapytaliśmy',
+    rozstrzygnijPowod('nie_podam').powod !== rozstrzygnijPowod(null).powod
+    && rozstrzygnijPowod('nie_podam').powod !== '',
+    `nie_podam: „${rozstrzygnijPowod('nie_podam').powod}" · null: „${rozstrzygnijPowod(null).powod}"`);
+  check('(9) ⛔ `nie podam` ZE SPACJĄ nie jest znanym powodem — baza odrzuca go kodem 23514',
+    !czyZnanyPowod('nie podam') && czyZnanyPowod('nie_podam'),
+    'zapis ze spacją przeszedł jako znany — u zawodnika skończy się błędem zapisu');
 
   // ⛔ ZAKRES — TEN PAS NIE BUDUJE ZDANIA O WYSTARCZALNOŚCI (§5 polecenia).
   check('(9) ⛔ moduł NIE ZAWIERA zdania o wystarczalności wobec celu — to osobny pas',

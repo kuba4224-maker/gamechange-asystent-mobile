@@ -240,7 +240,11 @@ export function czyOceniamy(r: RozpoznanieRodzaju): boolean {
 // Wynik, co do znaku:
 //   session_verdicts_absence_reason_enum
 //     CHECK (absence_reason IS NULL OR absence_reason = ANY (ARRAY[
-//       'kontuzja','choroba','szkola','rodzina','inny']))
+//       'kontuzja','choroba','szkola','rodzina','inny','nie_podam']))
+//
+// ⭐ SZÓSTY POWÓD DOŁOŻONY 18.08.2026 — decyzja Kuby. CHECK rozszerzony na
+// produkcji tego samego dnia i sprawdzony wykonaniem jego własnego wyrażenia:
+// przyjmuje 'nie_podam', ⛔ odrzuca 'nie podam' (ze spacją) i 'szkoła'.
 //   session_verdicts_powod_tylko_przy_nieodbyciu
 //     CHECK (absence_reason IS NULL OR verdict = 'nie_odbylo_sie')
 //
@@ -248,7 +252,9 @@ export function czyOceniamy(r: RozpoznanieRodzaju): boolean {
 // ortograficzna przy przepisywaniu do kodu nie rzuca błędem: po cichu rozjeżdża
 // dopasowanie i baza odrzuca wiersz kodem `23514` dopiero u zawodnika.
 
-export const POWODY_NIEOBECNOSCI = ['kontuzja', 'choroba', 'szkola', 'rodzina', 'inny'] as const;
+// ⛔ `nie_podam` z PODKREŚLNIKIEM, nie ze spacją — tak stoi w CHECK-u.
+export const POWODY_NIEOBECNOSCI =
+  ['kontuzja', 'choroba', 'szkola', 'rodzina', 'inny', 'nie_podam'] as const;
 export type PowodNieobecnosci = (typeof POWODY_NIEOBECNOSCI)[number];
 
 /**
@@ -307,13 +313,30 @@ export function rozstrzygnijPowod(
   if (wartosc === 'inny') {
     return { waga: 'liczy_sie', powod: 'powód inny niż zdrowotny i niezależny' };
   }
+  // ⭐⛔ „NIE PODAM" — DECYZJA KUBY 18.08.2026, I TO NIE JEST TO SAMO CO MILCZENIE.
+  //
+  // Milczenie (`null`) znaczy „nie zapytaliśmy albo zawodnik przewinął dalej".
+  // `nie_podam` znaczy „ZAPYTALIŚMY, a zawodnik świadomie odmówił odpowiedzi".
+  // To są dwa różne fakty o zawodniku i baza je od 18.08 rozróżnia.
+  //
+  // ⛔ DLACZEGO `nie_wiemy`, A NIE `nie_liczy_sie` ANI `liczy_sie`:
+  //   • `liczy_sie` policzyłoby odmowę PRZECIWKO zawodnikowi — czyli produkt
+  //     karałby go za skorzystanie z przycisku, który sam mu podstawił.
+  //     Przycisk, który kosztuje, przestaje być wyjściem i staje się pułapką.
+  //   • `nie_liczy_sie` twierdziłoby, że powód był od niego niezależny —
+  //     a tego NIE WIEMY. To byłoby podanie prawdopodobnego jako pewnego (Z0).
+  // Jedyne prawdziwe zdanie brzmi: zapytaliśmy, nie wiemy. Trzecia wartość (R5)
+  // jest tu nie ozdobą, tylko jedyną uczciwą odpowiedzią.
+  if (wartosc === 'nie_podam') {
+    return { waga: 'nie_wiemy', powod: 'zawodnik świadomie nie podał powodu — i miał do tego prawo' };
+  }
   // ⛔ WARTOŚĆ SPOZA CHECK-A. Nie zgadujemy i nie wpadamy do „liczy się":
   // baza jej nie przepuści, więc jedyne, co możemy tu prawdziwie powiedzieć,
   // to że jej nie znamy.
   return { waga: 'nie_wiemy', powod: `nie znam powodu „${wartosc}" — jest spoza CHECK-a bazy` };
 }
 
-/** Czy wartość jest jednym z pięciu powodów, które baza przyjmie. */
+/** Czy wartość jest jednym z sześciu powodów, które baza przyjmie. */
 export function czyZnanyPowod(w: unknown): w is PowodNieobecnosci {
   return typeof w === 'string' && (POWODY_NIEOBECNOSCI as readonly string[]).includes(w);
 }
@@ -717,13 +740,23 @@ export const KROK_POWOD = 'Powód — jeśli chcesz go podać';
 /** ⚠️ DO PRZEJRZENIA — O1. Zdanie, które mówi, że reszta jest dobrowolna. */
 export const RESZTA_DOBROWOLNA = 'Reszta jest dobrowolna — to, co powyżej, już się zapisało.';
 
-/** ⚠️ DO PRZEJRZENIA — O1. Pięć powodów, brzmienia dla zawodnika. */
+/**
+ * ⚠️ DO PRZEJRZENIA — O1. Sześć powodów, brzmienia dla zawodnika.
+ *
+ * ⭐ SZÓSTY DOŁOŻONY 18.08.2026 (decyzja Kuby). ⛔ Brzmienie jest CELOWO suche:
+ * „Nie podam" nie przeprasza i nie tłumaczy się za zawodnika. Przycisk, który
+ * każe się tłumaczyć z odmowy, przestaje być wyjściem.
+ * ⚠️ Ten typ jest `Record<PowodNieobecnosci, …>` i to NIE jest formalność:
+ * dopisanie powodu bez brzmienia przestaje się kompilować. Tak właśnie ten
+ * brak został złapany — przez `tsc`, nie przez suitę.
+ */
 export const POWOD_NAPIS: Record<PowodNieobecnosci, string> = {
   kontuzja: 'Kontuzja',
   choroba: 'Choroba',
   szkola: 'Szkoła',
   rodzina: 'Rodzina',
   inny: 'Inny',
+  nie_podam: 'Nie podam',
 };
 
 /** ⚠️ DO PRZEJRZENIA — O1. Zdanie przy pozycji, której nie da się usunąć. */

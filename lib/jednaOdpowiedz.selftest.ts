@@ -382,15 +382,68 @@ console.log('\n6. (T8/R1) NA „DZIŚ" NIE MA ELEMENTU POZA REJESTREM');
 
   const cialo = zrodlo.slice(odScrollView, doScrollView).replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
   const linie = cialo.split('\n');
-  const poczatki: number[] = [];
-  linie.forEach((l, i) => {
-    if (/^ {8}[<{]/.test(l) && !/^ {8}<\//.test(l) && !/^ {8}\)\}/.test(l)) poczatki.push(i);
+
+  /** Numery linii, od których zaczyna się blok JSX na zadanym wcięciu. */
+  const poczatkiNa = (od: number, doExcl: number, wciecie: number): number[] => {
+    const w = ' '.repeat(wciecie);
+    const out: number[] = [];
+    for (let i = od; i < doExcl; i++) {
+      const l = linie[i];
+      if (!l.startsWith(`${w}<`) && !l.startsWith(`${w}{`)) continue;
+      if (l[wciecie - 1] === ' ' && wciecie > 0 && linie[i][wciecie - 1] !== undefined
+        && l.slice(0, wciecie).trim() !== '') continue;
+      if (l.startsWith(`${w}</`) || l.startsWith(`${w})}`)) continue;
+      out.push(i);
+    }
+    return out;
+  };
+  const wytnij = (poczatki: number[], koniec: number): string[] =>
+    poczatki.map((i, j) => linie.slice(i, j + 1 < poczatki.length ? poczatki[j + 1] : koniec).join('\n'));
+
+  // ⭐ PRZEPISANE 18.08.2026 (PAS S1) — DLACZEGO WYCINANIE MA DWA POZIOMY.
+  //
+  // Do 18.08.2026 „blok najwyższego poziomu" znaczyło „linia z wcięciem 8
+  // wewnątrz `<ScrollView>`" i to była prawda: ekran był płaską listą kart.
+  // Pas A1 wchłonął widok „Tydzień" jako STAN EKRANU, więc na wcięciu 8 stoją
+  // dziś TRZY rzeczy — nagłówek dnia, przełącznik i JEDNO wyrażenie warunkowe
+  // `{zakresKarty === 'tydzien' ? (…) : (<>…</>)}`, w którym siedzi cała reszta.
+  // ⛔ Stary sposób wycinał wtedy 3 bloki zamiast 8 i strażnik strażnika
+  // zapalił się dokładnie tak, jak go zaprojektowano: powiedział, że PRZESTAŁ
+  // WIDZIEĆ EKRAN, zamiast po cichu przepuścić rejestr.
+  //
+  // ⛔ REGUŁA NIE ZOSTAŁA OSŁABIONA. Nadal: „jeden blok = jeden element ekranu,
+  // każdy musi mieć wpis w rejestrze". Zmieniło się to, że przełącznik stanu
+  // ekranu jest OTWIERANY, a nie liczony jako jeden element — bo inaczej jeden
+  // wpis (`styles.odpowiedzCard`) rozpoznawałby cały ekran i siódmy kafelek
+  // dołożony za rok wjechałby do środka niezauważony.
+  const poczatkiZewnetrzne = poczatkiNa(0, linie.length, 8);
+  const bloki: string[] = [];
+  let otwartychGalezi = 0;
+  poczatkiZewnetrzne.forEach((i, j) => {
+    const koniec = j + 1 < poczatkiZewnetrzne.length ? poczatkiZewnetrzne[j + 1] : linie.length;
+    const blok = linie.slice(i, koniec).join('\n');
+    // Przełącznik STANU EKRANU: `{cos ? ( … ) : ( … )}` rozciągnięty na wiele
+    // linii. Jego gałęzie są ekranami, więc otwieramy je i liczymy ICH bloki.
+    if (/^ {8}\{[^\n]*\?\s*\($/.test(linie[i])) {
+      otwartychGalezi += 1;
+      bloki.push(...wytnij(poczatkiNa(i + 1, koniec, 12), koniec));
+    } else {
+      bloki.push(blok);
+    }
   });
-  const bloki = poczatki.map((i, j) =>
-    linie.slice(i, j + 1 < poczatki.length ? poczatki[j + 1] : linie.length).join('\n'));
 
   check('(strażnik strażnika) umiem wyciąć bloki najwyższego poziomu',
     bloki.length >= 8, `wyciąłem ${bloki.length} bloków — jeśli 0, reguła niżej niczego nie pilnuje`);
+
+  // ⛔ ZAPADKA NA RÓWNOŚĆ — ILE STANÓW MA TEN EKRAN.
+  // Ustawiona 18.08.2026 na JEDEN (`Dziś / Tydzień`). Drugi przełącznik stanu
+  // znaczy, że ekran zaczął mieć cztery twarze — i wtedy „dziewięć rzeczy nad
+  // zgięciem" przestaje być prawdą o tym, co widzi zawodnik.
+  const PRZELACZNIKOW_STANU_18_08_2026 = 1;
+  check(`(strażnik strażnika) ekran ma DOKŁADNIE ${PRZELACZNIKOW_STANU_18_08_2026} przełącznik stanu`,
+    otwartychGalezi === PRZELACZNIKOW_STANU_18_08_2026,
+    `otwartych gałęzi: ${otwartychGalezi} — każdy kolejny przełącznik mnoży liczbę ekranów, `
+    + 'które trzeba zmierzyć osobno, a rejestr opisuje je jako jeden');
 
   const znaczniki = REJESTR_ELEMENTOW_DZIS.map((e) => e.znacznik);
   const nierozpoznane = bloki.filter((b) => !znaczniki.some((z) => b.includes(z)));
@@ -419,25 +472,78 @@ console.log('\n6. (T8/R1) NA „DZIŚ" NIE MA ELEMENTU POZA REJESTREM');
   check('(T8) jedna odpowiedź jest JEDNYM blokiem ekranu, nie trzema',
     blokiZOdpowiedzia.length === 1, `bloków niosących części odpowiedzi: ${blokiZOdpowiedzia.length}`);
 
-  // ── (T3) KOLEJNOŚĆ: karta głosu i punkt pomocy NAD jedną odpowiedzią ──
-  const iGlos = cialo.indexOf('styles.glosCard');
-  const iPomoc = cialo.indexOf('styles.pomocCard');
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐ (T3) PRZEPISANE 18.08.2026 (PAS S1) — TRZY NAGROBKI I JEDNA
+  //          PRZEPROWADZKA. ⛔ ANI JEDNA ASERCJA NIE ZOSTAŁA SKASOWANA.
+  // ═════════════════════════════════════════════════════════════════
+  // Do 18.08.2026 te trzy asercje pilnowały KOLEJNOŚCI trzech kart na „Dziś":
+  // kafelek wąskiego gardła → głos tygodnia → punkt pomocy → jedna odpowiedź.
+  // Dwie z tych kart ZDJĘTO DECYZJĄ, jedną WCHŁONIĘTO. Kolejność, której już
+  // nie ma, nie da się pilnować — ale to, ŻE TYCH RZECZY TAM NIE MA, pilnować
+  // się da i od dziś jest pilnowane. Zapadka odwrócona: z „stoi w tym miejscu"
+  // na „nie ma go tu i nie ma prawa wrócić bez decyzji".
   const iOdpowiedz = cialo.indexOf('styles.odpowiedzCard');
-  check('(T3) karta głosu tygodnia stoi NAD jedną odpowiedzią',
-    iGlos > 0 && iOdpowiedz > iGlos, `glos=${iGlos} odpowiedz=${iOdpowiedz}`);
-  check('(T3) punkt pomocy stoi NAD jedną odpowiedzią',
-    iPomoc > 0 && iOdpowiedz > iPomoc, `pomoc=${iPomoc} odpowiedz=${iOdpowiedz}`);
-  check('(T3) kafelek wąskiego gardła zostaje PIERWSZY (decyzja Kuby z 06.08.2026)',
-    cialo.indexOf('styles.heroGoal') > 0 && cialo.indexOf('styles.heroGoal') < iGlos, '');
 
-  // ── Kafelek nie wypowiada się już o tym, CO ZROBIĆ ────────────────
-  const heroOd = cialo.indexOf('styles.heroGoal');
-  const heroDo = cialo.indexOf('</TouchableOpacity>', heroOd);
-  const hero = cialo.slice(heroOd, heroDo);
-  check('(T1) z kafelka wąskiego gardła zniknęło „Nowa porcja w Twoim Bloku"',
-    !hero.includes(BLOK_NOWA_PORCJA), 'kafelek nadal mówi, co zrobić');
-  check('(T1) …i zniknęło „Zaplanuj Blok"',
-    !hero.includes(ZAPROSZENIE_ZAPLANUJ_BLOK), 'kafelek nadal mówi, co zrobić');
+  // ⭐ 1. GŁOS TYGODNIA — WCHŁONIĘTY, nie usunięty (przeprowadzka).
+  // ⛔ Zdania są te same CO DO ZNAKU (`glos.tytul`, `glos.tresc`) i rysują się
+  // WEWNĄTRZ karty jednej odpowiedzi, bo to ten sam gatunek zdania, a makieta
+  // v3 ma tu JEDEN blok, nie dwa. Asercja żąda obu rzeczy naraz: żeby głos
+  // nadal padał i żeby nie odzyskał własnej karty.
+  const kartaOdpowiedzi = (() => {
+    if (iOdpowiedz < 0) return null;
+    const koniec = cialo.indexOf('styles.sectionLabel', iOdpowiedz);
+    return koniec < 0 ? cialo.slice(iOdpowiedz) : cialo.slice(iOdpowiedz, koniec);
+  })();
+  check('(T3) ⭐ głos tygodnia jest WCHŁONIĘTY przez jedną odpowiedź — nie ma własnej karty',
+    kartaOdpowiedzi !== null
+    && /glos\.tytul/.test(kartaOdpowiedzi) && /glos\.tresc/.test(kartaOdpowiedzi)
+    && !cialo.includes('styles.glosCard'),
+    kartaOdpowiedzi === null
+      ? 'nie znajduję karty jednej odpowiedzi — nie da się powiedzieć, gdzie stoi głos'
+      : `glos w karcie: ${/glos\.tytul/.test(kartaOdpowiedzi)} · własna karta wróciła: `
+        + `${cialo.includes('styles.glosCard')} — głos tygodnia albo zniknął z ekranu, `
+        + 'albo odzyskał osobny blok, czyli wrócił kolaż pod nową nazwą');
+
+  // ⛔ 2. PUNKT POMOCY — ZDJĘTY DECYZJĄ KUBY 17.08.2026. CYTAT:
+  //    „najważniejsza jest prostota. Nie chcę, żebyś nawrzucał mi tam rzeczy
+  //     takich jak jakaś linia telefoniczna pomocy. Czyste «mięcho» sportowe."
+  // Ścieżka kryzysowa żyje z tyłu, uruchamiana danymi; jedyne wejście z ekranu
+  // stoi w „Profilu". ⛔ Ta asercja jest ZAPADKĄ NA POWRÓT, nie nagrobkiem
+  // biernym: dołożenie punktu pomocy do „Dziś" zapala ją z nazwą decyzji.
+  check('(T3) ⛔ punktu pomocy NIE MA na „Dziś" — decyzja Kuby z 17.08.2026',
+    !cialo.includes('styles.pomocCard') && !/POMOC_PRZYCISK/.test(cialo),
+    'na „Dziś" wróciła linia pomocy. Decyzja Kuby 17.08.2026: „najważniejsza jest prostota. '
+    + 'Nie chcę, żebyś nawrzucał mi tam rzeczy takich jak jakaś linia telefoniczna pomocy. '
+    + 'Czyste «mięcho» sportowe." Wejście do punktu pomocy stoi w „Profilu" i tam ma zostać.');
+
+  // ⛔ 3. KAFELEK WĄSKIEGO GARDŁA — ZDJĘTY 18.08.2026 (pas A1).
+  // Decyzja Kuby z 06.08.2026 mówiła „kafelek zostaje pierwszy" i obowiązywała,
+  // dopóki kafelek był na ekranie. Zastąpiła ją makieta v3 (PAS MK5): „Dziś"
+  // odpowiada na „co dziś zrobić", nie „nad czym pracujesz", i NIE MA na tym
+  // ekranie żadnego kafla celu. Wąskie gardło stoi dziś na „Profilu".
+  check('(T3) ⛔ kafla celu NIE MA na „Dziś" — makieta v3 (18.08.2026), wąskie gardło stoi na „Profilu"',
+    !cialo.includes('styles.heroGoal'),
+    'na „Dziś" wrócił kafelek wąskiego gardła (190 dp). Makieta v3 nie ma go na tym ekranie; '
+    + 'jeżeli to jest świadoma zmiana, zmień makietę i tę asercję razem, a nie samą asercję.');
+
+  // ── (T1) DWA WEZWANIA DO PRACY MAJĄ BYĆ W JEDNEJ ODPOWIEDZI ───────
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S1). Do 18.08 pytaliśmy, czy wyszły
+  // z kafelka wąskiego gardła. Kafelka nie ma, więc pytanie „czy ich tam nie
+  // ma" przechodziło na PUSTYM tekście — czyli nie znaczyło nic (dosłownie:
+  // `cialo.slice(-1, …)` oddawało pustkę). Od dziś pytamy o to samo od drugiej
+  // strony i MOCNIEJ: oba wezwania mają w `dzis.tsx` NIE PADAĆ WCALE, bo ekran
+  // bierze je z `zbudujJednaOdpowiedz()`, a nie wypisuje sam.
+  check('(T1) „Nowa porcja w Twoim Bloku" NIE JEST wpisana na ekranie — przychodzi z jednej odpowiedzi',
+    !cialo.includes(BLOK_NOWA_PORCJA),
+    'ekran wypisuje wezwanie do pracy sam, obok jednej odpowiedzi — czyli ma drugie źródło tego, '
+    + 'co zawodnik ma dziś zrobić');
+  check('(T1) …i tak samo „Zaplanuj Blok"',
+    !cialo.includes(ZAPROSZENIE_ZAPLANUJ_BLOK),
+    'ekran wypisuje wezwanie do pracy sam, obok jednej odpowiedzi');
+  check('(T1) ⭐ …a oba brzmienia NAPRAWDĘ istnieją w `lib/` i wychodzą przez jedną odpowiedź',
+    BLOK_NOWA_PORCJA.length > 0 && ZAPROSZENIE_ZAPLANUJ_BLOK.length > 0,
+    `${BLOK_NOWA_PORCJA} / ${ZAPROSZENIE_ZAPLANUJ_BLOK} — puste brzmienie sprawiłoby, `
+    + 'że dwie asercje wyżej przechodzą, nie sprawdzając niczego');
 
   // ── Trzy nagłówki jednej odpowiedzi naprawdę są na ekranie ────────
   // ⚠️ Sprawdzamy STAŁE, nie napisy: brzmienie należy do Kuby i może się

@@ -90,6 +90,31 @@ const PLIK_DZIS = 'app/(tabs)/dzis.tsx';
 const dzisSurowe = readFileSync(join(root, PLIK_DZIS), 'utf8');
 const dzis = bezKomentarzy(dzisSurowe);
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-S2 18.08.2026 — DRUGI PLIK, KTÓRY TEN STRAŻNIK OD DZIŚ CZYTA.
+//
+// GDZIE BYŁO: `app/(tabs)/dzis.tsx` — licznik pracy, praca we wszystkich
+// Blokach i trzeci stan postępu Bloku stały tam do 18.08.2026 rano.
+// GDZIE JEST: `components/PracaWLiczbach.tsx`, montowany przez
+// `components/ArkuszeProfilu.tsx` w pozycji „Skąd to wiemy" ekranu „Profil".
+// DLACZEGO: pas A1 przebudował ekran „Dziś" do makiety v3 i zdjął z niego trzy
+// bloki, ale WYWOŁANIA zostały — produkt liczył wszystkie trzy rzeczy i nie
+// rysował ani jednej (dokładnie stan zakazany przez (F1-2)). Ekran „Dziś" ma
+// 807 dp przy zgięciu 808, więc jedynym miejscem z zapasem był arkusz Profilu,
+// montowany POZA `ScrollView`, czyli za 0 dp.
+//
+// ⛔ REGUŁY SĄ TE SAME CO DO ZNAKU. Zmieniło się WYŁĄCZNIE, którego pliku
+// strażnik o nie pyta — i pyta go tak samo ostro: na wyciętych instrukcjach,
+// na równość, bez ani jednego `>= 1`.
+// ═══════════════════════════════════════════════════════════════════
+const PLIK_PRACA = 'components/PracaWLiczbach.tsx';
+const pracaSurowe = readFileSync(join(root, PLIK_PRACA), 'utf8');
+const praca = bezKomentarzy(pracaSurowe);
+
+/** Arkusze Profilu — jedyne miejsce, z którego blok wchodzi na ekran. */
+const PLIK_ARKUSZE = 'components/ArkuszeProfilu.tsx';
+const arkusze = bezKomentarzy(readFileSync(join(root, PLIK_ARKUSZE), 'utf8'));
+
 /**
  * Sekcja budowania TRZECH WEJŚĆ tygodnia i licznika, wycięta z SUROWEGO
  * źródła (znaczniki stoją w komentarzach, więc po `bezKomentarzy` by ich nie
@@ -221,11 +246,19 @@ function check(label: string, cond: boolean, detail: string) {
 // nigdy nie pytał. Cztery obietnice (WG-28, WG-37, WT-15, WT-17) stały wtedy
 // w `KOD GOTOWY` wyłącznie dlatego, że nikt nie wpiął jednego wywołania.
 {
-  check('(B5-2) `dzis.tsx` woła `policzWykonanaPrace`',
-    /\bpoliczWykonanaPrace\(/.test(dzis),
-    'licznik pracy pasa D1 (84 asercje) znowu nie ma ani jednego konsumenta');
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2) — REGUŁA TA SAMA, PLIK INNY.
+  // GDZIE PYTAŁA: `app/(tabs)/dzis.tsx`. GDZIE PYTA: `components/PracaWLiczbach.tsx`.
+  // DLACZEGO: pas A1 zdjął z ekranu „Dziś" render licznika, a wywołanie zostało
+  // — liczba szła do `console.log`. Od 18.08 licznik liczy się TAM, GDZIE się
+  // rysuje, więc jednym ruchem nie da się już zdjąć widza bez zdjęcia liczby.
+  // ⛔ RÓWNIE MOCNA: warunek co do znaku ten sam, plik jest JEDYNYM konsumentem.
+  check('(B5-2) blok „praca w liczbach" woła `policzWykonanaPrace`',
+    /\bpoliczWykonanaPrace\(/.test(praca)
+    && !/\bpoliczWykonanaPrace\(/.test(dzis),
+    'licznik pracy pasa D1 (84 asercje) znowu nie ma ani jednego konsumenta '
+    + '(albo wrócił na ekran „Dziś", który go nie rysuje — wtedy znowu liczy dla nikogo)');
 
-  const wywolaniaLicznika = argumentyWywolania(dzis, 'policzWykonanaPrace');
+  const wywolaniaLicznika = argumentyWywolania(praca, 'policzWykonanaPrace');
   // ⛔ Drugi argument (`ZasadyWykonania`) jest punktem wpięcia MUTACJI i należy
   // wyłącznie do strażnika D1. Podany z ekranu znaczyłby, że ekran ma własną,
   // schowaną kopię reguł rozstrzygania wykonania — i że mutacja ma drogę
@@ -247,7 +280,9 @@ function check(label: string, cond: boolean, detail: string) {
   // (`return null`, gdy dane jeszcze nie przyszły) i wynik funkcji. Trzeci
   // `return` znaczy, że ktoś dołożył drogę omijającą licznik — a taka droga
   // z definicji nie ma testu, bo wygląda jak brak danych.
-  const memoLicznika = cialoMemo(dzis, 'licznik');
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2): memo licznika mieszka od dziś
+  // w `components/PracaWLiczbach.tsx`. Kształt sprawdzany co do znaku ten sam.
+  const memoLicznika = cialoMemo(praca, 'licznik');
   const ileReturnow = (memoLicznika?.match(/\breturn\b/g) || []).length;
   const ileReturnNull = (memoLicznika?.match(/\breturn\s+null\b/g) || []).length;
   check('(B5-2) ⭐ wywołanie licznika jest OSIĄGALNE — memo ma dwa `return`, nie trzy',
@@ -277,8 +312,11 @@ function check(label: string, cond: boolean, detail: string) {
 // 'policzony' ? licznik.odbyte : 0` i zdanie „nie wiem, ile odbyłeś" zamienia
 // się w pomiar, którego nikt nie wykonał. Wygląda wtedy poprawnie i przechodzi
 // wszystkie pozostałe asercje.
+// ⭐ PRZECELOWANE 18.08.2026 (pas S2) — cała ta piątka pyta od dziś
+// `components/PracaWLiczbach.tsx` zamiast `app/(tabs)/dzis.tsx`. Reguły
+// nietknięte co do znaku; zmieniło się miejsce, w którym licznik jest rysowany.
 {
-  const cialoLicznika = cialoFunkcji(dzis, 'renderLicznikPracy');
+  const cialoLicznika = cialoFunkcji(praca, 'renderLicznikPracy');
 
   check('(B5-3) render licznika istnieje i rozgałęzia się po `rodzaj`',
     cialoLicznika !== null && /rodzaj\s*===\s*'policzony'/.test(cialoLicznika),
@@ -301,13 +339,21 @@ function check(label: string, cond: boolean, detail: string) {
 
   // Brzmienie `brak_podstawy` nie ma prawa zawierać wzorca „N z M".
   check('(B5-3) brzmienie `brak_podstawy` nie zawiera wzorca „N z M"',
-    !/LICZNIK_BRAK_PODSTAWY\s*=\s*\([^)]*\)\s*=>[\s\S]{0,600}?\$\{[^}]*\}\s*z\s*\$\{/.test(dzis),
+    !/LICZNIK_BRAK_PODSTAWY\s*=\s*\([^)]*\)\s*=>[\s\S]{0,600}?\$\{[^}]*\}\s*z\s*\$\{/.test(praca),
     'stała `brak_podstawy` buduje zdanie w kształcie pomiaru');
+
+  // ⛔ ZAPADKA NA JEDNĄ KOPIĘ BRZMIEŃ (pas S2, 18.08.2026). Do dziś rano te
+  // same stałe stały W DWÓCH plikach: żywa kopia nigdzie i martwa w `dzis.tsx`.
+  // Dwie kopie brzmienia rozjeżdżają się przy pierwszej poprawce, a każda
+  // z osobna wygląda poprawnie.
+  check('(B5-3) ⛔ brzmienia licznika mają DOKŁADNIE JEDNĄ kopię w produkcie',
+    /LICZNIK_POLICZONY\s*=/.test(praca) && !/LICZNIK_POLICZONY/.test(dzis),
+    'brzmienie licznika istnieje w dwóch miejscach albo zniknęło z tego, które je rysuje');
 
   // ⛔ WG-28 wymaga JAWNEGO „bez wpisu". Jawne znaczy: własne zdanie, nie
   // milczenie i nie doliczenie do mianownika.
   check('(B5-3) WG-28 — „bez wpisu" ma własne, jawne zdanie',
-    /LICZNIK_BEZ_WPISU\s*=/.test(dzis) && cialoLicznika !== null
+    /LICZNIK_BEZ_WPISU\s*=/.test(praca) && cialoLicznika !== null
     && /LICZNIK_BEZ_WPISU\(/.test(cialoLicznika),
     'trzecia liczba WG-28 („bez wpisu") nie jest pokazywana jawnie');
 
@@ -357,9 +403,15 @@ function check(label: string, cond: boolean, detail: string) {
   // ⛔ `zbudujTydzien` i `policzWykonanaPrace` MUSZĄ dostać werdykty. Wołanie
   // ich bez tego pola jest ciche: `WERDYKTY_NIEPODANE` zachowuje się jak
   // „brak", więc ekran wygląda poprawnie i po prostu nigdy nie widzi werdyktu.
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2) — DWA PLIKI ZAMIAST JEDNEGO, i to jest
+  // MOCNIEJSZE niż suma po produkcie: `zbudujTydzien` musi dostać werdykty
+  // w OBU miejscach, w których stoi (karta „Dziś" i blok pracy na „Profilu"),
+  // a licznik tam, gdzie się liczy. Pominięcie pola daje `WERDYKTY_NIEPODANE`,
+  // czyli ciche „brak" — i wygląda dokładnie jak poprawny kod.
   check('(B5-4) ⭐ obie funkcje dostają werdykty — inaczej werdykt zawodnika nie ma jak dojść na ekran',
     (argumentyWywolania(dzis, 'zbudujTydzien')[0] ?? []).join(',').includes('werdykty')
-    && (argumentyWywolania(dzis, 'policzWykonanaPrace')[0] ?? []).join(',').includes('werdykty'),
+    && (argumentyWywolania(praca, 'zbudujTydzien')[0] ?? []).join(',').includes('werdykty')
+    && (argumentyWywolania(praca, 'policzWykonanaPrace')[0] ?? []).join(',').includes('werdykty'),
     'któraś z funkcji jest wołana bez pola `werdykty` — pominięcie daje '
     + '`WERDYKTY_NIEPODANE`, czyli ciche „brak"');
 }
@@ -382,18 +434,29 @@ function check(label: string, cond: boolean, detail: string) {
   // `nazwa()` z pustymi nawiasami występuje raz w definicji; każde następne
   // wystąpienie JEST wywołaniem, niezależnie od tego, jak owinięte.
   const ilePolan = (nazwa: string) => (dzis.match(new RegExp(`${nazwa}\\(\\)`, 'g')) || []).length;
+  const ilePolanW = (src: string, nazwa: string) =>
+    (src.match(new RegExp(`${nazwa}\\(\\)`, 'g')) || []).length;
 
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2) — I WZMOCNIONE O DRUGI WARUNEK.
+  // GDZIE PYTAŁA: `dzis.tsx`. GDZIE PYTA: `components/PracaWLiczbach.tsx`
+  // (render jest wołany) ORAZ `components/ArkuszeProfilu.tsx` (sam blok jest
+  // NAPRAWDĘ montowany w pozycji „Skąd to wiemy"). ⛔ Sam render wołany
+  // wewnątrz komponentu, którego nikt nie montuje, jest tą samą pustką co
+  // przed przeprowadzką — dlatego warunki są dwa, nie jeden.
   check('(B5-5) ⭐ render licznika jest WOŁANY, a nie tylko zdefiniowany',
-    ilePolan('renderLicznikPracy') >= 2,
-    `wystąpień \`renderLicznikPracy()\`: ${ilePolan('renderLicznikPracy')} `
-    + '(1 = sama definicja, czyli nikt jej nie woła i liczba nie trafia na ekran)');
+    ilePolanW(praca, 'renderLicznikPracy') >= 2
+    && /<PracaWLiczbach\b/.test(arkusze)
+    && arkusze.indexOf('<PracaWLiczbach') > arkusze.indexOf("props.otwarty === 'skad'"),
+    `wystąpień \`renderLicznikPracy()\`: ${ilePolanW(praca, 'renderLicznikPracy')} `
+    + '(1 = sama definicja, czyli nikt jej nie woła i liczba nie trafia na ekran) · '
+    + `montaż bloku w arkuszu „Skąd to wiemy": ${/<PracaWLiczbach\b/.test(arkusze)}`);
 
   check('(B5-5) ⭐ render tygodnia jest WOŁANY, a nie tylko zdefiniowany',
     ilePolan('renderTydzienNaKarcie') >= 2,
     `wystąpień \`renderTydzienNaKarcie()\`: ${ilePolan('renderTydzienNaKarcie')} `
     + '(1 = sama definicja, czyli przełącznik nie ma czego pokazać)');
 
-  const cialoLicznika = cialoFunkcji(dzis, 'renderLicznikPracy');
+  const cialoLicznika = cialoFunkcji(praca, 'renderLicznikPracy');
 
   check('(B5-5) ⭐ LICZBA jest w elemencie `<Text>`, nie tylko policzona',
     cialoLicznika !== null
@@ -744,6 +807,16 @@ const KLUCZE_SILNIKOW_BEZ_EKRANU = new Set(SILNIKI_BEZ_EKRANU.map((s) => s.klucz
 type ZasadyF1 = {
   dzis: string;
   profil: string;
+  /**
+   * ⭐ PLAN-D-S2 18.08.2026 — TRZECIE ŹRÓDŁO BATERII: `components/PracaWLiczbach.tsx`.
+   * Dwie z trzech liczb pasa F1 (licznik pracy i praca w Blokach) oraz trzeci
+   * stan postępu Bloku mieszkają od 18.08 tutaj, nie na ekranie „Dziś".
+   * ⛔ Mutacje, które do 18.08 psuły `dzis`, psują od dziś TEN plik — inaczej
+   * bateria mierzyłaby kod, w którym badanych rzeczy już nie ma.
+   */
+  praca: string;
+  /** Arkusze Profilu — dowód, że blok jest MONTOWANY, a nie tylko napisany. */
+  arkusze: string;
   /** `lib/<plik>.ts` → treść. Wstrzykiwane, żeby mutacja nie dotykała dysku. */
   zrodlaLib: Record<string, string>;
   /** `app/…` i `components/…` → treść. Konsumenci pierwszego rzędu. */
@@ -811,25 +884,44 @@ function bateriaF1(z: ZasadyF1): WynikF1[] {
   const zapisz = (label: string, ok: boolean, detail = '') => r.push({ label, ok, detail });
 
   // ⚠️ IGŁA MUSI BYĆ JEDNOZNACZNA. `workProgress.stan === 'NIE_WIEM'` występuje
-  // w tym pliku DWA razy: na kafelku Celu i w `renderPracaWBlokach` (warunek
-  // powodu). Pierwsza wersja tej asercji brała pierwsze wystąpienie i pytała
-  // gałąź powodu o tytuł, którego tam nie ma — czyli zapalała się na poprawnym
-  // kodzie. Igła zawiera więc drugi człon warunku, który stoi TYLKO na kafelku.
-  const galazWiadomo = galazJsx(z.dzis, "workProgress.stan === 'WIADOMO' && widokDzis.pokazacPostepPracy");
-  const galazNieWiem = galazJsx(z.dzis, "workProgress.stan === 'NIE_WIEM' && widokDzis.pokazacPostepPracy");
-  const cialoPracy = cialoFunkcji(z.dzis, 'renderPracaWBlokach');
+  // w pliku bloku DWA razy: w `renderPostepBloku` i w `renderPracaWBlokach`
+  // (warunek powodu). Pierwsza wersja tej asercji brała pierwsze wystąpienie
+  // i pytała gałąź powodu o tytuł, którego tam nie ma — czyli zapalała się
+  // na poprawnym kodzie.
+  // ⭐ PLAN-D-S2 18.08.2026 — ROZWIĄZANE MOCNIEJ NIŻ DŁUŻSZĄ IGŁĄ: najpierw
+  // WYCINAMY CIAŁO `renderPostepBloku`, potem szukamy gałęzi W NIM. Igła oparta
+  // na drugim członie warunku (`widokDzis.pokazacPostepPracy`) trzymała się
+  // przypadkowego sąsiedztwa; ta trzyma się funkcji, o którą naprawdę pytamy,
+  // i nie da się jej ominąć przestawieniem kolejności bloków w pliku.
+  const cialoPostepu = cialoFunkcji(z.praca, 'renderPostepBloku');
+  const galazWiadomo = cialoPostepu === null
+    ? null : galazJsx(cialoPostepu, "workProgress.stan === 'WIADOMO'");
+  const galazNieWiem = cialoPostepu === null
+    ? null : galazJsx(cialoPostepu, "workProgress.stan === 'NIE_WIEM'");
+  const cialoPracy = cialoFunkcji(z.praca, 'renderPracaWBlokach');
   const ilePolan = (src: string, nazwa: string) => (src.match(new RegExp(`${nazwa}\\(\\)`, 'g')) || []).length;
 
   // ── P1 · PIERWSZA LICZBA MA KONSUMENTA I TRZECI STAN JEST NARYSOWANY ──
-  zapisz('⭐ (F1-1) `dzis.tsx` woła `computeFocusBlockProgressState`, a nie wersję bez trzeciego stanu',
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2) — OBA PLIKI NARAZ, i to jest MOCNIEJSZE
+  // niż pytanie o jeden. `dzis.tsx` woła stan nadal (karmi `maAktywnyBlok`
+  // w jednej odpowiedzi), a `PracaWLiczbach.tsx` woła go, bo go RYSUJE.
+  // ⛔ Powrót do `computeFocusBlockProgress` zakazany W OBU.
+  zapisz('⭐ (F1-1) OBA konsumenty wołają `computeFocusBlockProgressState`, a nie wersję bez trzeciego stanu',
     /\bcomputeFocusBlockProgressState\(/.test(z.dzis)
-    && !/\bsetWorkProgress\(\s*computeFocusBlockProgress\(/.test(z.dzis),
-    'ekran wrócił do `computeFocusBlockProgress` — „nie wiemy, ile z M" znowu rysuje się jako „0 z M"');
+    && /\bcomputeFocusBlockProgressState\(/.test(z.praca)
+    && !/\bsetWorkProgress\(\s*computeFocusBlockProgress\(/.test(z.dzis)
+    && !/[^a-zA-Z]computeFocusBlockProgress\(/.test(z.praca),
+    'któryś z ekranów wrócił do `computeFocusBlockProgress` — „nie wiemy, ile z M" '
+    + 'znowu rysuje się jako „0 z M"');
 
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2). GDZIE BYŁO: kafelek Celu na „Dziś".
+  // GDZIE JEST: `renderPostepBloku` w bloku „praca w liczbach" na „Profilu".
+  // DLACZEGO: makieta v3 nie ma kafla celu na ekranie 1, ale TRZECI STAN nie
+  // dostał w żadnym dokumencie nowego miejsca — dostał je dziś.
   zapisz('⭐ (F1-1) stan `NIE_WIEM` NAPRAWDĘ trafia do `<Text>`, nie tylko jest policzony',
     galazNieWiem !== null && /<Text[^>]*>\s*\{?\s*NIE_WIEM_TYTUL\(/.test(galazNieWiem),
     galazNieWiem === null
-      ? 'nie ma gałęzi `stan === \'NIE_WIEM\'` na kafelku Celu'
+      ? 'nie ma gałęzi `stan === \'NIE_WIEM\'` w `renderPostepBloku`'
       : `gałąź jest, ale nie rysuje tytułu: ${galazNieWiem.replace(/\s+/g, ' ').slice(0, 120)}`);
 
   // ⛔ O71 — TO JEST ASERCJA NA WYCIĘTĄ INSTRUKCJĘ, NIE NA PLIK. Pasek postępu
@@ -840,19 +932,45 @@ function bateriaF1(z: ZasadyF1): WynikF1[] {
     && galazNieWiem !== null && !/styles\.workFill/.test(galazNieWiem),
     'pasek wjechał do gałęzi „nie wiemy" albo zniknął z gałęzi „wiadomo"');
 
+  // ⭐ NOWA (pas S2, 18.08.2026) — TRZECI STAN NIE MA PRAWA BYĆ WYCISZONY.
+  // ⛔ Powód, dla którego ta asercja musiała powstać RAZEM z przeprowadzką:
+  // dwie siostrzane reguły („brak_podstawy" licznika i „nie_policzony" pracy
+  // w Blokach) miały swoje anty-`return null` od pasów B5 i F1, a `NIE_WIEM`
+  // NIE MIAŁ ŻADNEGO — bo do 18.08 mieszkał w gałęzi JSX, a nie w funkcji,
+  // z której da się wyjść. Po przeprowadzce do `renderPostepBloku` ta droga
+  // istnieje, więc musi mieć strażnika. Cisza przy „nie wiemy" wygląda
+  // dokładnie jak brak funkcji — i jest gorsza, bo nie da się jej zauważyć.
+  // ⚠️ `BRAK_PLANU` wolno wyciszyć i tylko jego: nie ma wtedy o czym mówić.
+  zapisz('⛔ ⭐ (F1-1) stan `NIE_WIEM` NIE jest wyciszany wcześniejszym `return null`',
+    cialoPostepu !== null
+    && !/stan\s*!==\s*'WIADOMO'[\s\S]{0,80}?return\s+null/.test(cialoPostepu)
+    && !/stan\s*===\s*'NIE_WIEM'[\s\S]{0,80}?return\s+null/.test(cialoPostepu),
+    cialoPostepu === null
+      ? 'nie ma funkcji `renderPostepBloku` — ta asercja nie znaczy nic'
+      : 'blok chowa stan „nie wiemy, ile z M" zamiast go pokazać');
+
   // ── P2 · DRUGA LICZBA MA KONSUMENTA I JEST NARYSOWANA ────────────────
-  zapisz('⭐ (F1-1) `dzis.tsx` woła `policzPraceWeWszystkichBlokach`',
-    /\bpoliczPraceWeWszystkichBlokach\(/.test(z.dzis),
-    'praca we wszystkich Blokach nie ma konsumenta — czyli nie istnieje dla zawodnika');
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2) — I WZMOCNIONE O ZAKAZ POWROTU:
+  // wołanie z `dzis.tsx` znaczyłoby liczenie bez rysowania, bo tamten ekran
+  // tej liczby nie pokazuje od 18.08 i nie ma na nią ani jednego dp.
+  zapisz('⭐ (F1-1) blok „praca w liczbach" woła `policzPraceWeWszystkichBlokach` — i nikt poza nim',
+    /\bpoliczPraceWeWszystkichBlokach\(/.test(z.praca)
+    && !/\bpoliczPraceWeWszystkichBlokach\(/.test(z.dzis),
+    'praca we wszystkich Blokach nie ma konsumenta — czyli nie istnieje dla zawodnika '
+    + '(albo wróciła na ekran, który jej nie rysuje)');
 
   zapisz('⭐ (F1-1) LICZBA pracy w Blokach jest w `<Text>`, nie tylko policzona',
     cialoPracy !== null && /<Text[^>]*>\s*\{?\s*dorobekBlokowLiczba\(/.test(cialoPracy),
     cialoPracy === null ? 'nie ma funkcji `renderPracaWBlokach`' : 'wynik nigdzie nie wchodzi do `<Text>`');
 
-  zapisz('⭐ (F1-1) render pracy w Blokach jest WOŁANY, a nie tylko zdefiniowany',
-    ilePolan(z.dzis, 'renderPracaWBlokach') >= 2,
-    `wystąpień \`renderPracaWBlokach()\`: ${ilePolan(z.dzis, 'renderPracaWBlokach')} `
-    + '(1 = sama definicja, czyli zawodnik tego nie zobaczy)');
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2) — DWA WARUNKI ZAMIAST JEDNEGO:
+  // render wołany W BLOKU **i** blok montowany w arkuszu „Skąd to wiemy".
+  // Sam render wołany w komponencie, którego nikt nie montuje, jest tą samą
+  // pustką co przed przeprowadzką.
+  zapisz('⭐ (F1-1) render pracy w Blokach jest WOŁANY, a blok MONTOWANY na ekranie',
+    ilePolan(z.praca, 'renderPracaWBlokach') >= 2 && /<PracaWLiczbach\b/.test(z.arkusze),
+    `wystąpień \`renderPracaWBlokach()\`: ${ilePolan(z.praca, 'renderPracaWBlokach')} `
+    + `(1 = sama definicja) · montaż bloku: ${/<PracaWLiczbach\b/.test(z.arkusze)}`);
 
   // ── P3 · ⭐ ASERCJA ODWROTNA ─────────────────────────────────────────
   const bezEkranu = silnikiBezEkranu(z);
@@ -921,9 +1039,13 @@ function bateriaF1(z: ZasadyF1): WynikF1[] {
     ['codziennie', /\bcodzienn/i],
     ['nie przerwij', /nie\s+przerw/i],
   ];
-  const trafioneN1 = zakazaneN1.filter(([, w]) => w.test(z.dzis)).map(([s]) => s);
-  zapisz('⭐⛔ (F1-4) N1 — ANI JEDNEGO słowa o dniach z rzędu w CAŁYM `dzis.tsx`',
-    trafioneN1.length === 0, `zakazane słowa w pliku: ${trafioneN1.join(', ')}`);
+  // ⭐ ROZSZERZONE 18.08.2026 (pas S2) na plik, do którego przeniosły się dwie
+  // liczby o pracy — zakazu N1 nie da się spełnić lokalnie, więc pytamy o CAŁE
+  // teksty obu plików, nie o wycinki.
+  const trafioneN1 = zakazaneN1
+    .filter(([, w]) => w.test(z.dzis) || w.test(z.praca)).map(([s]) => s);
+  zapisz('⭐⛔ (F1-4) N1 — ANI JEDNEGO słowa o dniach z rzędu w CAŁYM `dzis.tsx` i w bloku pracy',
+    trafioneN1.length === 0, `zakazane słowa w plikach: ${trafioneN1.join(', ')}`);
 
   // ── P6 · F1.3 — DWA OSIEROCONE `?? []` ──────────────────────────────
   zapisz('⭐ (F1-5) `dzis.tsx` nie ma już `eventsRes.data ?? []`',
@@ -973,6 +1095,8 @@ const ZRODLA_EKRANOW_PRAWDZIWE: Record<string, string> = Object.fromEntries([
 
 const ZASADY_F1: ZasadyF1 = {
   dzis,
+  praca,
+  arkusze,
   profil: bezKomentarzy(profilSurowe),
   zrodlaLib: ZRODLA_LIB_PRAWDZIWE,
   zrodlaEkranow: ZRODLA_EKRANOW_PRAWDZIWE,
@@ -1019,7 +1143,10 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
       zasady: {
         ...ZASADY_F1,
         dzis: ZASADY_F1.dzis
-          .replace(/setWorkProgress\(computeFocusBlockProgressState\(/g, 'setWorkProgress(computeFocusBlockProgress(')
+          .replace(/setWorkProgress\(computeFocusBlockProgressState\(/g, 'setWorkProgress(computeFocusBlockProgress('),
+        // ⭐ PLAN-D-S2 — MUTACJA IDZIE OD DZIŚ TAKŻE W PLIK, KTÓRY TO RYSUJE.
+        praca: ZASADY_F1.praca
+          .replace(/computeFocusBlockProgressState\(/g, 'computeFocusBlockProgress(')
           .replace(/workProgress\.stan === 'NIE_WIEM'/g, 'false'),
       },
     },
@@ -1028,7 +1155,7 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
       opis: '`policzPraceWeWszystkichBlokach` wraca do stanu z pasa E2: policzona, bez konsumenta',
       zasady: {
         ...ZASADY_F1,
-        dzis: ZASADY_F1.dzis.replace(/\bpoliczPraceWeWszystkichBlokach\(/g, 'nieistniejacaFunkcja('),
+        praca: ZASADY_F1.praca.replace(/\bpoliczPraceWeWszystkichBlokach\(/g, 'nieistniejacaFunkcja('),
       },
     },
     {
@@ -1036,7 +1163,7 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
       opis: 'najcichszy z możliwych sposobów odpięcia liczby — funkcja jest, `tsc` przechodzi, ekran milczy',
       zasady: {
         ...ZASADY_F1,
-        dzis: ZASADY_F1.dzis.replace(/\{renderPracaWBlokach\(\)\}/g, '{null}'),
+        praca: ZASADY_F1.praca.replace(/\{renderPracaWBlokach\(\)\}/g, '{null}'),
       },
     },
     {
@@ -1044,7 +1171,7 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
       opis: '„nie udało się policzyć" rysuje to samo zdanie co „jeszcze nic nie ma"',
       zasady: {
         ...ZASADY_F1,
-        dzis: ZASADY_F1.dzis.replace(/dorobekBlokowNiePoliczony\(/g, 'String(DOROBEK_BLOKOW_PUSTO) + String('),
+        praca: ZASADY_F1.praca.replace(/dorobekBlokowNiePoliczony\(/g, 'String(DOROBEK_BLOKOW_PUSTO) + String('),
       },
     },
     {
@@ -1052,9 +1179,9 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
       opis: 'kłamstwo narysowane zamiast napisanego — pasek na zero obok „nie wiemy, ile się odbyło"',
       zasady: {
         ...ZASADY_F1,
-        dzis: ZASADY_F1.dzis.replace(
-          /\{workProgress && workProgress\.stan === 'NIE_WIEM' && widokDzis\.pokazacPostepPracy \? \(/,
-          "{workProgress && workProgress.stan === 'NIE_WIEM' && widokDzis.pokazacPostepPracy ? (<View style={styles.workTrack}><View style={styles.workFill} /></View>) : null}\n{false ? (",
+        praca: ZASADY_F1.praca.replace(
+          /\{workProgress\.stan === 'NIE_WIEM' \? \(/,
+          "{workProgress.stan === 'NIE_WIEM' ? (<View style={styles.workTrack}><View style={styles.workFill} /></View>) : null}\n{false ? (",
         ),
       },
     },
@@ -1064,6 +1191,7 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
       zasady: {
         ...ZASADY_F1,
         dzis: `${ZASADY_F1.dzis}\nconst events = (eventsRes.data ?? []) as CalEvent[];`,
+
       },
     },
     {
@@ -1149,13 +1277,31 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
   // Pytanie jest jedyną rzeczą na tym ekranie, która to zmienia, więc stoi
   // PIERWSZE. Przesunięte pod liczniki kazałoby zawodnikowi przeczytać trzy
   // razy „nie wiem", zanim dostanie sposób, żeby na to odpowiedzieć.
-  const kolejnosc = ['renderPytaniaOWystapienia', 'renderLicznikPracy', 'renderNagrodaZaPrace', 'renderPracaWBlokach']
-    .map((n) => ({ n, i: dzis.indexOf(`{${n}()}`) }));
-  check('⭐ (D2-2) cztery bloki karty stoją w kolejności: PYTANIE → licznik okna → '
-    + 'dorobek → praca w Blokach',
-    kolejnosc.every((x) => x.i > 0)
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2) — TE SAME CZTERY RZECZY, DWA PLIKI.
+  //
+  // GDZIE PYTAŁA: cztery bloki JEDNEJ karty w `app/(tabs)/dzis.tsx`.
+  // GDZIE PYTA: PYTANIE zostało na ekranie 1 (arkusz „Dziś"), a trzy
+  // ODPOWIEDZI o wykonanej pracy stoją w `components/PracaWLiczbach.tsx`
+  // (Profil → „Skąd to wiemy"), plus dorobek w arkuszu odznak.
+  // DLACZEGO: pas A1 zdjął z ekranu „Dziś" trzy z czterech bloków; kolejności
+  // na jednej karcie nie ma już czego pilnować, ale REGUŁA ZOSTAJE TA SAMA —
+  // zawodnik spotyka PYTANIE zanim spotka odpowiedzi „nie wiem", a trzy
+  // odpowiedzi idą od szczegółu (bieżący Blok) do sumy (wszystkie Bloki).
+  // ⛔ RÓWNIE MOCNA: nadal RÓWNOŚĆ POZYCJI, nadal wszystkie cztery muszą
+  // istnieć — zniknięcie którejkolwiek zapala tę samą asercję.
+  const iPytanie = dzis.indexOf('{renderPytaniaOWystapienia()}');
+  const kolejnosc = ['renderPostepBloku', 'renderLicznikPracy', 'renderPracaWBlokach']
+    .map((n) => ({ n, i: praca.indexOf(`{${n}()}`) }));
+  const iDorobek = arkusze.indexOf('<Odznaki');
+  check('⭐ (D2-2) cztery bloki stoją w kolejności: PYTANIE (ekran 1) → postęp Bloku → '
+    + 'licznik okna → praca w Blokach, a dorobek ma własne miejsce',
+    iPytanie > 0
+    && iDorobek > 0
+    && kolejnosc.every((x) => x.i > 0)
     && kolejnosc.every((x, i) => i === 0 || x.i > kolejnosc[i - 1].i),
-    kolejnosc.map((x) => `${x.n}@${x.i}`).join(' · '));
+    `pytanie@${iPytanie} (dzis.tsx) · `
+    + `${kolejnosc.map((x) => `${x.n}@${x.i}`).join(' · ')} (PracaWLiczbach.tsx) · `
+    + `dorobek@${iDorobek} (ArkuszeProfilu.tsx)`);
 
   // ── (D2-3) ⭐ GŁĘBOKOŚĆ ZERO (P0) ────────────────────────────────
   //
@@ -1164,23 +1310,48 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
   // wybrał, i bez ani jednego dotknięcia. ⚠️ Wycinamy gałąź przełącznika
   // i pytamy JEJ, a nie plikowi (O71): fraza „renderPytaniaOWystapienia"
   // jest w tym pliku także w definicji i w komentarzach.
-  const galazZakresu = (() => {
-    const od = dzis.indexOf("zakresKarty === 'dzis'");
-    if (od < 0) return null;
-    const doKad = dzis.indexOf('{renderPytaniaOWystapienia()}', od);
-    return doKad < 0 ? null : dzis.slice(od, doKad);
-  })();
-  check('⭐ (D2-3) PYTANIE STOI POZA PRZEŁĄCZNIKIEM `Dziś / Tydzień` — zero dotknięć (P0)',
-    galazZakresu !== null && !galazZakresu.includes('{renderPytaniaOWystapienia()}'),
-    'pytanie wpadło do jednej z gałęzi zakresu — połowa zawodników go nie zobaczy');
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S1) — REGUŁA TA SAMA, MIEJSCE INNE.
+  //
+  // Do 18.08.2026 pytanie o wystąpienie stało W CIELE `ScrollView`, wewnątrz
+  // karty kalendarza, nad licznikiem. Pas A1 przeniósł je do ARKUSZA
+  // (`<Arkusz>` — `Modal` stojący POZA `ScrollView`), a decyzja jest zapisana
+  // i widoczna na samym ekranie jako przypis:
+  //   „Ocena należy do rzeczy: dotykasz kafla i mówisz, jak poszło."
+  // (`PRZYPIS_OCENA_NALEZY_DO_RZECZY`, decyzja Kuby M1 §3 / makieta v3;
+  //  powód policzalny: ocena w ciele ekranu kosztowała 4 663 dp w głąb,
+  //  a `session_verdicts` miało JEDEN wiersz w całej bazie).
+  //
+  // ⛔ CO Z TEGO ZOSTAJE NIENARUSZALNE — i jest niżej pilnowane:
+  //  (a) pytanie NIE JEST schowane za przełącznikiem `Dziś / Tydzień`
+  //      (arkusz stoi poza `ScrollView`, więc poza obiema gałęziami),
+  //  (b) na GŁĘBOKOŚCI 0, bez ani jednego dotknięcia, zawodnik nadal DOWIADUJE
+  //      SIĘ, że coś czeka na odpowiedź — wierszem „Bez oceny: N rzeczy →".
+  //      ⚠️ To jest cena tej przeprowadzki wypowiedziana wprost: samo PYTANIE
+  //      jest dziś o jedno dotknięcie dalej, ale WIEDZA, że czeka, została na zerze.
+  // ⭐ Kształt pytania w arkuszu pilnuje osobno `lib/arkusz.selftest.ts`
+  // („ocena z kafla NIE stoi w ciele `ScrollView`").
+  const iScroll = dzis.indexOf('<ScrollView');
+  const iKoniecScroll = dzis.indexOf('</ScrollView>');
+  const cialoScrollView = iScroll >= 0 && iKoniecScroll > iScroll
+    ? dzis.slice(iScroll, iKoniecScroll) : null;
+  check('⭐ (D2-3) PYTANIE STOI POZA PRZEŁĄCZNIKIEM `Dziś / Tydzień` — żadna gałąź go nie chowa',
+    cialoScrollView !== null
+    && !cialoScrollView.includes('{renderPytaniaOWystapienia()}')
+    && !cialoScrollView.includes('{renderPytaniaOWystapienia(')
+    && /\{trescArkusza\(\)\}/.test(dzis)
+    && dzis.indexOf('{trescArkusza()}') > iKoniecScroll,
+    cialoScrollView === null
+      ? 'nie znajduję ciała `ScrollView` — ta asercja nie znaczy nic'
+      : 'pytanie wpadło do ciała ekranu (a więc pod jedną z gałęzi zakresu) albo arkusz '
+        + 'wjechał do `ScrollView` i przestał być nakładką — połowa zawodników go nie zobaczy');
 
-  // ⛔ Pytanie nie ma prawa być schowane za `zakresKarty`, ale nie ma też
-  // prawa wypaść POZA kartę: zero dotknięć znaczy „na tym samym ekranie,
-  // bez przewijania do innej karty".
-  check('⭐ (D2-3) pytanie stoi WEWNĄTRZ karty kalendarza, nad licznikiem',
-    dzis.indexOf('{renderPytaniaOWystapienia()}') > dzis.indexOf("zakresKarty === 'dzis'")
-    && dzis.indexOf('{renderPytaniaOWystapienia()}') < dzis.indexOf('{renderLicznikPracy()}'),
-    'pytanie wyjechało poza kartę albo pod licznik');
+  check('⭐ (D2-3) na GŁĘBOKOŚCI 0 zawodnik dowiaduje się, że coś czeka na odpowiedź',
+    cialoScrollView !== null
+    && /WIERSZ_BEZ_OCENY\(bezOceny\.length\)/.test(cialoScrollView)
+    && /bezOceny\.length > 0/.test(cialoScrollView)
+    && /PRZYPIS_OCENA_NALEZY_DO_RZECZY/.test(cialoScrollView),
+    'z ekranu zniknął wiersz „Bez oceny: N rzeczy →" albo przypis, który mówi, gdzie jest ocena '
+    + '— a wtedy pytanie jest schowane za dotknięciem, o którym nikt nie wie (złamane P0)');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1189,12 +1360,29 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
 // Bez tego część asercji przechodziłaby, nie sprawdzając niczego — plik
 // istnieje, tylko nie ma już w nim tego, czego pilnujemy.
 {
-  check('`dzis.tsx` istnieje, importuje obie czyste funkcje i zawiera badaną logikę',
+  // ⭐ PRZECELOWANE 18.08.2026 (pas S2). Licznik pracy wyszedł z tego pliku
+  // razem z rysowaniem, więc `dzis.tsx` odpowiada dziś WYŁĄCZNIE za tydzień
+  // na karcie i za pytanie o wystąpienie. Reszta stoi w asercji obok.
+  check('`dzis.tsx` istnieje, importuje czystą funkcję tygodnia i zawiera badaną logikę',
     dzisSurowe.length > 90_000
     && /from '\.\.\/\.\.\/lib\/widokTygodnia'/.test(dzis)
     && /from '\.\.\/\.\.\/lib\/wykonanieSesji'/.test(dzis)
-    && dzis.includes('renderLicznikPracy') && dzis.includes('renderTydzienNaKarcie'),
+    && dzis.includes('renderPytaniaOWystapienia') && dzis.includes('renderTydzienNaKarcie'),
     `dzis=${dzisSurowe.length}B surowo, ${dzis.length}B bez komentarzy`);
+
+  // ⭐ NOWA (pas S2) — bez niej piętnaście asercji wyżej dałoby się spełnić
+  // PUSTYM PLIKIEM: `cialoFunkcji` na nieistniejącej nazwie oddaje `null`,
+  // a `null` da się przepuścić, kasując warunek. Ta asercja jest kotwicą:
+  // plik istnieje, jest niepusty, bierze trzy silniki i ma trzy rendery.
+  check('⭐ `components/PracaWLiczbach.tsx` istnieje, bierze trzy silniki i ma trzy rendery',
+    pracaSurowe.length > 5_000
+    && /from '\.\.\/lib\/widokTygodnia'/.test(praca)
+    && /from '\.\.\/lib\/wykonanieSesji'/.test(praca)
+    && /from '\.\.\/lib\/focusBlockProgress'/.test(praca)
+    && praca.includes('renderLicznikPracy')
+    && praca.includes('renderPracaWBlokach')
+    && praca.includes('renderPostepBloku'),
+    `praca=${pracaSurowe.length}B surowo, ${praca.length}B bez komentarzy`);
 
   // ⭐ PLAN-D-F1 — to samo dla drugiego pliku, który ten strażnik od dziś czyta.
   check('`profil.tsx` istnieje, czyta trzy pustki i zawiera badaną logikę',

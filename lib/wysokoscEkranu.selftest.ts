@@ -124,9 +124,22 @@ const NARZEDZIE = join('tests', 'measure-heights.ts');
     !/REGRESJA: dzis\.tsx ma \d+ B/.test(wyjscie),
     'wrócił próg bajtowy — to nie jest miara wysokości');
 
+  // ⛔ POPRAWKA 18.08.2026, PAS S1 — DEFEKT STRAŻNIKA ZGŁOSZONY PRZEZ PAS A1.
+  // Wzorzec nie miał flagi `u`, a `👁` jest PARĄ SUROGATÓW. Dopóki ekran „Dziś"
+  // NIE MIEŚCIŁ się nad zgięciem, wiersze listy niosły znaczniki `↓` i `✂`
+  // (jednoznakowe) i wzorzec działał. Odkąd 18.08.2026 mieści się w całości,
+  // WSZYSTKIE wiersze mają `👁` — a klasa znaków bez `u` rozbija tę parę
+  // na dwie połówki i nie łapie ani jednego wiersza. Strażnik zapalił się
+  // NA SUKCESIE i to jest dokładnie ten rodzaj czerwieni, którego chcemy:
+  // ⛔ liczba wierszy nie spadła do zera, spadła do zera ZDOLNOŚĆ LICZENIA.
+  // ⚠️ Asercja NIE JEST osłabiona: próg `>= 8` zostaje bez zmiany.
+  const WIERSZ_LISTY = /^\s+[👁✂↓]\s+\d+\.\s+\d+ dp/gmu;
+  const wierszeListy = (wyjscie.match(WIERSZ_LISTY) ?? []).length;
   check('⭐ (M1-1) narzędzie ODDAJE LISTĘ pozycji ekranu, a nie samą sumę',
-    (wyjscie.match(/^\s+[👁✂↓]\s+\d+\.\s+\d+ dp/gm) ?? []).length >= 8,
-    `znalezionych wierszy listy: ${(wyjscie.match(/^\s+[👁✂↓]\s+\d+\.\s+\d+ dp/gm) ?? []).length}`);
+    wierszeListy >= 8,
+    `znalezionych wierszy listy: ${wierszeListy} — ⛔ jeżeli 0 przy poprawnym raporcie, `
+    + 'sprawdź NAJPIERW, czy wzorzec ma flagę `u`: bez niej `👁` (para surogatów) '
+    + 'nie wpada do klasy znaków i strażnik milczy o działającym narzędziu');
 
   check('⭐ (M1-1) narzędzie ODDAJE LICZBĘ rzeczy widocznych bez przewijania',
     /Zawodnik widzi w całości \d+ z \d+ rzeczy/.test(wyjscie) || /Cały ekran „Dziś" mieści się/.test(wyjscie),
@@ -174,11 +187,24 @@ const NARZEDZIE = join('tests', 'measure-heights.ts');
     zDopiskiem.wysokoscRazemDp > dzis.wysokoscRazemDp,
     `${dzis.wysokoscRazemDp} → ${zDopiskiem.wysokoscRazemDp}`);
 
-  // ⛔ ZDJĘCIE karty ma wynik ZMNIEJSZYĆ. Miara, która tylko rośnie, nie
+  // ⛔ ZDJĘCIE elementu ma wynik ZMNIEJSZYĆ. Miara, która tylko rośnie, nie
   // zauważyłaby, że faza hierarchii cokolwiek zdjęła.
-  const bezKarty = tekst.replace(/<LivingDiagnosisPulseCard \/>/, '');
-  const zdjeta = zmierzEkranZTekstu('dzis-1', bezKarty, join(root, 'app', '(tabs)'));
-  check('⭐ (M1-2, O70) ZDJĘCIE karty z ekranu też zmienia wynik — miara działa w obie strony',
+  //
+  // ⭐ PRZECELOWANA 18.08.2026 (pas S1). Do 18.08 badanym elementem była
+  // `<LivingDiagnosisPulseCard />`. Pas A1 zdjął ją z ekranu (442 dp z budżetu
+  // 850 na komponent zamrożony od 06.08, rysujący `null`), więc `replace`
+  // przestał cokolwiek zdejmować i asercja badała RÓŻNICĘ ZERA — czyli
+  // przechodziłaby przy mierze, która nie umie liczyć w dół.
+  // ⛔ ELEMENT BADANY MUSI BYĆ NA EKRANIE — pilnuje tego asercja niżej, żeby
+  // ta sama dziura nie wróciła po cichu przy następnej przebudowie.
+  const ELEMENT_BADANY = '<Text style={styles.licznikPodpis}>{PRZYPIS_OCENA_NALEZY_DO_RZECZY}</Text>';
+  check('⭐ (M1-2, O70) element badany PRZEZ tę asercję naprawdę stoi na ekranie',
+    tekst.includes(ELEMENT_BADANY),
+    `nie znajduję na „Dziś" elementu ${ELEMENT_BADANY} — dopóki go tam nie ma, `
+    + 'asercja niżej zdejmuje NIC i przepuszcza miarę, która nie liczy w dół');
+  const bezElementu = tekst.replace(ELEMENT_BADANY, '');
+  const zdjeta = zmierzEkranZTekstu('dzis-1', bezElementu, join(root, 'app', '(tabs)'));
+  check('⭐ (M1-2, O70) ZDJĘCIE elementu z ekranu też zmienia wynik — miara działa w obie strony',
     zdjeta.pozycje.length === dzis.pozycje.length - 1 && zdjeta.wysokoscRazemDp < dzis.wysokoscRazemDp,
     `pozycji ${zdjeta.pozycje.length} (było ${dzis.pozycje.length}), dp ${zdjeta.wysokoscRazemDp} (było ${dzis.wysokoscRazemDp})`);
 
@@ -212,25 +238,34 @@ const NARZEDZIE = join('tests', 'measure-heights.ts');
 // zdjąć. Zapadka bez powodu to zapadka, której nie ma.
 const ZAPADKA_DZIS = {
   /** Ile rzeczy stoi na ekranie „Dziś" po kolei od góry. */
-  pozycji: 10,
+  pozycji: 9,
   /** Ile z nich zawodnik widzi W CAŁOŚCI, zanim czegokolwiek dotknie. */
-  widocznychBezPrzewijania: 5,
+  widocznychBezPrzewijania: 9,
   /** Ile rzeczy przecina zgięcie — zaczyna się nad nim, kończy pod. */
-  przecietychZgieciem: 1,
+  przecietychZgieciem: 0,
   /**
    * Cała wysokość ekranu w dp (miara: `lib/wysokoscEkranu.ts`).
-   * ⭐ PRZESTAWIONA 17.08.2026 przez pas M2: 2 237 → 5 724 dp.
-   * ⛔ To NIE JEST regresja produktu — ekran nie urósł ani o jedną kartę
-   * (`app/(tabs)/dzis.tsx` w tym pasie nietknięty). Urosła PRAWDA o nim:
-   * kolejka podania rysuje do czterech pozycji (`DOMYSLNA_LICZBA.dzis`),
-   * a nie jedną, a zakładka „Tydzień" w karcie kalendarza rysuje siedem
-   * wierszy dni, których poprzednia miara nie widziała w ogóle.
+   *
+   * ⭐⭐ PRZESTAWIONA 18.08.2026 przez pas A1: **6 669 → 807 dp**, czyli
+   * −5 862 dp. ⛔ To jest PIERWSZE przestawienie tej zapadki W DÓŁ i jedyne
+   * zdanie, jakie tu pasuje, brzmi: ekran przestał wymagać przewijania.
+   * Cały nadmiar wziął się z TRZECH ruchów, nie z cięcia zdań:
+   *   1. ocena z kafla zeszła do arkusza (`components/Arkusz.tsx`) — arkusz
+   *      jest `Modal`-em, więc NIE WCHODZI do przewijania ekranu pod spodem;
+   *   2. kolejka podania rysuje na „Dziś" JEDNĄ pozycję zamiast czterech;
+   *   3. licznik pracy, „TWÓJ DOROBEK", praca w Blokach, hero wąskiego gardła,
+   *      wgląd z osią pomiarów i karta pulsu diagnozy ZESZŁY Z TEGO EKRANU.
+   * ⛔ Imienna tabela „co zdjęte · dlaczego · co stoi w tym miejscu" stoi
+   * w `claude/PRZEKAZANIE_PAS_A1_18_08_2026.md` — nic nie zniknęło po cichu (B3).
+   *
+   * ⭐ 807 < 808: ekran mieści się nad zgięciem W CAŁOŚCI, a `przecietych`
+   * spadło z 1 na 0. Cel z makiety v3 wynosił 850 dp; jest 807.
    */
-  wysokoscDp: 6650,
-  ustawiona: '17.08.2026',
-  powod: 'pas O1 — trzy kroki oceny (czas i RPE, ból, powód) pod pytaniem „ZROBIŁEŚ?”. '
-    + 'Ekran UROSŁ naprawdę, o 926 dp; miara nie zmieniła zdania. Kierunek jest przeciwny '
-    + 'do makiety (850 dp) i należy do fazy hierarchii, nie do tego pasa',
+  wysokoscDp: 807,
+  ustawiona: '18.08.2026',
+  powod: 'pas A1 — przebudowa „Dziś / Tydzień" wg makiety v3: ocena z kafla do arkusza, '
+    + 'jedna pozycja kolejki zamiast czterech, licznik i dorobek zdjęte z ekranu. '
+    + 'Ekran ZMALAŁ o 5 862 dp i po raz pierwszy mieści się nad zgięciem w całości',
 };
 
 /**
@@ -246,10 +281,16 @@ const ZAPADKA_DZIS = {
  * zapadka jest liczbą bez właściciela.
  */
 const ZAPADKI_POZOSTALE = [
-  { ekran: 'ja', pozycji: 16, widocznych: 6, przecietych: 1, wysokoscDp: 1325,
-    ustawiona: '17.08.2026',
-    powod: 'pas M2 — jedyny z pięciu ekranów bez ani jednej listy; liczba nie zmieniła się '
-      + 'ani o dziesiątą część dp i to jest dowód, że naprawa dotknęła list, a nie wszystkiego' },
+  // ⭐ PRZESTAWIONA 18.08.2026 (pas S1) — LICZBY PASA A3, nie moje.
+  // JEDNO ZDANIE, CO JĄ ZMIENIŁO: pas A3 przebudował `app/(tabs)/ja.tsx`
+  // w ekran „Profil" — szesnaście pozycji i 1 325 dp zeszło do sześciu pozycji
+  // i 602 dp, a liczba rzeczy PRZECIĘTYCH zgięciem spadła z 1 na 0.
+  // ⛔ To jest przestawienie zapadki, nie jej zdjęcie: nadal RÓWNOŚĆ.
+  { ekran: 'ja', pozycji: 6, widocznych: 6, przecietych: 0, wysokoscDp: 602,
+    ustawiona: '18.08.2026',
+    powod: 'pas A3 — ekran „Ja" przebudowany w „Profil": dwie miary, zdanie o pracy dodatkowej '
+      + 'i pięć pozycji za dotknięciem; 16 pozycji / 1 325 dp → 6 pozycji / 602 dp, '
+      + 'zero rzeczy pod zgięciem i zero przeciętych' },
   { ekran: 'dziennik', pozycji: 21, widocznych: 14, przecietych: 1, wysokoscDp: 3712,
     ustawiona: '17.08.2026',
     powod: 'pas M2 — historia wpisów rysuje do 20 wierszy (`.limit(20)` w tym ekranie), '
@@ -287,9 +328,23 @@ const ZAPADKI_POZOSTALE = [
     /^\d{2}\.\d{2}\.\d{4}$/.test(ZAPADKA_DZIS.ustawiona) && ZAPADKA_DZIS.powod.length > 20,
     `${ZAPADKA_DZIS.ustawiona} / ${ZAPADKA_DZIS.powod}`);
 
-  check('(M1-3) ekran „Dziś" NADAL nie mieści się nad zgięciem — i to jest wypowiedziane, nie przemilczane',
-    d.wysokoscRazemDp > WIDOCZNE_NAD_ZGIECIEM_DP,
-    `${d.wysokoscRazemDp} dp ≤ ${WIDOCZNE_NAD_ZGIECIEM_DP} dp — jeżeli to prawda, przepisz tę asercję`);
+  // ⭐⭐ PRZEPISANA 18.08.2026 (pas A1) — I TO JEST CAŁY SENS TEGO PASA.
+  // Do 18.08 ta asercja brzmiała: „ekran »Dziś« NADAL nie mieści się nad
+  // zgięciem" i pilnowała, żeby prawda o nim była WYPOWIEDZIANA, a nie
+  // przemilczana. Jej własny komunikat kończył się zdaniem „jeżeli to prawda,
+  // przepisz tę asercję" — bo od początku wiadomo było, że zapali się na
+  // SUKCESIE (O73). Zapaliła się 18.08.2026 przy 807 dp.
+  // ⛔ Od teraz pilnuje kierunku ODWROTNEGO: ekran, który raz zmieścił się
+  // nad zgięciem, nie ma prawa po cichu z niego wyjść.
+  check('⭐ (M1-3, A1) ekran „Dziś" MIEŚCI SIĘ nad zgięciem w całości — i to jest '
+    + 'pilnowane, a nie zakładane',
+    d.wysokoscRazemDp <= WIDOCZNE_NAD_ZGIECIEM_DP,
+    `${d.wysokoscRazemDp} dp > ${WIDOCZNE_NAD_ZGIECIEM_DP} dp — ekran wyszedł spod zgięcia`);
+
+  // ⭐ CEL Z MAKIETY v3 — 850 dp. Stoi osobno od zapadki, bo zapadka pilnuje
+  // ZMIANY, a to pilnuje UMOWY z makietą.
+  check('⭐ (A1) ekran „Dziś" mieści się w celu z makiety v3 — 850 dp',
+    d.wysokoscRazemDp <= 850, `${Math.round(d.wysokoscRazemDp)} dp`);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -543,10 +598,19 @@ const ZAPADKA_NIEWYPROWADZALNE = {
    * ⭐ Ustawiona 17.08.2026 przez pas M2: 1 → 17. Przed tym pasem lista
    * miała jedną pozycję (`Checkbox`), bo wszystko inne wypadało BEZ ŚLADU.
    */
-  ile: 18,
-  ustawiona: '17.08.2026',
-  powod: 'pas O1 — doszła lista krokiOceny(...).filter(...).map(...), której miara nie '
-    + 'umie wyprowadzić; jest NAZWANA, a nie zgubiona; 16 z 18 pozycji to listy o długości '
+  // ⭐ PRZESTAWIONA 18.08.2026 (pas S1): 18 → 13. Liczba SPADŁA O PIĘĆ i to jest
+  // dobra wiadomość — mniej konstrukcji, których miara nie umie rozwinąć.
+  // JEDNO ZDANIE, CO JĄ ZMIENIŁO: pas A1 przebudował „Dziś" (kolejka czterech
+  // pozycji, oś pomiarów wglądu i lista kroków oceny zeszły z ekranu do arkusza
+  // albo do jednej pozycji), a pas A3 przebudował „Ja" na sześć pozycji bez ani
+  // jednej listy — razem ubyło pięć różnych konstrukcji z pięciu ekranów.
+  // ⛔ Zapadka zostaje NA RÓWNOŚĆ: kto DOŁOŻY ekranowi konstrukcję, której
+  // miara nie zna, zobaczy czerwień tak samo jak dotąd.
+  ile: 13,
+  ustawiona: '18.08.2026',
+  powod: 'pas S1 — 18 → 13 po przebudowie obu ekranów produktu (pasy A1 i A3): '
+    + 'z „Dziś" zeszła kolejka czterech pozycji, oś pomiarów wglądu i lista kroków oceny, '
+    + 'a ekran „Ja" nie ma dziś ani jednej listy. 11 z 13 pozycji to listy o długości '
     + 'zależnej od danych zawodnika, dwie to klocki spoza repozytorium',
 };
 {
@@ -651,13 +715,60 @@ const styles = StyleSheet.create({
   }
 
   // ⛔ ŹRÓDŁO NAJMOCNIEJSZE: stała produktu czytana NA ŻYWO, a nie przepisana.
-  const dzis = zmierzEkran(EKRAN_DZIS);
-  const kolejka = [...dzis.pozycje, ...dzis.pozycje.flatMap((p) => p.czesci)]
+  //
+  // ⭐ PRZECELOWANA 18.08.2026 (pas S1) — REGUŁA TA SAMA, MIEJSCE INNE.
+  // Do 18.08 ta asercja mierzyła listę kolejki NA EKRANIE „Dziś" i miała rację:
+  // ekran rysował `pozycjeNaDzis.map(...)`. Pas A1 zdjął trzy z czterech pozycji
+  // (makieta v3 ma na „Dziś" JEDNĄ odpowiedź), więc listy tam już nie ma —
+  // a asercja przypięta do MIEJSCA zapaliłaby się na zmianie, która sama
+  // w sobie jest w porządku, i niczego by o regule nie powiedziała.
+  // ⛔ Reguła brzmi: „liczba powtórzeń listy pochodzi ze STAŁEJ PRODUKTU
+  // czytanej na żywo, a nie z tego, ile się komuś wydaje" — i sprawdzamy ją
+  // PODSTAWIENIEM, tak jak sekcja 10 wyżej sprawdza konstrukcje nieznane.
+  // ⭐ To jest MOCNIEJSZE niż wersja poprzednia: działa niezależnie od tego,
+  // czy któryś ekran akurat rysuje tę listę, więc nie da się jej uciszyć
+  // zdjęciem listy z ekranu.
+  const EKRAN_Z_KOLEJKA = `
+import { View, Text, StyleSheet } from 'react-native';
+export default function Ekran() {
+  return (
+    <ScrollView contentContainerStyle={{ padding: 20 }}>
+      {pozycjeNaDzis.map((p) => (
+        <View key={p.id} style={styles.karta}><Text style={styles.napis}>{p.co}</Text></View>
+      ))}
+    </ScrollView>
+  );
+}
+const styles = StyleSheet.create({
+  karta: { height: 200, backgroundColor: '#111' },
+  napis: { fontSize: 16, lineHeight: 20 },
+});
+`;
+  const zKolejka = zmierzEkranZTekstu('kolejka-podstawiona', EKRAN_Z_KOLEJKA, root);
+  const kolejka = [...zKolejka.pozycje, ...zKolejka.pozycje.flatMap((p) => p.czesci)]
     .filter((p) => p.powtorzenia?.nazwa === 'pozycjeNaDzis');
-  check('⭐ (M2-11, D3) kolejka „Dziś" liczy się tyle razy, ile wynosi stała produktu, a nie „ile się wydaje"',
+  check('⭐ (M2-11, D3) lista kolejki liczy się tyle razy, ile wynosi STAŁA PRODUKTU, a nie „ile się wydaje"',
     kolejka.length > 0 && kolejka.every((p) => p.powtorzenia?.ile === (DOMYSLNA_LICZBA.dzis ?? -1)),
-    `pozycji kolejki ${kolejka.length}, powtórzeń ${kolejka.map((p) => p.powtorzenia?.ile).join('/')}, `
+    `list kolejki ${kolejka.length}, powtórzeń ${kolejka.map((p) => p.powtorzenia?.ile).join('/')}, `
     + `stała produktu ${DOMYSLNA_LICZBA.dzis}`);
+
+  // ⛔ ZAPADKA NA RÓWNOŚĆ — ILE LIST STOI DZIŚ NA „DZIŚ".
+  // ⚠️ Bez niej powyższe podstawienie byłoby ucieczką od pytania „a co
+  // NAPRAWDĘ rysuje ekran". Zmierzona 18.08.2026 przez pas S1: JEDNA —
+  // `hintBox · {p.hint.hint}`, czyli treść ZAWSZE WIDOCZNA (bezpieczeństwo),
+  // rysowana z `hintState.alwaysVisible`. ⛔ Kolejki na tej liście NIE MA:
+  // pas A1 zostawił na „Dziś" JEDNĄ pozycję (`pozycjeNaDzis[0]`), nie listę —
+  // decyzja z makiety v3 („na Dziś jedna odpowiedź i kafle dnia").
+  // ⛔ Dołożenie ekranowi drugiej listy zapala tę asercję I KAŻE PODAĆ JEJ
+  // ŹRÓDŁO — dokładnie tak, jak dotąd.
+  const LIST_NA_DZIS_18_08_2026 = 1;
+  const dzis = zmierzEkran(EKRAN_DZIS);
+  const listyDzis = [...dzis.pozycje, ...dzis.pozycje.flatMap((p) => p.czesci)].filter((p) => p.lista);
+  check(`⭐ (M2-11, D3, O73) ZAPADKA: list na ekranie „Dziś" jest DOKŁADNIE ${LIST_NA_DZIS_18_08_2026}`,
+    listyDzis.length === LIST_NA_DZIS_18_08_2026,
+    `jest ${listyDzis.length}: ${listyDzis.map((p) => `${p.nazwa}=${p.powtorzenia?.ile ?? '?'}`).join(', ')} `
+    + '(zapadka 18.08.2026, pas S1). Jeżeli dołożyłeś ekranowi listę — podaj jej ŹRÓDŁO '
+    + 'w `POWTORZENIA_LIST` i przestaw tę liczbę z datą i powodem.');
 
   check('⭐ (M2-11, D3, O75) i ta stała jest IMPORTOWANA z produktu, a nie przepisana do miary',
     /import\s*\{[^}]*DOMYSLNA_LICZBA[^}]*\}\s*from\s*'\.\/kolejkaPodania'/.test(zrodlo('lib/wysokoscEkranu.ts')),

@@ -1,0 +1,783 @@
+// PLAN-D-A3 08.2026 (18.08.2026) — NOWY PLIK. Model ekranu 2 „Profil".
+//
+// ═════════════════════════════════════════════════════════════════════
+// PO CO TO ISTNIEJE
+// ═════════════════════════════════════════════════════════════════════
+// Ekran „Profil" pokazuje DWIE MIARY obok siebie, jedno zdanie o pracy
+// dodatkowej i pięć pozycji za dotknięciem. Każda z tych rzeczy ma regułę,
+// którą da się zepsuć po cichu — a ekran Reacta nie jest miejscem, w którym
+// reguła może mieszkać: nie da się jej uruchomić bez telefonu.
+//
+// Dlatego CAŁA arytmetyka i WSZYSTKIE brzmienia ekranu 2 stoją tutaj,
+// a `app/(tabs)/ja.tsx` wyłącznie je rysuje.
+//
+// ⛔ CZEGO W TYM PLIKU NIE MA I NIE MA PRAWA BYĆ:
+//   • Reacta i Supabase — ten plik nie wie, skąd biorą się wiersze,
+//   • zegara — dzisiejszą datę podaje wołający (i dziś nikt jej nie podaje,
+//     bo żadna liczba tego ekranu nie ma okna),
+//   • kopii `MAPA_PRACY_WLASNEJ` ani kopii tabeli `PROGI` — obie są czytane
+//     z modułów produktu na żywo. Kopia rozjechałaby się przy pierwszej
+//     poprawce i OBA miejsca wyglądałyby poprawnie.
+//
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⛔ NAJWAŻNIEJSZE ZDANIE TEGO PLIKU — OBCIĄŻENIE NIE MA DZIŚ MIARY
+// ═════════════════════════════════════════════════════════════════════
+// `policzObciazenieWOknie` (`lib/obciazenieOstatnichDni.ts`) WYGLĄDA jak
+// gotowa miara obciążenia i NIĄ NIE JEST. Sumuje `j.punkty`, a `j.punkty`
+// niesie w sobie TRAFNOŚĆ: ta sama sesja 30 min × RPE 5 waży 1,0 przy
+// trafności 1,0 i 1,5 przy 1,5. Podpięcie tego pod liczbę nazwaną
+// „OBCIĄŻENIE" powiedziałoby zawodnikowi, że TRAFNIEJSZA PRACA BARDZIEJ
+// OBCIĄŻA CIAŁO — czyli dokładną odwrotność tezy produktu
+// (ROZWÓJ = OBCIĄŻENIE × TRAFNOŚĆ, więc trafność podnosi rozwój, a nie
+// obciążenie).
+//
+// ⛔ DO CZASU PASA D1 `OBCIĄŻENIE · 7 dni` MA DOKŁADNIE JEDEN OSIĄGALNY
+// WARIANT: `nie_policzone`. Nazwana pustka, nie liczba. Pilnują tego dwie
+// asercje strażnika: jedna liczy warianty typu, druga czyta ten plik jako
+// tekst i żąda, żeby nie było w nim ani jednego importu z
+// `obciazenieOstatnichDni`.
+
+import {
+  PROGI,
+  type NagrodaZaPrace,
+  type Prog,
+  type WejscieNagrody,
+  type WejscieZrodla,
+  type SegmentyCelow,
+  type WierszDziennika,
+  type WierszMeczu,
+  type WierszOdpowiedziKontrolnej,
+  type WierszWydarzeniaDoNagrody,
+  jednostkiZDziennika,
+  policzNagrode,
+  jednostkiZMeczow,
+  jednostkiZOdpowiedziKontrolnych,
+  zrodloSesji,
+  zrodloNieczytane,
+} from './nagrodaZaPrace';
+import { WERDYKTY_NIEPODANE } from './wykonanieSesji';
+import {
+  MAPA_PRACY_WLASNEJ,
+  ocenPraceWlasna,
+  policzZwrotObszarow,
+  type ObszarZeZwrotem,
+  type OcenaPracyWlasnej,
+  type ZwrotObszarow,
+} from './zwrotObszaru';
+
+// ═════════════════════════════════════════════════════════════════════
+// 1. SKĄD BIERZE SIĘ POZYCJA — i dlaczego to jedna linijka decyduje o tym,
+//    czy zdanie o pracy dodatkowej w ogóle padnie
+// ═════════════════════════════════════════════════════════════════════
+//
+// ⛔ ZMIERZONE 18.08.2026 NA PRODUKCJI, nie założone. Konto `adam.bar@op.pl`:
+//   `player_profiles.position_primary` = NULL
+//   `diagnostics.position`             = „Boczny obrońca"
+// Czytane z profilu: „nie znam pozycji" i zdanie NIE PADA. Czytane z diagnozy:
+// sześć obszarów trafnych i „z 4 rzeczy trafiają 2" — dosłownie zdanie
+// z makiety, u zawodnika BEZ ANI JEDNEGO WPISU.
+//
+// ⭐ Dlatego pozycja czyta się Z DIAGNOZY, z odwrotem do profilu — i produkt
+// ZAPISUJE, z którego źródła wyszła (Z0: nie podajemy prawdopodobnego jako
+// pewnego, więc źródło musi być widoczne w wyniku, a nie domyślane).
+
+export type ZrodloPozycji = 'diagnoza' | 'profil' | 'nie_znam';
+
+export type WybranaPozycja = {
+  /** ⛔ `null` znaczy „nie znam", a nie „zawodnik nie ma pozycji". */
+  pozycja: string | null;
+  zrodlo: ZrodloPozycji;
+};
+
+function niepustyNapis(x: unknown): string | null {
+  return typeof x === 'string' && x.trim().length > 0 ? x.trim() : null;
+}
+
+/**
+ * ⭐ Pozycja zawodnika: NAJPIERW diagnoza, POTEM profil. Wynik zawsze niesie
+ * źródło — liczba bez źródła jest zgadywaniem.
+ */
+export function wybierzPozycje(args: {
+  /** `diagnostics.position` najnowszej diagnozy z czytelnymi wynikami. */
+  zDiagnozy: string | null;
+  /** `player_profiles.position_primary`. */
+  zProfilu: string | null;
+}): WybranaPozycja {
+  const d = niepustyNapis(args.zDiagnozy);
+  if (d !== null) return { pozycja: d, zrodlo: 'diagnoza' };
+  const p = niepustyNapis(args.zProfilu);
+  if (p !== null) return { pozycja: p, zrodlo: 'profil' };
+  return { pozycja: null, zrodlo: 'nie_znam' };
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 2. TRZY WARTOŚCI W KAŻDYM POLU — nie dwie (R5)
+// ═════════════════════════════════════════════════════════════════════
+
+/**
+ * ⭐ ROZWÓJ. ⛔ NIE MA OKNA i NIGDY NIE MALEJE — dlatego w tym typie nie ma
+ * ani słowa o dniach, a `nie_policzone` ŚWIADOMIE NIE MA POLA `punkty`:
+ * gdyby miało, dałoby się narysować „0" na miejscu, w którym prawdą jest
+ * „nie wiem".
+ */
+export type RozwojNaEkranie =
+  | { rodzaj: 'jest'; punkty: number; jednostki: number }
+  /** ⭐ Policzyłem i wyszło zero. ⛔ To NIE JEST to samo co „nie policzyłem". */
+  | { rodzaj: 'jeszcze_nic' }
+  | { rodzaj: 'nie_policzone'; powod: string };
+
+/**
+ * ⭐ OBCIĄŻENIE · 7 DNI. ⛔ JEDEN OSIĄGALNY WARIANT DO CZASU D1.
+ * Dołożenie tu wariantu `policzone` zapala strażnika imiennie.
+ */
+export type ObciazenieNaEkranie = { rodzaj: 'nie_policzone'; powod: string };
+
+/** Dlaczego zdania o pracy dodatkowej nie ma. ⛔ Cztery różne braki, cztery zdania. */
+export type PowodBrakuPracyDodatkowej =
+  | 'brak_diagnozy'
+  | 'brak_pozycji'
+  | 'nie_umiem_policzyc'
+  | 'brak_deklaracji';
+
+export type PracaDodatkowaNaEkranie =
+  | {
+    rodzaj: 'jest';
+    /** Ile rzeczy zawodnik robi dodatkowo (rozpoznanych przez mapę). */
+    ile: number;
+    /** Ile z nich trafia w największy zwrot. */
+    trafia: number;
+    trafiaja: readonly string[];
+    nieTrafiaja: readonly string[];
+    /** ⭐ Rodzaje spoza mapy — nazwane, nie pominięte. */
+    nieznaneRodzaje: readonly string[];
+  }
+  | { rodzaj: 'nie_wiemy'; powod: PowodBrakuPracyDodatkowej; szczegol: string };
+
+// ═════════════════════════════════════════════════════════════════════
+// 3. BRZMIENIA — wszystkie w jednym miejscu
+// ═════════════════════════════════════════════════════════════════════
+// ⚠️ BRZMIENIA — DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-A3, 18.08.2026).
+
+export const BRZMIENIE_DO_PRZEJRZENIA_A3 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-A3, 18.08.2026)';
+
+export const TYTUL_EKRANU = 'TWÓJ PROFIL';
+
+/** ⛔ Dwa rzeczowniki, dwa różne słowa. Nigdy sklejone w jedno (N1, O92). */
+export const NAZWA_ROZWOJU = 'Rozwój';
+export const NAZWA_OBCIAZENIA = 'Obciążenie · 7 dni';
+
+/** ⛔ Jednostka rozwoju. Słowo „jednostka pracy" nie wraca — nie ma desygnatu. */
+export const JEDNOSTKA_ROZWOJU_WIELE = 'punktów rozwoju';
+export const JEDNOSTKA_ROZWOJU_JEDEN = 'punkt rozwoju';
+/** ⛔ Druga miara ma WŁASNY rzeczownik. Nigdy „punkty" bez przymiotnika. */
+export const JEDNOSTKA_OBCIAZENIA_WIELE = 'punktów obciążenia';
+
+/** ⭐ Rozwój nie ma okna — i to zdanie jest jedyną rzeczą, która to mówi. */
+export const ROZWOJ_PODPIS = 'rośnie, nigdy nie maleje';
+export const ROZWOJ_JESZCZE_NIC =
+  'Jeszcze żadnego. Ruszy z pierwszą rzeczą, którą oznaczysz jako zrobioną — i nigdy potem nie wróci do zera.';
+export const ROZWOJ_NIE_POLICZONE = (powod: string) =>
+  `Nie udało mi się tego policzyć (${powod}). To nie znaczy, że nie masz dorobku — pociągnij w dół.`;
+
+/**
+ * ⭐ POWÓD, DLA KTÓREGO OBCIĄŻENIA NIE MA NA EKRANIE — napisany zawodnikowi,
+ * nie programiście. ⛔ Ani oceny, ani progu, ani przymiotnika o ciężkości.
+ */
+export const OBCIAZENIE_NIE_POLICZONE_POWOD =
+  'nie mamy jeszcze miary obciążenia';
+export const OBCIAZENIE_NIE_POLICZONE_ZDANIE =
+  'Nie policzone — nie mamy jeszcze miary tego, ile ciało wzięło na siebie. To jest osobna liczba od rozwoju i powstanie osobno.';
+/** ⛔ Znak w miejscu liczby. Nie „0" — zero byłoby pomiarem, którego nie ma. */
+export const OBCIAZENIE_ZAMIAST_LICZBY = '—';
+
+export const PRACA_DODATKOWA_ZDANIE = (ile: number, trafia: number) =>
+  `Z ${liczebnikDopelniacz(ile)} rzeczy, które robisz dodatkowo, w Twój największy zwrot `
+  + `${trafia === 1 ? 'trafia' : 'trafiają'} ${liczebnikMianownik(trafia)}.`;
+export const PRACA_DODATKOWA_ZERO_TRAFIEN =
+  'Nic z tego, co robisz dodatkowo, nie trafia dziś w Twój największy zwrot. ⛔ To nie znaczy, że ta praca jest bez wartości — znaczy, że ta sama godzina gdzie indziej daje więcej.';
+export const PRACA_DODATKOWA_WEJSCIE = 'Skąd to wiemy →';
+
+/**
+ * ⭐ CZTERY RÓŻNE BRAKI, CZTERY RÓŻNE ZDANIA (D3).
+ * ⛔ Sklejenie dwóch w jedno zapala strażnika: zawodnik, który czyta jedno
+ * zdanie na cztery różne przyczyny, nie wie, co ma zrobić.
+ */
+export const PRACA_DODATKOWA_BRAK: Readonly<Record<PowodBrakuPracyDodatkowej, string>> = {
+  brak_diagnozy:
+    'Nie wiemy jeszcze, w co celujesz — nie masz wyników diagnozy. Bez nich nie ma z czego policzyć, co daje Ci największy zwrot.',
+  brak_pozycji:
+    'Nie wiemy jeszcze, w co celujesz — nie znamy Twojej pozycji. Ten sam wynik znaczy co innego u bramkarza i u napastnika.',
+  nie_umiem_policzyc:
+    'Nie umiem tego policzyć z Twojej diagnozy. Nie zgadujemy — puste miejsce nazywamy, a nie wypełniamy założeniem.',
+  brak_deklaracji:
+    'Nie powiedziałeś jeszcze, co robisz dodatkowo poza treningiem z drużyną. Dopóki tego nie wiemy, nie ma czego z czym porównać.',
+};
+
+/**
+ * ⭐ PIĘĆ POZYCJI. ⛔ Wiersz „Moje zadania" ZDJĘTY z tego ekranu świadomie —
+ * zadanie żyje w dniu i należy do ekranu 1 (wpis w
+ * `claude/REJESTR_UTRACONEGO_DOSTEPU.md`).
+ */
+export type KluczPozycji = 'odznaki' | 'dane' | 'skad' | 'nazewnatrz' | 'ustawienia';
+
+export const KOLEJNOSC_POZYCJI: readonly KluczPozycji[] =
+  ['odznaki', 'dane', 'skad', 'nazewnatrz', 'ustawienia'];
+
+export const TYTULY_POZYCJI: Readonly<Record<KluczPozycji, string>> = {
+  odznaki: 'Odznaki i progi',
+  dane: 'Moje dane i cel',
+  skad: 'Skąd to wiemy',
+  nazewnatrz: 'Co o Tobie wychodzi na zewnątrz',
+  ustawienia: 'Ustawienia i konto',
+};
+
+/**
+ * ⭐ PRZYPIS EKRANU. ⚠️ TO JEST JEDYNE MIEJSCE W TYM PLIKU, W KTÓRYM WOLNO
+ * UŻYĆ SŁÓW O PORÓWNANIU I O SERII — bo ono mówi, że TEGO TU NIE MA.
+ * Strażnik N3 sprawdza ten plik po USUNIĘCIU tej stałej i wtedy nie wolno
+ * mu znaleźć ani jednego takiego słowa.
+ */
+export const PRZYPIS_CZEGO_TU_NIE_MA =
+  'Czego tu nie ma: miejsca w tabeli, poziomów, serii dni z rzędu i ani jednej liczby o tym, ile robią inni.';
+
+/**
+ * ⭐ Podpis nagłówka: imię i wiek. ⛔ Ani jednej z tych rzeczy nie zgadujemy —
+ * brak rocznika daje NAZWANY brak, nie „0 lat".
+ * ⛔ Ten moduł nie ma zegara: rok bieżący podaje wołający.
+ */
+export function podpisNaglowka(a: {
+  imie: string | null;
+  rocznik: number | null;
+  rokTeraz: number;
+}): string {
+  const imie = niepustyNapis(a.imie);
+  const wiek = typeof a.rocznik === 'number' && Number.isFinite(a.rocznik) && a.rocznik > 1900
+    ? a.rokTeraz - a.rocznik
+    : null;
+  if (imie === null && wiek === null) return 'nie znamy jeszcze ani imienia, ani rocznika';
+  if (wiek === null) return `${imie} · rocznik nie podany`;
+  if (imie === null) return `${wiek} lat · imię nie podane`;
+  return `${imie}, ${wiek} lat`;
+}
+
+/**
+ * ⚠️ DWA PRZYPADKI, NIE JEDEN. „Z **czterech** rzeczy … trafiają **dwie**" —
+ * pierwsza liczba jest w dopełniaczu, druga w mianowniku. Jedna tablica dawała
+ * „trafiają dwóch", czyli zdanie, którego piętnastolatek nie przeczyta jako
+ * poprawnego. ⛔ Zmierzone na prawdziwych kontach A i C, nie wyobrażone.
+ */
+function liczebnikDopelniacz(n: number): string {
+  const slowa = ['zera', 'jednej', 'dwóch', 'trzech', 'czterech', 'pięciu', 'sześciu', 'siedmiu', 'ośmiu', 'dziewięciu'];
+  return n >= 0 && n < slowa.length ? slowa[n] : String(n);
+}
+function liczebnikMianownik(n: number): string {
+  const slowa = ['zero', 'jedna', 'dwie', 'trzy', 'cztery', 'pięć', 'sześć', 'siedem', 'osiem', 'dziewięć'];
+  return n >= 0 && n < slowa.length ? slowa[n] : String(n);
+}
+
+/**
+ * ⚠️ POLSKI MA TRZY FORMY, NIE DWIE: 1 wpis · 3 wpisy · 7 wpisów.
+ * ⛔ Dwie formy dawały „3 wpisów" — liczbę poprawną w zdaniu niepoprawnym.
+ */
+export function formaLiczby(n: number, jeden: string, kilka: string, wiele: string): string {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a === 1) return jeden;
+  if (b >= 2 && b <= 4 && (a < 12 || a > 14)) return kilka;
+  return wiele;
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 4. ⚠️ SZEŚĆ PROGÓW, A NIE PIĘĆ — rozstrzygnięte świadomie
+// ═════════════════════════════════════════════════════════════════════
+//
+// Makieta rysuje PIĘĆ progów (1 · 10 · 40 · 150 · 400, wszystkie w mierze
+// `punkty`). `PROGI` w `lib/nagrodaZaPrace.ts` ma SZEŚĆ: szósty to
+// `praca_w_celu`, w mierze `punkty_w_celu`.
+//
+// ⭐ ROZSTRZYGNIĘCIE TEGO PASA: NA EKRAN WCHODZĄ WSZYSTKIE, KTÓRE ZNA SILNIK.
+// ⛔ Odfiltrowanie szóstego byłoby zniknięciem bez wpisu (B3): próg istnieje,
+// zawodnik może go zdobyć i `policzNagrode` już dziś go liczy. Odznaka, która
+// przysługuje, a nie jest widoczna, jest gorsza niż odznaka, której nie ma.
+//
+// Filtr JEST — nazwany i z powodem — ale jest TOŻSAMOŚCIOWY. Gdyby kiedyś
+// zawężał, jego nazwa i powód muszą się zmienić razem z nim, a strażnik
+// porównuje liczbę progów na ekranie z `PROGI.length` PO tym filtrze.
+export const NAZWA_FILTRU_PROGOW = 'wszystkie progi, które silnik umie policzyć';
+export const POWOD_FILTRU_PROGOW =
+  'Makieta zna pięć progów w mierze „punkty". Silnik ma szósty — „Praca nad swoim celem" '
+  + 'w mierze „punkty w celu". Zawężenie do pięciu ukryłoby przed zawodnikiem próg, który '
+  + 'mu przysługuje i który produkt już liczy. Dlatego filtr jest tożsamościowy, a szósty '
+  + 'próg ma na ekranie napisane, w czym się liczy.';
+
+export function progiNaEkranie(): readonly Prog[] {
+  return PROGI.filter(() => true);
+}
+
+/** Nazwy miar w dopełniaczu — do zdania „brakuje Ci N …". */
+export const NAZWA_MIARY: Readonly<Record<string, string>> = {
+  punkty: JEDNOSTKA_ROZWOJU_WIELE,
+  odpowiedzi_kontrolne: 'rzeczy domkniętych odpowiedzią',
+  punkty_w_celu: 'punktów rozwoju w tym, co sam nazwałeś celem',
+};
+
+// ═════════════════════════════════════════════════════════════════════
+// 5. MODEL EKRANU
+// ═════════════════════════════════════════════════════════════════════
+
+/** ⛔ `null` w każdym polu = „nie odczytałem", nigdy „nie masz". */
+export type LiczbyZrodel = {
+  wpisy: number | null;
+  oceny: number | null;
+  mecze: number | null;
+  pomiary: number | null;
+};
+
+/** Cztery pola „Moje dane i cel" — każde w trzech stanach. */
+export type DaneICel = {
+  rocznik: number | null;
+  wzrostPomiarow: number | null;
+  pozycja: WybranaPozycja;
+  cel: string | null;
+};
+
+export type PozycjaNaEkranie = {
+  klucz: KluczPozycji;
+  tytul: string;
+  podpis: string;
+  /** ⭐ Czy podpis mówi o TREŚCI, czy o jej braku. Dwa różne teksty, zawsze. */
+  maTresc: boolean;
+};
+
+export type ModelProfilu = {
+  tytul: string;
+  rozwoj: RozwojNaEkranie;
+  obciazenie7: ObciazenieNaEkranie;
+  pracaDodatkowa: PracaDodatkowaNaEkranie;
+  pozycje: readonly PozycjaNaEkranie[];
+  przypis: string;
+};
+
+export type WejscieModelu = {
+  nagroda: NagrodaZaPrace;
+  /** Wynik `policzZwrotObszarow` dla tego zawodnika. */
+  zwrot: ZwrotObszarow;
+  /** Wynik `ocenPraceWlasna` dla tego zawodnika. */
+  pracaWlasna: OcenaPracyWlasnej;
+  /** Czy w ogóle mamy czytelną diagnozę (`diagnostics.scores`). */
+  maDiagnoze: boolean;
+  pozycja: WybranaPozycja;
+  /** Surowe `diagnostics.own_training_types`. `null` = nie podał. */
+  rodzajePracy: string | null;
+  liczby: LiczbyZrodel;
+  daneICel: DaneICel;
+  /** Czy cokolwiek o zawodniku wychodzi na zewnątrz. `null` = nie odczytałem. */
+  raportRodzicaIstnieje: boolean | null;
+};
+
+/**
+ * ⭐ ROZWÓJ NA EKRANIE. Trzy wartości i ani jednego okna.
+ * ⛔ `nie_policzone` nie ma pola `punkty` — patrz komentarz przy typie.
+ */
+export function rozwojZNagrody(n: NagrodaZaPrace): RozwojNaEkranie {
+  if (n.rodzaj === 'nie_policzona') {
+    return { rodzaj: 'nie_policzone', powod: n.powod };
+  }
+  if (n.punkty <= 0) return { rodzaj: 'jeszcze_nic' };
+  return { rodzaj: 'jest', punkty: n.punkty, jednostki: n.jednostki };
+}
+
+/**
+ * ⭐⛔ OBCIĄŻENIE · 7 DNI — JEDEN OSIĄGALNY WARIANT DO CZASU D1.
+ * Ta funkcja nie przyjmuje ANI JEDNEGO argumentu i to nie jest niedopatrzenie:
+ * nie ma czego jej podać. Gdy powstanie prawdziwa miara obciążenia (bez
+ * trafności w środku), zmieni się TU i strażnik to zauważy.
+ */
+export function obciazenieNaEkranie(): ObciazenieNaEkranie {
+  return { rodzaj: 'nie_policzone', powod: OBCIAZENIE_NIE_POLICZONE_POWOD };
+}
+
+/** Który z czterech braków zaszedł — rozstrzygane ze STANU, nie z tekstu powodu. */
+export function powodBrakuPracyDodatkowej(args: {
+  maDiagnoze: boolean;
+  pozycja: WybranaPozycja;
+  zwrot: ZwrotObszarow;
+  rodzajePracy: string | null;
+}): { powod: PowodBrakuPracyDodatkowej; szczegol: string } | null {
+  if (!args.maDiagnoze) {
+    return { powod: 'brak_diagnozy', szczegol: 'nie mam wyników diagnozy tego zawodnika' };
+  }
+  if (args.pozycja.pozycja === null) {
+    return { powod: 'brak_pozycji', szczegol: 'nie znam pozycji tego zawodnika' };
+  }
+  if (args.zwrot.rodzaj !== 'jest') {
+    return { powod: 'nie_umiem_policzyc', szczegol: args.zwrot.powod };
+  }
+  if (niepustyNapis(args.rodzajePracy) === null) {
+    return { powod: 'brak_deklaracji', szczegol: 'zawodnik nie podał, co robi dodatkowo' };
+  }
+  return null;
+}
+
+export function pracaDodatkowaNaEkranie(we: {
+  maDiagnoze: boolean;
+  pozycja: WybranaPozycja;
+  zwrot: ZwrotObszarow;
+  rodzajePracy: string | null;
+  pracaWlasna: OcenaPracyWlasnej;
+}): PracaDodatkowaNaEkranie {
+  const brak = powodBrakuPracyDodatkowej(we);
+  if (brak !== null) return { rodzaj: 'nie_wiemy', ...brak };
+  if (we.pracaWlasna.rodzaj !== 'jest') {
+    // ⛔ Gałąź osiągalna wyłącznie wtedy, gdy `ocenPraceWlasna` odmówiła
+    // z powodu, którego cztery gałęzie wyżej nie objęły. Nie milczymy.
+    return { rodzaj: 'nie_wiemy', powod: 'nie_umiem_policzyc', szczegol: we.pracaWlasna.powod };
+  }
+  const trafiaja = we.pracaWlasna.trafiaja;
+  const nieTrafiaja = we.pracaWlasna.nieTrafiaja;
+  return {
+    rodzaj: 'jest',
+    ile: trafiaja.length + nieTrafiaja.length,
+    trafia: trafiaja.length,
+    trafiaja,
+    nieTrafiaja,
+    nieznaneRodzaje: we.pracaWlasna.nieznaneRodzaje,
+  };
+}
+
+/** Zdanie o pracy dodatkowej — jedno miejsce, w którym powstaje jego treść. */
+export function zdanieOPracyDodatkowej(p: PracaDodatkowaNaEkranie): string {
+  if (p.rodzaj === 'nie_wiemy') return PRACA_DODATKOWA_BRAK[p.powod];
+  if (p.trafia === 0) return PRACA_DODATKOWA_ZERO_TRAFIEN;
+  return PRACA_DODATKOWA_ZDANIE(p.ile, p.trafia);
+}
+
+// ── Podpisy pięciu pozycji: DWA WARIANTY KAŻDY (D6) ─────────────────
+
+function podpisOdznaki(n: NagrodaZaPrace): { podpis: string; maTresc: boolean } {
+  const ile = progiNaEkranie().length;
+  if (n.rodzaj === 'nie_policzona') {
+    return { podpis: `${ile} progów — nie udało mi się sprawdzić, które masz`, maTresc: false };
+  }
+  const zdobyte = n.odznaki.length;
+  if (zdobyte === 0) {
+    return { podpis: `0 z ${ile} — pokazujemy progi, a nie puste miejsca`, maTresc: false };
+  }
+  return { podpis: `${zdobyte} z ${ile} zdobytych — wszystkie za pracę, żadna za wejście do aplikacji`, maTresc: true };
+}
+
+function podpisDane(d: DaneICel): { podpis: string; maTresc: boolean } {
+  const podane: string[] = [];
+  const brakujace: string[] = [];
+  (d.rocznik === null ? brakujace : podane).push('rocznik');
+  (d.wzrostPomiarow === null || d.wzrostPomiarow === 0 ? brakujace : podane).push('wzrost');
+  (d.pozycja.pozycja === null ? brakujace : podane).push('pozycja');
+  (niepustyNapis(d.cel) === null ? brakujace : podane).push('cel');
+  if (podane.length === 0) {
+    return { podpis: 'rocznik, wzrost, pozycja i cel — żadne z nich nie jest jeszcze podane', maTresc: false };
+  }
+  if (brakujace.length === 0) {
+    return { podpis: 'rocznik, wzrost, pozycja i cel — komplet', maTresc: true };
+  }
+  return { podpis: `podane: ${podane.join(', ')} · brakuje: ${brakujace.join(', ')}`, maTresc: true };
+}
+
+/**
+ * ⭐ „Skąd to wiemy". ⛔ KAŻDE ZERO MA OBOK SIEBIE ZDANIE, CZYM JEST — a każde
+ * `null` mówi „nie sprawdziłem", nie „nie masz". ⛔ Ani jedna z tych liczb nie
+ * przechodzi przez `?? 0`.
+ */
+export function opiszLiczbe(n: number | null, jeden: string, kilka: string, wiele: string): string {
+  if (n === null) return `${wiele}: nie sprawdziłem`;
+  if (n === 0) return `0 ${wiele} — nie ma jeszcze z czego liczyć`;
+  return `${n} ${formaLiczby(n, jeden, kilka, wiele)}`;
+}
+
+function podpisSkad(l: LiczbyZrodel): { podpis: string; maTresc: boolean } {
+  const czesci = [
+    opiszLiczbe(l.wpisy, 'wpis', 'wpisy', 'wpisów'),
+    opiszLiczbe(l.oceny, 'ocena', 'oceny', 'ocen'),
+    opiszLiczbe(l.mecze, 'mecz', 'mecze', 'meczów'),
+    opiszLiczbe(l.pomiary, 'pomiar', 'pomiary', 'pomiarów'),
+  ];
+  const maTresc = [l.wpisy, l.oceny, l.mecze, l.pomiary].some((x) => x !== null && x > 0);
+  return { podpis: czesci.join(' · '), maTresc };
+}
+
+function podpisNaZewnatrz(raport: boolean | null): { podpis: string; maTresc: boolean } {
+  if (raport === null) {
+    return { podpis: 'nie udało mi się sprawdzić, co o Tobie wychodzi', maTresc: false };
+  }
+  if (raport) {
+    return { podpis: 'raport dla rodzica istnieje — zobacz, co dokładnie zawiera', maTresc: true };
+  }
+  return { podpis: 'nic o Tobie nie wychodzi — sprawdź, co to znaczy', maTresc: true };
+}
+
+/**
+ * ⭐ „Ustawienia i konto". ⛔ MAKIETA OBIECUJE „powiadomienia, hasło,
+ * usunięcie konta" i ŻADNEJ Z TYCH TRZECH RZECZY W PRODUKCIE NIE MA
+ * (zmierzone `grep`, 18.08.2026: zero trafień). Podpis mówi to, co JEST.
+ */
+export const USTAWIENIA_PODPIS = 'dostęp, kod drużyny, logowanie odciskiem, wylogowanie';
+export const USTAWIENIA_CZEGO_NIE_MA =
+  'Czego tu jeszcze nie ma: powiadomień, zmiany hasła i usunięcia konta. To nie są ukryte przełączniki — tych trzech rzeczy produkt dziś nie umie i nie udajemy, że umie.';
+
+export function pozycjeProfilu(we: WejscieModelu): readonly PozycjaNaEkranie[] {
+  const wybor: Record<KluczPozycji, { podpis: string; maTresc: boolean }> = {
+    odznaki: podpisOdznaki(we.nagroda),
+    dane: podpisDane(we.daneICel),
+    skad: podpisSkad(we.liczby),
+    nazewnatrz: podpisNaZewnatrz(we.raportRodzicaIstnieje),
+    ustawienia: { podpis: USTAWIENIA_PODPIS, maTresc: true },
+  };
+  return KOLEJNOSC_POZYCJI.map((k) => ({
+    klucz: k,
+    tytul: TYTULY_POZYCJI[k],
+    podpis: wybor[k].podpis,
+    maTresc: wybor[k].maTresc,
+  }));
+}
+
+export function zbudujModelProfilu(we: WejscieModelu): ModelProfilu {
+  return {
+    tytul: TYTUL_EKRANU,
+    rozwoj: rozwojZNagrody(we.nagroda),
+    obciazenie7: obciazenieNaEkranie(),
+    pracaDodatkowa: pracaDodatkowaNaEkranie(we),
+    pozycje: pozycjeProfilu(we),
+    przypis: PRZYPIS_CZEGO_TU_NIE_MA,
+  };
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 6. WEJŚCIE NAGRODY Z SUROWYCH ODCZYTÓW
+// ═════════════════════════════════════════════════════════════════════
+//
+// ⛔ TO NIE MA PRAWA MIESZKAĆ NA EKRANIE. Ekran `ja.tsx` czyta wiersze
+// i podaje je TUTAJ — reguła „co jest źródłem pracy" ma jedną kopię.
+//
+// ⛔ ANI JEDNEGO `?? []`: nieudany odczyt każdego z czterech źródeł przewraca
+// całą liczbę na `nie_policzona`, bo suma z trzech źródeł zamiast czterech
+// jest MNIEJSZA od prawdy — a rozwój nie ma prawa maleć.
+
+export type OdczytTabeli<T> =
+  | { rodzaj: 'jest'; wiersze: readonly T[] }
+  | { rodzaj: 'nie_odczytano'; powod: string };
+
+/**
+ * ⭐ WIERSZE Z SUPABASE → `OdczytTabeli`. ⛔ Ta zamiana NIE MA PRAWA stać
+ * na ekranie: literał `'nie_odczytano'` wpisany w plik ekranu jest drugą kopią
+ * słownika, którym cały produkt nazywa nieudany odczyt.
+ */
+export function odczytTabeli<T>(
+  blad: unknown,
+  dane: unknown,
+  gdzie: string,
+  zaloguj?: (zdanie: string) => void,
+): OdczytTabeli<T> {
+  if (blad || !Array.isArray(dane)) {
+    if (blad && zaloguj) zaloguj(`nie odczytałem ${gdzie}: ${String(blad)}`);
+    return { rodzaj: 'nie_odczytano', powod: `nie odczytałem ${gdzie}` };
+  }
+  return { rodzaj: 'jest', wiersze: dane as readonly T[] };
+}
+
+export type OdczytyDoRozwoju = {
+  wydarzenia: OdczytTabeli<WierszWydarzeniaDoNagrody>;
+  dziennik: OdczytTabeli<WierszDziennika & { calendar_event_id?: number | null }>;
+  odpowiedziKontrolne: OdczytTabeli<WierszOdpowiedziKontrolnej>;
+  mecze: OdczytTabeli<WierszMeczu>;
+  /** ⭐ Zbiór celów BEZ filtra po statusie — cel domknięty to sukces, nie utrata. */
+  cele: OdczytTabeli<{ segment_id: string | null }>;
+  /**
+   * ⭐ Zwrot obszarów tego zawodnika — wchodzi do TRAFNOŚCI sesji własnej pracy.
+   * ⛔ `null` NIE odbiera nikomu punktów: trafność spada wtedy do bazy 1,0.
+   */
+  zwrot: ZwrotObszarow | null;
+};
+
+/**
+ * ⭐ `calendar_events.id` → ZMIERZONA długość sesji i ZMIERZONE RPE, wyjęte
+ * z `daily_logs.payload` wpisu wskazującego TĘ pozycję.
+ * ⛔ Przy dwóch wpisach o tej samej sesji wygrywa WYŻSZA wartość: pomiar może
+ * wagę podnieść, nigdy obniżyć (decyzja C Kuby, 17.08.2026).
+ * ⛔ `null` = nie odczytałem Dziennika. Pusta mapa = odczytałem i nic nie ma.
+ */
+export function pomiaryZWpisow(
+  o: OdczytTabeli<WierszDziennika & { calendar_event_id?: number | null }>,
+): { minuty: ReadonlyMap<number, number> | null; rpe: ReadonlyMap<number, number> | null } {
+  if (o.rodzaj === 'nie_odczytano') return { minuty: null, rpe: null };
+  const minuty = new Map<number, number>();
+  const rpe = new Map<number, number>();
+  for (const w of o.wiersze) {
+    const id = w?.calendar_event_id;
+    if (typeof id !== 'number' || !Number.isFinite(id)) continue;
+    const p = w?.payload;
+    if (p === null || typeof p !== 'object') continue;
+    const min = (p as Record<string, unknown>).duration_minutes;
+    if (typeof min === 'number' && Number.isFinite(min) && min > 0) {
+      minuty.set(id, Math.max(minuty.get(id) ?? 0, min));
+    }
+    const r = (p as Record<string, unknown>).rpe;
+    if (typeof r === 'number' && Number.isFinite(r) && r > 0 && r <= 10) {
+      rpe.set(id, Math.max(rpe.get(id) ?? 0, r));
+    }
+  }
+  return { minuty, rpe };
+}
+
+function zrodlo<T>(o: OdczytTabeli<T>, nazwa: string, na: (w: readonly T[]) => WejscieZrodla): WejscieZrodla {
+  return o.rodzaj === 'nie_odczytano' ? zrodloNieczytane(`${nazwa}: ${o.powod}`) : na(o.wiersze);
+}
+
+export function wejscieNagrodyZOdczytow(o: OdczytyDoRozwoju): WejscieNagrody {
+  const wpisyDziennika: ReadonlySet<number> | null = o.dziennik.rodzaj === 'nie_odczytano'
+    ? null
+    : new Set(o.dziennik.wiersze
+      .map((w) => w.calendar_event_id)
+      .filter((x): x is number => typeof x === 'number' && Number.isFinite(x)));
+
+  // ⭐ SEGMENTY CELÓW — ⛔ ŚWIADOMIE BEZ FILTRA `status='active'`.
+  // Cel domknięty zostaje w zbiorze: odznaka „praca nad swoim celem" policzona
+  // ze zbioru aktywnych przepadłaby W DNIU DOMKNIĘCIA CELU, czyli licznik
+  // cofnąłby się z powodu sukcesu.
+  const segmentyCelow: SegmentyCelow = o.cele.rodzaj === 'nie_odczytano'
+    ? { rodzaj: 'niepelne', powod: `nie odczytałem listy Twoich celów — ${o.cele.powod}` }
+    : {
+      rodzaj: 'pelne',
+      segmenty: new Set(o.cele.wiersze
+        .map((g) => g?.segment_id)
+        .filter((s): s is string => typeof s === 'string' && s.length > 0)),
+    };
+
+  const pomiary = pomiaryZWpisow(o.dziennik);
+
+  return {
+    sesje: o.wydarzenia.rodzaj === 'nie_odczytano'
+      ? zrodloNieczytane(`kalendarz: ${o.wydarzenia.powod}`)
+      : zrodloSesji({
+        wydarzenia: o.wydarzenia.wiersze,
+        // ⚠️ Ekran „Profil" NIE CZYTA werdyktów — mówi to wprost, zamiast
+        // podawać pustą listę udającą „nie było żadnego".
+        werdykty: WERDYKTY_NIEPODANE,
+        wpisyDziennika,
+        segmentBloku: null,
+        minutyZWpisow: pomiary.minuty,
+        rpeZWpisow: pomiary.rpe,
+        zwrot: o.zwrot,
+      }),
+    dziennik: zrodlo(o.dziennik, 'Dziennik', (w) => ({ rodzaj: 'jest', jednostki: jednostkiZDziennika(w) })),
+    odpowiedziKontrolne: zrodlo(o.odpowiedziKontrolne, 'odpowiedzi kontrolne Bloku',
+      (w) => ({ rodzaj: 'jest', jednostki: jednostkiZOdpowiedziKontrolnych(w) })),
+    mecze: zrodlo(o.mecze, 'mecze', (w) => ({ rodzaj: 'jest', jednostki: jednostkiZMeczow(w) })),
+    segmentyCelow,
+  };
+}
+
+/**
+ * ⭐ JEDNO WEJŚCIE → GOTOWY ROZWÓJ. ⛔ Ekran nie woła `policzNagrode` sam:
+ * gdyby wołał, reguła „co jest pracą" miałaby drugą kopię na ekranie.
+ */
+export function policzRozwojZOdczytow(o: OdczytyDoRozwoju): NagrodaZaPrace {
+  return policzNagrode(wejscieNagrodyZOdczytow(o));
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 7. ARKUSZ „SKĄD BIERZE SIĘ TRAFNOŚĆ"
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ Ten arkusz NIE LICZY zwrotu sam. Czyta `policzZwrotObszarow`, a mapę
+// rodzajów pracy — z `MAPA_PRACY_WLASNEJ`. Kopii tu nie ma i nie będzie.
+
+export const TRAFNOSC_TYTUL = 'Skąd bierze się trafność';
+export const TRAFNOSC_WZOR =
+  'Trafne to nie jest to, co masz najsłabsze. Trafne to to, gdzie ta sama godzina pracy daje najwięcej: (100 − Twój wynik) × waga obszaru na Twojej pozycji. Obszar z wynikiem 40 lub niżej wchodzi zawsze.';
+export const TRAFNOSC_REMIS =
+  'Remis wchodzi w komplecie. Jeżeli kilka obszarów ma identyczny zwrot, nie wybieramy z nich jednego — nie ma czym.';
+export const TRAFNOSC_ZAWSZE_JEDEN =
+  'Trening klubowy i mecz mają trafność 1,0 zawsze — nie decydujesz o ich treści. Trafność nigdy nie schodzi poniżej 1,0: nic, co zrobisz, nie może być warte mniej niż praca.';
+/** ⛔ Pustka arkusza przy braku diagnozy — INNA niż przy braku pozycji. */
+export const TRAFNOSC_PUSTKA_BRAK_DIAGNOZY =
+  'Nie mamy z czego tego policzyć — nie masz jeszcze wyników diagnozy. Nie zgadujemy: puste miejsce nazywamy, a nie wypełniamy założeniem.';
+export const TRAFNOSC_PUSTKA_BRAK_POZYCJI =
+  'Nie mamy z czego tego policzyć — nie znamy Twojej pozycji. Ten sam wynik obszaru znaczy co innego u bramkarza i u napastnika.';
+
+export type WierszPracyDodatkowej = {
+  rodzaj: string;
+  /** Obszary, w które ten rodzaj celuje — ⛔ czytane z `MAPA_PRACY_WLASNEJ`. */
+  obszary: readonly string[];
+  trafia: boolean;
+  /** ⭐ Rodzaj spoza mapy — nazwany, nie pominięty. */
+  znany: boolean;
+};
+
+export function wierszePracyDodatkowej(args: {
+  rodzajePracy: string | null;
+  zwrot: ZwrotObszarow;
+}): readonly WierszPracyDodatkowej[] {
+  const surowe = niepustyNapis(args.rodzajePracy);
+  if (surowe === null) return [];
+  // ⛔ Zbiór trafnych wyjęty PRZED pętlę, a nie zawężany w domknięciu.
+  // ⚠️ `tsc` (18.08) słusznie odmówił zawężenia `args.zwrot` wewnątrz `.some(...)`:
+  // zawężenie unii nie przechodzi przez granicę funkcji. Pusty zbiór przy
+  // „nie wiemy" daje ten sam wynik co brak trafienia i nie udaje wiedzy (R5).
+  const trafne: ReadonlySet<string> = args.zwrot.rodzaj === 'jest'
+    ? args.zwrot.trafne : new Set<string>();
+  return surowe.split(',').map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0)
+    .map((r) => {
+      const obszary = MAPA_PRACY_WLASNEJ[r];
+      if (!obszary) return { rodzaj: r, obszary: [], trafia: false, znany: false };
+      const trafia = obszary.some((o) => trafne.has(o));
+      return { rodzaj: r, obszary, trafia, znany: true };
+    });
+}
+
+/**
+ * ⭐ Jedno wejście → cały arkusz trafności. ⛔ Zero arytmetyki po stronie
+ * komponentu: komponent dostaje gotową listę i ją rysuje.
+ */
+export type ArkuszTrafnosci =
+  | {
+    rodzaj: 'jest';
+    obszary: readonly ObszarZeZwrotem[];
+    trafne: ReadonlySet<string>;
+    praca: readonly WierszPracyDodatkowej[];
+  }
+  | { rodzaj: 'pusto'; zdanie: string };
+
+export function arkuszTrafnosci(we: {
+  maDiagnoze: boolean;
+  pozycja: WybranaPozycja;
+  zwrot: ZwrotObszarow;
+  rodzajePracy: string | null;
+}): ArkuszTrafnosci {
+  if (!we.maDiagnoze) return { rodzaj: 'pusto', zdanie: TRAFNOSC_PUSTKA_BRAK_DIAGNOZY };
+  if (we.pozycja.pozycja === null) return { rodzaj: 'pusto', zdanie: TRAFNOSC_PUSTKA_BRAK_POZYCJI };
+  if (we.zwrot.rodzaj !== 'jest') return { rodzaj: 'pusto', zdanie: we.zwrot.powod };
+  return {
+    rodzaj: 'jest',
+    obszary: we.zwrot.obszary,
+    trafne: we.zwrot.trafne,
+    praca: wierszePracyDodatkowej({ rodzajePracy: we.rodzajePracy, zwrot: we.zwrot }),
+  };
+}
+
+/**
+ * Skrót, który ekran woła RAZ: z surowych danych diagnozy robi wszystko,
+ * czego potrzebuje zdanie o pracy dodatkowej i jego arkusz.
+ */
+export function trafnoscZawodnika(args: {
+  wyniki: Readonly<Record<string, unknown>> | null;
+  pozycjaZDiagnozy: string | null;
+  pozycjaZProfilu: string | null;
+  rodzajePracy: string | null;
+}): { pozycja: WybranaPozycja; zwrot: ZwrotObszarow; pracaWlasna: OcenaPracyWlasnej; maDiagnoze: boolean } {
+  const pozycja = wybierzPozycje({ zDiagnozy: args.pozycjaZDiagnozy, zProfilu: args.pozycjaZProfilu });
+  const zwrot = policzZwrotObszarow({ wyniki: args.wyniki, pozycja: pozycja.pozycja });
+  return {
+    pozycja,
+    zwrot,
+    pracaWlasna: ocenPraceWlasna({ zwrot, rodzaje: args.rodzajePracy }),
+    maDiagnoze: args.wyniki !== null && typeof args.wyniki === 'object',
+  };
+}

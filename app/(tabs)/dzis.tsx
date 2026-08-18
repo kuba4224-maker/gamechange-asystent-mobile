@@ -121,7 +121,7 @@
 // pierwszym `load()`; kolejne odświeżenia (`useFocusEffect`, `RefreshControl`)
 // go NIE podnoszą, bo wtedy na ekranie są już prawdziwe dane i migotanie
 // byłoby gorsze niż jego brak.
-import { useState, useCallback, useMemo, useRef, Fragment } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -151,19 +151,15 @@ import { SEGMENT_LABELS } from '../../lib/labels';
 // ręką wersję BEZ trzeciego stanu i wybierał ją, bo była krótsza. Funkcja
 // zostaje w `lib/` (woła ją `computeFocusBlockProgressState` w środku, ma
 // własne asercje), ale ekran nie ma już jak jej wybrać.
+// ⭐ PLAN-D-S2 18.08.2026 — `policzPraceWeWszystkichBlokach` ZDJĘTE Z TEGO
+// PLIKU. Ekran wołał je do 18.08 i wyrzucał wynik do `console.log`: pas A1
+// zdjął `renderPracaWBlokach` (~120 dp), a nikt nie postawił go z powrotem.
+// Liczba i jej rysowanie stoją od dziś RAZEM, w `components/PracaWLiczbach.tsx`
+// (Profil → „Skąd to wiemy"). Tutaj zostaje wyłącznie stan postępu Bloku —
+// bo ma tu ŻYWEGO konsumenta: `maAktywnyBlok` w jednej odpowiedzi.
 import {
   computeFocusBlockProgressState,
-  policzPraceWeWszystkichBlokach,
-  NIE_WIEM_TYTUL,
-  NIE_WIEM_POWOD,
-  DOROBEK_BLOKOW_NAGLOWEK,
-  DOROBEK_BLOKOW_PUSTO,
-  DOROBEK_BLOKOW_RZECZ_DO_ZROBIENIA,
-  dorobekBlokowLiczba,
-  dorobekBlokowNiePoliczony,
-  type BlockEventLike,
   type FocusBlockProgressState,
-  type DorobekWBlokach,
 } from '../../lib/focusBlockProgress';
 // WIEDZA B4 08.08.2026 — wszystkie reguły podpowiedzi (bramka wiekowa A9,
 // rozróżnienie R5, wybór jednej z kilkunastu) siedzą w czystych funkcjach
@@ -221,7 +217,6 @@ import { colors, typography, spacing, radii, minTouchHeight, skew } from '../../
 // Zakres wyjatku jest ZAMKNIETY na dwa stany: `injury` i `exit`. Dolozenie
 // trzeciego stanu, drugiego ekranu albo drugiego wejscia jest cofnieciem
 // decyzji wlasciciela, nie ulepszeniem — tego dotyczy ZASADA wyzej.
-import LivingDiagnosisPulseCard from '../../components/LivingDiagnosisPulseCard';
 import RecommendationCard, { RECOMMENDATION_COLUMNS, type Recommendation } from '../../components/RecommendationCard';
 // PLAN-D-F 08.2026 (12.08.2026) — GŁOS TYGODNIA. Ekran czyta gotowy wiersz
 // `weekly_voice`; drabinę liczy backend (gamechange-app/lib/arbiter-glosu.js,
@@ -230,7 +225,6 @@ import RecommendationCard, { RECOMMENDATION_COLUMNS, type Recommendation } from 
 import {
   stanGlosu,
   pokazacKarte,
-  podniescPunktPomocy,
   opisDoLogu,
   poniedzialekTygodnia as poniedzialekGlosu,
   type StanGlosu,
@@ -286,8 +280,6 @@ import { czytajStanDostepu, RPC_STAN_DOSTEPU } from '../../lib/dostepKonta';
 // ZADANIE E2 12.08.2026 — punkt pomocy wyżej w kontuzji i ścieżce wyjścia.
 // Stąd idzie WYŁĄCZNIE prośba o otwarcie tego samego, jedynego modala
 // zamontowanego w app/_layout.tsx. Zero drugiego egzemplarza.
-import { otworzPunktPomocy } from '../../components/PunktPomocy';
-import { POMOC_PRZYCISK, POMOC_WIERSZ_PODPIS } from '../../lib/labels';
 // ⭐ PLAN-D-O1 — MIEJSCA BÓLU BIERZEMY Z ISTNIEJĄCEGO SŁOWNIKA, nie z nowego.
 // To ten sam `BODY_LOCATIONS`, z którego rysuje Dziennik i wgląd WT-25:
 // drugi słownik na to samo rozjechałby się przy pierwszej poprawce, a oba
@@ -342,6 +334,23 @@ import {
   TABELA_ZADAN,
 } from '../../lib/zadania';
 import PozycjaKolejkiCard from '../../components/PozycjaKolejkiCard';
+// ⭐ PLAN-D-A1 08.2026 (18.08.2026) — ARKUSZ JAKO WZORZEC NAWIGACJI (A2, A5).
+// Do 18.08 ten ekran nie miał ani jednej nakładki: wszystko, co zawodnik miał
+// zrobić, albo stało na ekranie (i podnosiło go), albo było za trasą (i wtedy
+// kosztowało opuszczenie ekranu). Trzy moduły niżej są DECYZJAMI, ten plik
+// jest ich WYKONANIEM — żadna z nich nie jest liczona tutaj.
+import Arkusz from '../../components/Arkusz';
+import { naglowekArkusza } from '../../lib/arkusz';
+import {
+  rzeczyMeczu, podpisArkuszaMeczu, czegoNieUmiemyZapisac,
+  MECZ_WIECEJ_WEJSCIE, MECZ_CZEKA_NA_KOLUMNE,
+} from '../../lib/meczWiecej';
+import {
+  sprawdzPrzedDodaniem, wolnoUtworzycWydarzenie,
+  KOLIZJA_PYTANIE, KOLIZJA_PODPYTANIE, KOLIZJA_TO_BYLO_TO, KOLIZJA_INNA_RZECZ,
+  KOLIZJA_PRZYPIS, KOLIZJA_NIC_NIE_STALO, KOLIZJA_NIE_ODCZYTANE,
+  type PozycjaBezOceny, type OdpowiedzNaKolizje,
+} from '../../lib/dodanieWstecz';
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-B4 08.2026 (14.08.2026), zadanie B4.2 — WGLĄDY WCHODZĄ NA EKRAN.
 //
@@ -365,11 +374,13 @@ import PozycjaKolejkiCard from '../../components/PozycjaKolejkiCard';
 // i rysuje ją ten ekran — patrz `WgladPozycji` niżej. Bez tego wgląd kończy
 // się na wiedzy, a to jest złamanie M4.
 // ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-S2 18.08.2026 — `dataPoPolsku` i `liczbaPoPolsku` SKREŚLONE.
+// Były martwe od 18.08 rano: zostały po komponencie `WgladPozycji`, który pas
+// A1 zdjął z tego pliku, a pas S1 wyprowadził do `components/WgladPozycji.tsx`.
+// Pas S1 zamroził je świadomie w zapadce powierzchni importu z komentarzem
+// „dług do skreślenia jedną linią" — to jest ta linia.
 import {
   policzWglady,
-  wgladDlaPozycji,
-  dataPoPolsku,
-  liczbaPoPolsku,
   type WejsciaWgladow,
   type WynikiWgladow,
   type Wglad,
@@ -435,13 +446,15 @@ import {
   type WierszWydarzenia,
   type WierszDnia,
 } from '../../lib/widokTygodnia';
+// ⭐ PLAN-D-S2 18.08.2026 — `policzWykonanaPrace` ZDJĘTE Z TEGO PLIKU.
+// Ekran liczył licznik pracy do 18.08 i oddawał go do `console.log`, bo pas A1
+// zdjął `renderLicznikPracy` (~150 dp) i nikt go nie postawił z powrotem.
+// Licznik i jego rysowanie stoją od dziś RAZEM, w `components/PracaWLiczbach.tsx`
+// (Profil → „Skąd to wiemy"). ⛔ `czytajWerdykty` ZOSTAJE: karmi `zbudujTydzien`,
+// czyli widok tygodnia na tej karcie.
 import {
-  policzWykonanaPrace,
   czytajWerdykty,
-  opisLicznikaDoLogu,
-  type LicznikPracy,
   type WejscieWerdyktow,
-  type WystapienieDoLicznika,
   type WartoscWerdyktu,
 } from '../../lib/wykonanieSesji';
 // ═══════════════════════════════════════════════════════════════════
@@ -558,7 +571,6 @@ import {
   policzNagrode,
   jednostkiZDziennika,
   jednostkiZMeczow,
-  punktyRozwojuNaEkranie,
   jednostkiZOdpowiedziKontrolnych,
   zrodloSesji,
   zrodloNieczytane,
@@ -673,20 +685,12 @@ type DaneEkranu = {
    * przy każdym renderze, z wierszy, które już są w bazie.
    */
   wejsciaNagrody: WejscieNagrody;
-  /**
-   * ⭐ PLAN-D-F1 15.08.2026 — WSZYSTKIE sesje Bloków tego zawodnika,
-   * BEZ odsiewania po statusie Bloku i BEZ odsiewania po statusie sesji.
-   *
-   * ⛔ TO NIE JEST TO SAMO CO `wydarzeniaDnia` ANI CO `wejscia.kalendarz`:
-   * tamte dwa jadą z odpowiedzi zawężonej do `status in ('scheduled','completed')`,
-   * a praca we wszystkich Blokach MUSI widzieć `cancelled` — zmierzone
-   * 15.08.2026: Blok `completed` ma wszystkie 12 swoich sesji w tym statusie.
-   * Podanie tu zbioru odsianego daje liczbę MNIEJSZĄ OD PRAWDY, czyli dorobek
-   * cofnięty za domknięcie Bloku (N1).
-   *
-   * ⛔ `null` = odczyt się nie udał. Pusta tablica = odczytałem i nic nie ma.
-   */
-  sesjeWszystkichBlokow: BlockEventLike[] | null;
+  // ⭐ PLAN-D-S2 18.08.2026 — POLE `sesjeWszystkichBlokow` ZDJĘTE.
+  // Istniało wyłącznie po to, żeby nakarmić `policzPraceWeWszystkichBlokach`
+  // — a to wywołanie wyszło z tego pliku razem z rysowaniem. Zostawione
+  // byłoby danymi bez konsumenta, czyli tą samą chorobą od drugiej strony.
+  // ⛔ Zbiór PEŁNY (z `cancelled`) czyta dziś `app/(tabs)/ja.tsx` i podaje go
+  // do `components/PracaWLiczbach.tsx`.
 };
 
 type WierszBolu = {
@@ -821,6 +825,12 @@ const KOLEJKA_WCZYTUJE = 'Wczytuję…';
  *  miejsce na to, w którym zawodnik szuka odpowiedzi „co dziś zrobić". */
 const DZIENNIK_CO = 'Zapisz dzisiejszy wpis';
 const DZIENNIK_DLACZEGO = 'Nie masz jeszcze dzisiejszego wpisu.';
+// ⭐ PLAN-D-A1 18.08.2026 — DWA BRAKUJĄCE STANY KAFLA WPISU (R5).
+// ⛔ „Wpis jest" i „nie wiem, czy jest" to dwie różne rzeczy i zawodnik ma je
+// odróżniać po tekście, a nie zgadywać z ciszy. ⛔ Zero pochwały za wpis (N1):
+// zdanie stwierdza fakt i nie gratuluje.
+const DZIENNIK_JEST = 'Dzisiejszy wpis jest zapisany. Możesz go poprawić.';
+const DZIENNIK_NIE_WIEM = 'Nie udało się sprawdzić, czy masz dzisiejszy wpis.';
 
 // ─────────────────────────────────────────────────────────────────────
 // ⭐ PLAN-D-B4 — BRZMIENIA WGLĄDU, KTÓRE DOKŁADA EKRAN
@@ -832,15 +842,12 @@ const DZIENNIK_DLACZEGO = 'Nie masz jeszcze dzisiejszego wpisu.';
 /** Znacznik dla Kuby i dla strażnika. Nie usuwać do czasu zatwierdzenia brzmień. */
 const BRZMIENIE_DO_PRZEJRZENIA_B4 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-B4, 14.08.2026)';
 
-/**
- * Nagłówek trzeciej części wglądu. ⚠️ Ten sam kształt, co „CO DZIŚ ZROBIĆ" /
- * „DLACZEGO AKURAT TO" / „CO TO ZMIENI" — bo to jest część TEJ SAMEJ karty,
- * a nie nowy kafelek.
- */
-const WGLAD_DO_ZROBIENIA = 'JEDNA RZECZ DO ZROBIENIA';
-/** WG-34 — oś pomiarów. Głębokość 1: jedno dotknięcie, bez opuszczania ekranu (P0). */
-const OS_POKAZ = 'Pokaż pomiary';
-const OS_UKRYJ = 'Ukryj pomiary';
+// ⭐ PLAN-D-S2 18.08.2026 — TRZY MARTWE KOPIE BRZMIEŃ WGLĄDU SKREŚLONE:
+// `WGLAD_DO_ZROBIENIA`, `OS_POKAZ`, `OS_UKRYJ`. ⛔ Nie znikły z produktu —
+// żyją co do znaku w `components/WgladPozycji.tsx`, czyli w JEDYNEJ kopii
+// rysowania trzeciej części wglądu (pas S1). Tutaj były drugą kopią,
+// zamrożoną z komentarzem „dług do skreślenia"; dwie kopie brzmienia
+// rozjeżdżają się przy pierwszej poprawce, a każda z osobna wygląda poprawnie.
 
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-B5 08.2026 (15.08.2026) — BRZMIENIA KARTY I LICZNIKA.
@@ -853,54 +860,15 @@ const BRZMIENIE_DO_PRZEJRZENIA_B5 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-B5, 15.0
 const KARTA_ZAKRES_DZIS = 'Dziś';
 const KARTA_ZAKRES_TYDZIEN = 'Tydzień';
 
-/** Okno licznika pracy. Jedna liczba, jedno miejsce — WG-28 mówi o 14 dniach. */
-const OKNO_LICZNIKA_DNI = 14;
-
-/** Nagłówek licznika. Ten sam kształt, co pozostałe nadtytuły tej karty. */
-const LICZNIK_NAGLOWEK = 'WYKONANA PRACA';
-
-/**
- * ⭐ ZDANIE STANU `policzony`.
- *
- * ⚠️ TRZECIA OSOBA JEST TREŚCIĄ, NIE STYLEM. „2 z 3 sesji odbyte" opisuje
- * NASZĄ WIEDZĘ; „Odbyłeś 2 z 3" jest zdaniem o zawodniku — a `nieodbyte`
- * zawiera dziś także sesje ODWOŁANE, których zawodnik nie opuścił. Druga
- * osoba przypisałaby mu więc cudzą decyzję jako własną porażkę (Z0).
- * Ta sama zasada, co przy plakietkach pasa C1: produkt opisuje, co wie.
- */
-const LICZNIK_POLICZONY = (odbyte: number, mianownik: number, oknoDni: number) =>
-  `${odbyte} z ${mianownik} sesji odbyte · ostatnie ${oknoDni} dni`;
-
-/**
- * ⭐ ZDANIE STANU `brak_podstawy` — ⛔ INNA STAŁA, NIE TA SAMA Z ZEREM.
- *
- * ⛔ TU NIE MA I NIE MOŻE BYĆ „0 z 0". Kształt `brak_podstawy` świadomie nie
- * ma pól `odbyte` ani `mianownik` (pas D1), więc zera nie da się nawet
- * przypadkiem narysować — a zdanie „0 z 0" wygląda jak pomiar i nim nie jest.
- * Ten stan mówi, CZEGO BRAKUJE, a nie ile czego zrobiono.
- */
-const LICZNIK_BRAK_PODSTAWY = (bezWpisu: number, nieodczytane: number) => {
-  if (bezWpisu > 0 && nieodczytane > 0) {
-    return `${bezWpisu} sesji bez wpisu i ${nieodczytane} nieodczytanych — nie wiem, które się odbyły.`;
-  }
-  if (bezWpisu > 0) return `${bezWpisu} sesji bez wpisu — nie wiem, które się odbyły.`;
-  if (nieodczytane > 0) return `${nieodczytane} sesji nie udało mi się odczytać — nie wiem, które się odbyły.`;
-  return 'Nie masz w kalendarzu ani jednej sesji z ostatnich dwóch tygodni.';
-};
-
-/** Trzecia liczba WG-28 — „bez wpisu" JAWNIE, i jawnie POZA licznikiem. */
-const LICZNIK_BEZ_WPISU = (ile: number) =>
-  `${ile} bez wpisu — nie liczą się ani do jednej z tych liczb.`;
-const LICZNIK_NIEODCZYTANE = (ile: number) =>
-  `${ile} nie udało mi się odczytać — też są poza licznikiem.`;
-
-/**
- * ⭐ M4 — LICZBA KOŃCZY SIĘ RZECZĄ DO ZROBIENIA. „2 z 3" bez wyjścia jest oceną.
- * Obie prowadzą do Kalendarza, bo tam mieszka zapis werdyktu (pas D1) i tam
- * planuje się sesję. ⛔ Ten ekran werdyktu NIE ZAPISUJE.
- */
-const LICZNIK_ROBOTA_ZAZNACZ = 'Zaznacz w Kalendarzu, których nie odbyłeś →';
-const LICZNIK_ROBOTA_ZAPLANUJ = 'Zaplanuj kolejną sesję w Kalendarzu →';
+// ⭐ PLAN-D-S2 18.08.2026 — OSIEM MARTWYCH BRZMIEŃ LICZNIKA SKREŚLONYCH:
+// `OKNO_LICZNIKA_DNI`, `LICZNIK_NAGLOWEK`, `LICZNIK_POLICZONY`,
+// `LICZNIK_BRAK_PODSTAWY`, `LICZNIK_BEZ_WPISU`, `LICZNIK_NIEODCZYTANE`,
+// `LICZNIK_ROBOTA_ZAZNACZ`, `LICZNIK_ROBOTA_ZAPLANUJ`.
+// ⛔ NIE ZNIKŁY Z PRODUKTU — stoją CO DO ZNAKU w `components/PracaWLiczbach.tsx`
+// (Profil → „Skąd to wiemy"), razem z jedynym miejscem, które je rysuje.
+// Od 18.08 rano były tu martwe: pas A1 zdjął `renderLicznikPracy`, a brzmienia
+// zostały jako druga kopia bez widza. Strażnik `lib/kartaDzisILicznik.selftest.ts`
+// pyta od dziś o kopię ŻYWĄ.
 
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-C4 — BRZMIENIA NAGRODY ZA PRACĘ.
@@ -996,46 +964,58 @@ const KARTA_TYDZIEN_NIEODCZYTANY =
  * ⛔ PUNKT OSI BEZ CZYTELNEJ DATY NIE JEST RYSOWANY. `dataPoPolsku` oddaje
  * wtedy `null`, a surowe „2026-13-45" na ekranie jest gorsze niż brak punktu.
  */
-function WgladPozycji({ wglad }: { wglad: Wglad | null }) {
-  const [osWidoczna, setOsWidoczna] = useState(false);
-  if (wglad === null) return null;
+// ⛔ ZDJĘTE 18.08.2026 (pas A1): komponent `WgladPozycji` razem z osią pomiarów
+// (WG-34). Rysował trzecią część wglądu — „jedna rzecz do zrobienia" (M4) —
+// pod pozycją kolejki na „Dziś". Zmierzone: sam ten blok niósł 330 dp z 927,
+// czyli ponad jedną trzecią ekranu, który ma się zmieścić w 850.
+// ⭐ Inwentarz A1 §1.3 kieruje go na „Profil → Skąd to wiemy"; postawienie go
+// tam należy do pasa A3. ⛔ Nic nie zniknęło bez śladu: pełny kod stoi
+// w `git show 70e00d7:"app/(tabs)/dzis.tsx"`, linie 999–1039, a wiersz
+// „zdjęte · dlaczego · co stoi w tym miejscu" — w nocie przekazania A1.
 
-  const punkty = wglad.os
-    .map((p) => ({ data: dataPoPolsku(p.dzien), wartosc: p.wartosc, jednostka: p.jednostka }))
-    .filter((p): p is { data: string; wartosc: number; jednostka: string } => p.data !== null);
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ PLAN-D-A1 08.2026 (18.08.2026) — BRZMIENIA EKRANU „DZIŚ / TYDZIEŃ"
+//
+// ⛔ ZERO SŁÓW OCENIAJĄCYCH PRACĘ ZAWODNIKA. Ani jedno z tych zdań nie liczy
+// dni z rzędu (N1), nie porównuje z nikim (N3) i nie chwali za samo wejście.
+// ⚠️ Brzmienia przepisane z makiety v3 (`ekranDzien`, `arkuszPlus`) — nowe
+// jest tylko to, co makieta zostawiła w HTML-u, a nie w produkcie.
+// ═══════════════════════════════════════════════════════════════════
+const ETYKIETA_TWOJ_DZIEN = 'Twój dzień';
+const KAFEL_CZEKA_NA_OCENE = 'czeka na Twoją ocenę';
+const WIERSZ_BEZ_OCENY = (ile: number) =>
+  `Bez oceny: ${ile} ${ile === 1 ? 'rzecz' : 'rzeczy'} →`;
+const PRZYPIS_OCENA_NALEZY_DO_RZECZY =
+  'Ocena należy do rzeczy: dotykasz kafla i mówisz, jak poszło.';
+const ARKUSZ_JUZ_OCENIONE =
+  'Ta rzecz nie czeka już na ocenę. Nic nie przepadło — wpis jest zapisany.';
+const ARKUSZ_NIC_BEZ_OCENY = 'Sprawdziłem i nie ma tu ani jednej rzeczy bez oceny.';
+// ⛔ TRZECI STAN (R5): awaria odczytu NIE JEST pustką i ma własne zdanie.
+const ARKUSZ_NIE_ODCZYTANE =
+  'Nie udało się sprawdzić, o co zapytać. Nie powiem Ci, że nic nie czeka — '
+  + 'nie wiem tego. Pociągnij ekran w dół, żeby spróbować jeszcze raz.';
+const MECZ_WIECEJ_OTWORZ = 'Powiedz więcej o tym meczu →';
+const PLUS_ETYKIETA = 'Dodaj do kalendarza';
+const PLUS_W_PRZYSZLOSCI = 'Coś, co dopiero będzie';
+const PLUS_W_PRZYSZLOSCI_PODPIS =
+  'mecz w sobotę, sparing, stały trening — stanie w dniu i poczeka na ocenę';
+const PLUS_JUZ_SIE_ODBYLO = 'Już się odbyło';
+const PLUS_JUZ_SIE_ODBYLO_PODPIS =
+  'wczorajszy trening, którego nie było w planie — wpadnie do kalendarza wstecz';
+const PLUS_DODAJ_NOWE = 'Dodaj nowe wydarzenie →';
 
-  return (
-    <View style={styles.wgladCzesc}>
-      <Text style={styles.odpowiedzNaglowek}>{WGLAD_DO_ZROBIENIA}</Text>
-      <Text style={styles.wgladDoZrobienia}>{wglad.doZrobienia}</Text>
+/**
+ * ⭐ CO WŁAŚNIE STOI NAD EKRANEM. ⛔ `null` znaczy „nic" — arkusz nie ma
+ * stanu „otwarty, ale pusty".
+ */
+type StanArkusza =
+  | { rodzaj: 'ocena'; klucz: string }
+  | { rodzaj: 'oceny' }
+  | { rodzaj: 'meczWiecej'; tytul: string }
+  | { rodzaj: 'plus' }
+  | { rodzaj: 'kolizja' }
+  | null;
 
-      {/* ── GŁĘBOKOŚĆ 1: OŚ POMIARÓW (WG-34) ────────────────────────── */}
-      {/* ⛔ Przełącznik rysuje się WYŁĄCZNIE wtedy, gdy oś naprawdę ma punkty.
-          Pusty przycisk „Pokaż pomiary", po którym nic się nie pokazuje, jest
-          obietnicą bez pokrycia — a wgląd bez osi to poprawny stan, nie defekt. */}
-      {punkty.length > 0 ? (
-        <>
-          <TouchableOpacity
-            style={styles.inlineLink}
-            onPress={() => setOsWidoczna((x) => !x)}
-            accessibilityRole="button"
-          >
-            <Text style={styles.cardAction}>{osWidoczna ? OS_UKRYJ : OS_POKAZ}</Text>
-          </TouchableOpacity>
-          {osWidoczna ? punkty.map((p) => (
-            <Text key={p.data} style={styles.osPunkt}>
-              {p.data}
-              {'  ·  '}
-              {liczbaPoPolsku(p.wartosc)}
-              {' '}
-              {p.jednostka}
-            </Text>
-          )) : null}
-        </>
-      ) : null}
-    </View>
-  );
-}
 
 function dayCodeFor(date: Date) {
   const idx = (date.getDay() + 6) % 7; // 0=Pon..6=Nd — ta sama konwencja co lib/date-utils.ts
@@ -1083,6 +1063,9 @@ export default function DzisScreen() {
    * odpowiedzi na listę.
    */
   const [zakresKarty, setZakresKarty] = useState<'dzis' | 'tydzien'>('dzis');
+  // ⭐ PLAN-D-A1 — ARKUSZ. ⛔ Jeden stan na całą nakładkę: dwa arkusze naraz
+  // to dwa okna nad sobą, z których zawodnik nie umie wyjść w jednym ruchu.
+  const [arkusz, setArkusz] = useState<StanArkusza>(null);
   /**
    * ⭐ PLAN-D-D2 — KTÓRE WYSTĄPIENIE JEST WŁAŚNIE ZAPISYWANE. Klucz
    * `(id, dzien)`, `null` = nic nie leci. ⚠️ Nie `boolean`: przy dwóch
@@ -1903,32 +1886,16 @@ export default function DzisScreen() {
       scheduledEvents: events === null ? [] : events,
       // ⭐ DYSKRYMINATOR pasa A1. `null` (odczyt powiązań padł) daje pusty
       // zbiór, czyli NIE_WIEM — jedyny stan, który jest wtedy prawdziwy.
-      // Powodu NIE_WIEM ekran w tym stanie nie rysuje (patrz `renderPracaWBlokach`),
-      // bo zdanie „żaden wpis nie jest jeszcze połączony" byłoby twierdzeniem
-      // o zawodniku postawionym po odczycie, którego nie było.
+      // Powodu NIE_WIEM ten ekran nie rysuje wcale: od 18.08 stan postępu Bloku
+      // karmi tu WYŁĄCZNIE `maAktywnyBlok` w jednej odpowiedzi, a zdanie
+      // o powodzie stoi tam, gdzie stoi liczba — `components/PracaWLiczbach.tsx`.
       doneEventIds: wpisyDziennikaIds === null ? new Set<number>() : new Set(wpisyDziennikaIds),
     }));
 
-    // (2) PRACA WE WSZYSTKICH BLOKACH — liczba, której nic nie kasuje.
-    //
-    // ⛔ ZBIÓR MUSI BYĆ PEŁNY: bez odsiewania po statusie Bloku I bez
-    // odsiewania po statusie sesji. Zmierzone 15.08.2026 na produkcji: Blok
-    // `completed` ma wszystkie 12 sesji w statusie `cancelled`, więc każdy
-    // z tych dwóch filtrów Z OSOBNA wystarczy, żeby czterotygodniowa praca
-    // zniknęła z ekranu. Dlatego źródłem jest `tydzienRes` (zapytanie BEZ
-    // filtra statusu), rozszerzone w tym pasie o kolumnę `focus_block_id`.
-    //
-    // ⚠️ NAZWA ZMIENNEJ JEST CZĘŚCIĄ OBRONY, nie ozdobą: asercja `(E2-6)`
-    // w `lib/focusBlockProgress.selftest.ts` czyta argument tego wywołania
-    // i zapala się, gdy trafi w nim na `scheduled`, `active` czy `aktywn`.
-    const sesjeWszystkichBlokow: BlockEventLike[] | null =
-      tydzienRes.error || !Array.isArray(tydzienRes.data)
-        ? null
-        : (tydzienRes.data as unknown as { id: number; focus_block_id: string | null }[])
-          .map((e) => ({ id: e.id, focus_block_id: e.focus_block_id ?? null }));
-    if (sesjeWszystkichBlokow === null) {
-      console.warn(opisBleduOdczytuDoLogu('dzis.load → sesje wszystkich Bloków', tydzienRes.error));
-    }
+    // ⭐ PLAN-D-S2 18.08.2026 — ODCZYT SESJI WSZYSTKICH BLOKÓW ZDJĘTY STĄD
+    // razem z jedynym wywołaniem, które go używało. ⛔ Zbiór PEŁNY (z sesjami
+    // `cancelled`, bez których praca w domkniętym Bloku znika) czyta dziś
+    // `app/(tabs)/ja.tsx` i podaje go do `components/PracaWLiczbach.tsx`.
     // ⬆⬆⬆ WEJŚCIA TYGODNIA I LICZNIKA — KONIEC ⬆⬆⬆
 
     // ═══════════════════════════════════════════════════════════════
@@ -2079,10 +2046,6 @@ export default function DzisScreen() {
       werdykty: werdyktyWe,
       // ⭐ PLAN-D-C4 — WEJŚCIA, NIE WYNIK. Liczby powstają w `useMemo` niżej.
       wejsciaNagrody,
-      // ⭐ PLAN-D-F1 — WEJŚCIE, NIE WYNIK, z tego samego powodu co wyżej:
-      // liczba wyliczona w `load()` i przechowana w stanie jest drugą kopią
-      // prawdy, która rozjeżdża się przy pierwszym renderze z innym wejściem.
-      sesjeWszystkichBlokow,
     }));
     // ⬆⬆⬆ WEJŚCIA KOLEJKI — KONIEC ⬆⬆⬆
   }, [currentUser, markShownAsViewed, loadHint, loadNewDose]);
@@ -2178,47 +2141,13 @@ export default function DzisScreen() {
   /** Bieżący tydzień — ten, który rysuje przełącznik. Zawsze ostatni z trzech. */
   const tydzienBiezacy: Tydzien | null = tygodnie.length > 0 ? tygodnie[tygodnie.length - 1] : null;
 
-  /**
-   * ⭐ LICZNIK PRACY — pierwszy konsument `policzWykonanaPrace` w całej appce.
-   *
-   * Wystąpienia bierzemy z tych samych trzech tygodni, więc reguła rozwijania
-   * cyklicznej stoi w jednym miejscu. `status` dokładamy z surowego wiersza:
-   * `PozycjaDnia` go nie niesie, bo widok tygodnia potrzebuje stanu, nie
-   * statusu — a licznik potrzebuje obu.
-   *
-   * ⛔ NIE FILTRUJEMY OKNA TUTAJ. `policzWykonanaPrace` ma własne okno
-   * `[dziś − 13, dziś]` i sam odcina przyszłość. Drugie odcinanie na ekranie
-   * byłoby drugą kopią granicy okna — i pierwszą rzeczą, która by się z nią
-   * rozjechała przy zmianie `oknoDni`.
-   */
-  const licznik: LicznikPracy | null = useMemo(() => {
-    if (dane === null || dzisNapis === null) return null;
-    const statusy = new Map<number, string>();
-    const surowe = dane.wydarzeniaTygodnia;
-    if (surowe !== null) for (const w of surowe) statusy.set(w.id, w.status);
-
-    const wystapienia: WystapienieDoLicznika[] | null = surowe === null
-      ? null
-      : tygodnie.flatMap((t) => t.dni.flatMap((d) => d.pozycje.map((p) => ({
-        idWydarzenia: p.id,
-        dzien: p.dzien,
-        // ⚠️ Wiersz, którego nie ma w mapie, nie istnieje — ale gdyby kiedyś
-        // zaistniał, `''` NIE jest żadnym ze statusów bazy, więc reguła
-        // potraktuje go jako „nie odwołany i nie completed", czyli najostrożniej.
-        status: statusy.get(p.id) ?? '',
-        zRegulyCyklicznej: p.zRegulyCyklicznej,
-      }))));
-
-    return policzWykonanaPrace({
-      dzis: dzisNapis,
-      oknoDni: OKNO_LICZNIKA_DNI,
-      wystapienia,
-      wpisyDziennika: dane.wpisyDziennika,
-      werdykty: dane.werdykty,
-    });
-  }, [dane, dzisNapis, tygodnie]);
-
-  if (licznik !== null) console.log(`dzis: ${opisLicznikaDoLogu(licznik)}`);
+  // ⭐ PLAN-D-S2 18.08.2026 — MEMO LICZNIKA PRACY ZDJĘTE Z TEGO PLIKU.
+  // Do dziś stało tutaj, wołało `policzWykonanaPrace` i oddawało wynik
+  // WYŁĄCZNIE do `console.log` — bo pas A1 zdjął z ekranu `renderLicznikPracy`
+  // i nie postawił go nigdzie indziej. To był producent bez konsumenta, czyli
+  // dokładnie to, czego zakazuje (F1-2). Licznik liczy się od dziś TAM, GDZIE
+  // się rysuje: `components/PracaWLiczbach.tsx`, Profil → „Skąd to wiemy".
+  // ⛔ Ani jednego dp mniej ani więcej na tym ekranie: nic tu nie było rysowane.
 
   /**
    * ⭐ PLAN-D-D2 15.08.2026 — O CO PRODUKT MA DZIŚ ZAPYTAĆ.
@@ -2564,31 +2493,10 @@ export default function DzisScreen() {
 
   if (nagroda !== null) console.log(`dzis: ${opisNagrodyDoLogu(nagroda)}`);
 
-  /**
-   * ⭐ PLAN-D-F1 15.08.2026 — PRACA WE WSZYSTKICH BLOKACH.
-   *
-   * ⛔ WYLICZANA W `useMemo` Z WEJŚĆ, nie czytana z kolumny stanu — z tego
-   * samego powodu, co dorobek pasa C4: liczba trzymana w stanie jest liczbą,
-   * którą da się nie zaktualizować albo wyzerować, a ta liczba NIE MA PRAWA
-   * ZMALEĆ. Tu nie ma czego zerować: powstaje przy każdym renderze z wierszy,
-   * które już są w bazie.
-   *
-   * ⛔ JEDEN ARGUMENT, jak przy `policzNagrode`: funkcja nie przyjmuje ani
-   * listy Bloków, ani statusu, ani daty — i to jest cała jej obrona.
-   */
-  const pracaWBlokach: DorobekWBlokach | null = useMemo(
-    () => (dane === null ? null : policzPraceWeWszystkichBlokach({
-      wszystkieSesjeBlokow: dane.sesjeWszystkichBlokow,
-      zrobioneEventIds: dane.wpisyDziennika,
-    })),
-    [dane],
-  );
-
-  if (pracaWBlokach !== null) {
-    console.log(`dzis: [PLAN-D-F1] praca w Blokach — ${pracaWBlokach.rodzaj === 'policzony'
-      ? `${pracaWBlokach.sesje} sesji w ${pracaWBlokach.bloki} Blokach`
-      : `NIE POLICZONA, nie odczytałem: ${pracaWBlokach.nieodczytaneZrodlo}`}`);
-  }
+  // ⭐ PLAN-D-S2 18.08.2026 — MEMO PRACY WE WSZYSTKICH BLOKACH ZDJĘTE STĄD.
+  // Ten sam powód, co przy liczniku: pas A1 zdjął `renderPracaWBlokach`
+  // (~120 dp), a wywołanie zostało i szło do `console.log`. Liczba i jej
+  // rysowanie stoją od dziś razem w `components/PracaWLiczbach.tsx`.
 
   // PIERWSZE URUCHOMIENIE 10.08.2026 — stan „zawodnik zero": ani diagnozy,
   // ani Celu. Świadomie WYMAGA OBU warunków: kto zdążył założyć Cel sam,
@@ -2944,10 +2852,21 @@ export default function DzisScreen() {
     // sieci wyglądałaby jak siedem dni bez nic — czyli jak nieprawda o tym,
     // co zawodnik ma zaplanowane (Z0).
     if (tydzienBiezacy === null || !tydzienBiezacy.odczyt.wydarzenia) {
-      return <Text style={styles.cardBody}>{KARTA_TYDZIEN_NIEODCZYTANY}</Text>;
+      return (
+        <View style={styles.card}>
+          <Text style={styles.cardBody}>{KARTA_TYDZIEN_NIEODCZYTANY}</Text>
+        </View>
+      );
     }
     return (
-      <>
+      /* ⭐ PLAN-D-A1 18.08.2026 — KARTA WCHODZI DO TEJ FUNKCJI, a gałąź na
+         ekranie jest GOŁYM WYWOŁANIEM (`renderTydzienNaKarcie()`), tak jak
+         w `app/(tabs)/kalendarz.tsx`. ⛔ To nie jest kosmetyka: miara
+         (`lib/wysokoscEkranu.ts`) umie NAZWAĆ pominiętą gałąź tylko wtedy,
+         gdy jest ona wywołaniem po nazwie. Owinięta w `<View>` wypadała
+         z raportu BEZ ŚLADU razem z siedmioma wierszami dni — czyli dokładnie
+         ten cichy brak, którego pilnuje asercja (M2-13, O97). */
+      <View style={styles.card}>
         <Text style={styles.kartaTydzienZakres}>{tydzienBiezacy.zakresDat}</Text>
         {/* ⚠️ Zdanie nad tygodniem POWSTAJE ALBO NIE POWSTAJE — nigdy nie
             jest ogólne. `zbudujZdanie` oddaje `null`, gdy nie ma czego
@@ -2956,7 +2875,7 @@ export default function DzisScreen() {
           ? <Text style={styles.kartaTydzienZdanie}>{tydzienBiezacy.zdanie.podsumowanie}</Text>
           : null}
         {tydzienBiezacy.dni.map(renderWierszDnia)}
-      </>
+      </View>
     );
   }
 
@@ -3126,7 +3045,28 @@ export default function DzisScreen() {
     );
   }
 
-  function renderPytaniaOWystapienia() {
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-A1 18.08.2026 — TEN SAM RENDER, NOWE MIEJSCE (A2).
+  //
+  // ⚠️ CO SIĘ TU ZMIENIŁO I DLACZEGO. Do 18.08.2026 ta funkcja była wołana
+  // WEWNĄTRZ karty kalendarza, pod przełącznikiem, pod listą dnia i nad
+  // trzema licznikami. Miara `lib/wysokoscEkranu.ts` postawiła pytanie
+  // „ZROBIŁEŚ?" na 4 663 dp od górnej krawędzi — pięć i pół ekranu
+  // przewijania. Silnik był gotowy i podłączony (`lib/ocenaZKafla.ts`,
+  // `krokiOceny`, `sciezkaUsuniecia`, `rozstrzygnijPowod`), a mimo to
+  // `session_verdicts` miało JEDEN wiersz w całej bazie.
+  //
+  // ⛔ SILNIK NIE ZOSTAŁ TKNIĘTY — `lib/ocenaZKafla.ts` nie ma w tym pasie
+  // ani jednej zmiany. Zmieniło się WYŁĄCZNIE miejsce wywołania: z karty
+  // NA ekranie → do `<Arkusz>` NAD ekranem. To jest przeniesienie, nie budowa.
+  //
+  // ⭐ JEDEN ARGUMENT, DWA WEJŚCIA. `renderPytaniaOWystapienia()` bez
+  // argumentu rysuje WSZYSTKO, co czeka („Bez oceny: 3 rzeczy"); z kluczem
+  // rysuje DOKŁADNIE JEDNĄ rzecz — tę, której kafel zawodnik dotknął.
+  // ⛔ To jest ten sam kod i ten sam filtr; druga kopia znaczyłaby, że kafel
+  // i wiersz zbiorczy mogą po cichu zacząć pytać o co innego.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderPytaniaOWystapienia(tylkoKlucz?: string) {
     if (pytania === null) return null;
 
     // ⛔ ZAKAZ 6, GAŁĄŹ AWARII — STOI PRZED KAŻDYM `return null`, żeby nie
@@ -3155,24 +3095,33 @@ export default function DzisScreen() {
     // jest prawdziwe i bezwartościowe: zawodnik nie ma z nim co zrobić.
     if (pytania.rodzaj !== 'pytania') return null;
 
+    const doNarysowania = tylkoKlucz === undefined
+      ? pytania.pytania
+      : pytania.pytania.filter((p) => p.klucz === tylkoKlucz);
+    // ⛔ NIE OTWIERAMY PUSTEGO OKNA. Rzecz mogła zostać oceniona w międzyczasie
+    // — wtedy arkusz mówi to wprost, zamiast pokazywać puste miejsce.
+    if (doNarysowania.length === 0) {
+      return <Text style={styles.cardBody}>{ARKUSZ_JUZ_OCENIONE}</Text>;
+    }
+
     return (
       <View style={styles.licznikCzesc}>
         <Text style={styles.odpowiedzNaglowek}>{PYTANIE_NAGLOWEK}</Text>
-        {pytania.pytania.map((p) => {
+        {doNarysowania.map((p) => {
           const wybrane = p.stan.rodzaj === 'odpowiedziane' ? p.stan.werdykt : null;
           const leci = zapisWerdyktu === p.klucz;
+          const mecz = faktyPozycji(p.idWydarzenia).eventType === 'match';
           return (
             <View key={p.klucz} style={styles.pytanieWiersz}>
-              {/* ⭐ ZDANIE PYTAJĄCE — jedyne nowe brzmienie tego pasa.
-                  Rozstrzyga je `lib/pytanieOWystapienie.ts`, nie ten plik. */}
+              {/* ⭐ ZDANIE PYTAJĄCE — rozstrzyga je `lib/pytanieOWystapienie.ts`,
+                  nie ten plik. */}
               <Text style={styles.licznikLiczba}>{p.zdanie}</Text>
-              {/* ⛔ PLAN-D-K1 — TA LISTA MA ZOSTAĆ DWUELEMENTOWA I TO JEST
-                  JAWNA DECYZJA, NIE PRZEOCZONA GAŁĄŹ (D7). To są wartości
-                  `WartoscWerdyktu` — tego, co ZAWODNIK może o sobie
-                  powiedzieć — a nie `StanWykonania`. Piąta wartość stanu
-                  (`odwolane`) jest FAKTEM O PLANIE i ⛔ NIE WOLNO jej tu
-                  dokładać: przycisk „Odwołane" prosiłby zawodnika, żeby
-                  oświadczył coś, czego nie zrobił i czego nie wie. */}
+              {/* ⛔ PLAN-D-K1 — TA LISTA MA ZOSTAĆ DWUELEMENTOWA I TO JEST JAWNA
+                  DECYZJA (D7). To są wartości `WartoscWerdyktu` — tego, co
+                  ZAWODNIK może o sobie powiedzieć — a nie `StanWykonania`.
+                  Piąta wartość stanu (`odwolane`) jest FAKTEM O PLANIE i ⛔ NIE
+                  WOLNO jej tu dokładać: przycisk „Odwołane" prosiłby zawodnika,
+                  żeby oświadczył coś, czego nie zrobił i czego nie wie. */}
               <View style={styles.pytanieOdpowiedzi}>
                 {(['odbylo_sie', 'nie_odbylo_sie'] as const).map((w) => (
                   <TouchableOpacity
@@ -3191,13 +3140,23 @@ export default function DzisScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
-              {/* ⭐ PLAN-D-O1 — TU JEST CAŁA RÓŻNICA WOBEC PASA D2. Do dziś
-                  pytanie kończyło się na dwóch przyciskach; teraz pod
-                  odpowiedzią stoją trzy kroki, wszystkie zwinięte i wszystkie
-                  dobrowolne. ⛔ Zawodnik, który zamknie appkę po pierwszym
-                  dotknięciu, zostawia po sobie ODPOWIEDŹ, nie porzucony
-                  formularz — i to jest decyzja D2, a nie układ ekranu. */}
+              {/* ⭐ PLAN-D-O1 — trzy kroki zwinięte pod odpowiedzią, wszystkie
+                  dobrowolne. ⛔ Zawodnik, który zamknie arkusz po pierwszym
+                  dotknięciu, zostawia po sobie ODPOWIEDŹ, nie porzucony formularz. */}
               {renderKrokiOceny(p)}
+              {/* ⭐ DECYZJA KUBY 18.08 (M1 §3) — RESZTA PYTAŃ O MECZ MA WEJŚCIE
+                  Z TEGO SAMEGO KAFLA. ⛔ To wejście musiało powstać ZANIM zniknęła
+                  zakładka „Mecz": do 18.08 `app/(tabs)/mecz.tsx` (961 linii) miał
+                  ZERO `router.push('/mecz')` w całym repozytorium, więc zdjęcie
+                  zakładki skasowałoby jedyne wejście do `match_contexts`. */}
+              {mecz ? (
+                <TouchableOpacity
+                  style={styles.inlineLink}
+                  onPress={() => setArkusz({ rodzaj: 'meczWiecej', tytul: p.tytul })}
+                >
+                  <Text style={styles.cardAction}>{MECZ_WIECEJ_OTWORZ}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           );
         })}
@@ -3212,228 +3171,161 @@ export default function DzisScreen() {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // ⭐ PLAN-D-B5, B5.3 — LICZNIK PRACY NA EKRANIE.
-  //
-  // CZTERY ZAKAZY, KAŻDY Z POWODEM (§6 polecenia):
-  //
-  //  1. ⛔ `brak_podstawy` NIE RYSUJE SIĘ JAKO „0 z 0" ANI JAKO „0". Prowadzi
-  //     do INNEJ STAŁEJ (`LICZNIK_BRAK_PODSTAWY`), mówiącej, CZEGO BRAKUJE.
-  //     Kształt danych celowo nie ma pól `odbyte` ani `mianownik` — i nie
-  //     dorabiamy ich tutaj.
-  //  2. ⛔ LICZNIK NIE ZERUJE SIĘ I NIE LICZY DNI Z RZĘDU (N1). Nie ma tu
-  //     ani jednego warunku zerującego, bo cała arytmetyka siedzi w czystej
-  //     funkcji, a ta nie zna pojęcia serii.
-  //  3. ⛔ „BEZ WPISU" NIE WCHODZI DO MIANOWNIKA — pilnuje tego funkcja,
-  //     a ekran ma tego NIE OBCHODZIĆ. Rysujemy `bezWpisu` jako TRZECIĄ,
-  //     osobną liczbę i mówimy wprost, że nie liczy się do żadnej z dwóch.
-  //  4. ⭐ LICZBA KOŃCZY SIĘ RZECZĄ DO ZROBIENIA (M4). „2 z 3" bez wyjścia
-  //     jest oceną, nie pomocą.
+  // ⭐ PLAN-D-A1 — CO ARKUSZ MA W ŚRODKU
   // ═══════════════════════════════════════════════════════════════════
-  function renderLicznikPracy() {
-    if (licznik === null) return null;
+  const pytaniaLista: readonly Pytanie[] =
+    pytania !== null && pytania.rodzaj === 'pytania' ? pytania.pytania : [];
+  /** ⛔ „Bez oceny" to `pytam`, nie „wszystkie" — odpowiedziane już nie proszą. */
+  const bezOceny = pytaniaLista.filter((p) => p.stan.rodzaj === 'pytam');
+  /**
+   * ⭐ DZIEŃ, O KTÓRY PYTA ŚCIEŻKA „+", BIERZE SIĘ Z PYTAŃ — nie z arytmetyki
+   * dat na ekranie. ⛔ To nie jest wygoda: okno „wczoraj i dziś" jest REGUŁĄ
+   * (`lib/pytanieOWystapienie.ts`) i druga jego kopia tutaj rozjechałaby się
+   * z pierwszą przy pierwszej poprawce — a ekran nadal wyglądałby poprawnie.
+   * `kiedy` przychodzi z reguły; ten plik go tylko CZYTA.
+   */
+  const wczorajszeBezOceny = bezOceny.filter((p) => p.kiedy === 'wczoraj');
+  /**
+   * ⛔ TRZY WARTOŚCI, NIE DWIE (R5). `null` znaczy „NIE ODCZYTALIŚMY pytań",
+   * pusta tablica — „odczytaliśmy i nic tam nie ma". Sklejenie ich kazałoby
+   * produktowi twierdzić, że dzień był pusty, o dniu, którego nie sprawdził (Z0).
+   */
+  const nieocenioneWczoraj: PozycjaBezOceny[] | null =
+    pytania === null || pytania.rodzaj === 'nie_wiem'
+      ? null
+      : wczorajszeBezOceny.map((p) => ({
+        idWydarzenia: p.idWydarzenia, tytul: p.tytul, godzina: p.godzina,
+      }));
+  /**
+   * ⭐ A5 — BRAMKA ŚCIEŻKI „+". Decyzja jest CZYSTĄ FUNKCJĄ
+   * (`lib/dodanieWstecz.ts`), ten ekran ją WYKONUJE.
+   */
+  const stanDodania = sprawdzPrzedDodaniem({
+    data: wczorajszeBezOceny[0]?.dzien ?? null,
+    dzis: dzisNapis ?? '',
+    nieocenione: nieocenioneWczoraj,
+  });
+  console.log(`dzis: [A5] ${stanDodania.powod}`);
 
-    // ⚠️ Wyjście dobiera się do TEGO, CZEGO BRAKUJE, a nie do stanu licznika:
-    // przy sesjach bez wpisu brakuje rozstrzygnięcia (a to robi się w
-    // Kalendarzu), a bez sesji brakuje sesji.
-    const doZrobienia = licznik.bezWpisu > 0 ? LICZNIK_ROBOTA_ZAZNACZ : LICZNIK_ROBOTA_ZAPLANUJ;
+  const naglowekOtwartego = arkusz === null ? null : naglowekArkusza(
+    arkusz.rodzaj,
+    arkusz.rodzaj === 'ocena'
+      ? (pytaniaLista.find((q) => q.klucz === arkusz.klucz)?.tytul ?? '')
+      : arkusz.rodzaj === 'meczWiecej' ? arkusz.tytul : '',
+  );
 
-    return (
-      <View style={styles.licznikCzesc}>
-        <Text style={styles.odpowiedzNaglowek}>{LICZNIK_NAGLOWEK}</Text>
-        {licznik.rodzaj === 'policzony' ? (
-          <>
-            <Text style={styles.licznikLiczba}>
-              {LICZNIK_POLICZONY(licznik.odbyte, licznik.mianownik, licznik.oknoDni)}
+  /**
+   * ⭐ WYJŚCIE ZE ŚCIEŻKI „+" DO KALENDARZA — I JEDYNE MIEJSCE, W KTÓRYM
+   * pada zdanie „wolno utworzyć nowe wydarzenie". ⛔ Bramka jest wołana
+   * ZAWSZE, także w gałęzi „nie wiemy" — inaczej byłaby ozdobą.
+   */
+  function przejdzDoDodania(odpowiedz: OdpowiedzNaKolizje) {
+    const brama = wolnoUtworzycWydarzenie(stanDodania, odpowiedz);
+    console.log(`dzis: [A5] wolno utworzyć = ${brama.wolno} — ${brama.powod}`);
+    if (!brama.wolno) return;
+    setArkusz(null);
+    router.push('/kalendarz');
+  }
+
+  function trescArkusza() {
+    if (arkusz === null) return null;
+
+    // ⭐ JEDEN KAFEL — DOKŁADNIE JEDNA RZECZ DO OCENY.
+    if (arkusz.rodzaj === 'ocena') return <>{renderPytaniaOWystapienia(arkusz.klucz)}</>;
+
+    // ⭐ WSZYSTKO, CO CZEKA — wejście z wiersza „Bez oceny: N rzeczy".
+    // ⛔ Wywołanie BEZ ARGUMENTU jest tym samym renderem, nie drugą kopią.
+    if (arkusz.rodzaj === 'oceny') return <>{renderPytaniaOWystapienia()}</>;
+
+    if (arkusz.rodzaj === 'meczWiecej') {
+      return (
+        <>
+          <Text style={styles.cardBody}>{podpisArkuszaMeczu()}</Text>
+          {rzeczyMeczu('arkusz_wiecej').map((r) => (
+            <Text key={r.kolumna} style={styles.arkuszWiersz}>{r.napis}</Text>
+          ))}
+          {/* ⛔ CZEGO PRODUKT NIE UMIE ZAPISAĆ — imiennie, na ekranie.
+              `match_contexts.match_length_minutes` NIE ISTNIEJE (zmierzone
+              18.08.2026), więc arkusz mówi to zamiast pokazywać pole,
+              które nic nie zapisze (Z0). */}
+          {czegoNieUmiemyZapisac().map((r) => (
+            <Text key={`brak-${r.kolumna}`} style={styles.licznikPodpis}>
+              {MECZ_CZEKA_NA_KOLUMNE(r.napis)}
             </Text>
-            {licznik.bezWpisu > 0
-              ? <Text style={styles.licznikPodpis}>{LICZNIK_BEZ_WPISU(licznik.bezWpisu)}</Text>
-              : null}
-            {licznik.nieodczytane > 0
-              ? <Text style={styles.licznikPodpis}>{LICZNIK_NIEODCZYTANE(licznik.nieodczytane)}</Text>
-              : null}
-          </>
-        ) : (
-          <Text style={styles.licznikBrakPodstawy}>
-            {LICZNIK_BRAK_PODSTAWY(licznik.bezWpisu, licznik.nieodczytane)}
-          </Text>
-        )}
-        <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/kalendarz')}>
-          <Text style={styles.cardAction}>{doZrobienia}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // ⭐ PLAN-D-C4, C4.3 — DOROBEK NA EKRANIE. Cztery rzeczy, ani jednej więcej:
-  //
-  //  1. ŁĄCZNA WYKONANA PRACA — liczba, która NIGDY NIE MALEJE. ⛔ Bez zakresu
-  //     czasu, bo zakres czasu jest tym, co pozwala liczbie zmaleć.
-  //  2. ODZNAKI ZDOBYTE, każda z jednym zdaniem: ZA JAKĄ PRACĘ (M4).
-  //     Odznaka bez tego zdania jest naklejką, a nie informacją o kompetencji.
-  //  3. NASTĘPNY PRÓG wyrażony W PRACY — ⛔ NIGDY W DNIACH. „Brakuje Ci
-  //     15 punktów pracy", nigdy „trenuj jeszcze 3 dni".
-  //  4. STAN „NIE UDAŁO SIĘ POLICZYĆ", ODRÓŻNIALNY od „jeszcze nic nie
-  //     zrobiłeś" (R5) — dwie różne stałe, nie ta sama z zerem.
-  //
-  // ⛔ ANI JEDNEGO SŁOWA O DNIACH Z RZĘDU, PASSIE, SERII, „NIE PRZERWIJ".
-  // ⛔ ZERO POWIADOMIEŃ. Odznaka jest DO ZOBACZENIA, gdy zawodnik wejdzie —
-  // nie do zawołania go z powrotem. Nagroda, która zaczepia, jest nagrodą
-  // za obecność w przebraniu.
-  // ⛔ ZERO PORÓWNANIA Z KIMKOLWIEK (N3). Progi są takie same dla wszystkich
-  // i nie mówią, ilu ludzi je zdobyło.
-  // ═══════════════════════════════════════════════════════════════════
-  function renderNagrodaZaPrace() {
-    if (nagroda === null) return null;
-
-    if (nagroda.rodzaj === 'nie_policzona') {
-      return (
-        <View style={styles.licznikCzesc}>
-          <Text style={styles.odpowiedzNaglowek}>{NAGRODA_NAGLOWEK}</Text>
-          <Text style={styles.licznikBrakPodstawy}>{NAGRODA_NIE_POLICZONA(nagroda.powod)}</Text>
-        </View>
+          ))}
+          <TouchableOpacity
+            style={styles.inlineLink}
+            onPress={() => { setArkusz(null); router.push('/mecz'); }}
+          >
+            <Text style={styles.cardAction}>{MECZ_WIECEJ_WEJSCIE}</Text>
+          </TouchableOpacity>
+        </>
       );
     }
 
-    return (
-      <View style={styles.licznikCzesc}>
-        <Text style={styles.odpowiedzNaglowek}>{NAGRODA_NAGLOWEK}</Text>
-
-        {/* (1) ŁĄCZNA WYKONANA PRACA — albo jawne „jeszcze nic", NIE „0". */}
-        {nagroda.punkty > 0 ? (
-          <Text style={styles.licznikLiczba}>{NAGRODA_PUNKTY(nagroda.punkty, nagroda.jednostki)}</Text>
-        ) : (
-          <Text style={styles.licznikBrakPodstawy}>{NAGRODA_JESZCZE_NIC}</Text>
-        )}
-
-        {/* (2) ODZNAKI — każda ze zdaniem, za jaką pracę. */}
-        {nagroda.odznaki.length > 0 ? (
-          <>
-            <Text style={styles.nagrodaPodnaglowek}>{NAGRODA_ODZNAKI_NAGLOWEK}</Text>
-            {nagroda.odznaki.map((o) => (
-              <Text key={o.id} style={styles.nagrodaOdznaka}>
-                {NAGRODA_ODZNAKA(o.nazwa, o.zaJakaPrace)}
-              </Text>
-            ))}
-          </>
-        ) : null}
-
-        {/* (3) NASTĘPNY PRÓG — w pracy, nie w dniach. */}
-        {nagroda.nastepnyProg !== null ? (
-          <Text style={styles.nagrodaNastepny}>
-            {NAGRODA_NASTEPNY(
-              nagroda.nastepnyProg.nazwa,
-              nagroda.nastepnyProg.brakuje,
-              NAGRODA_MIARA[nagroda.nastepnyProg.miara] ?? nagroda.nastepnyProg.miara,
-            )}
-          </Text>
-        ) : (
-          <Text style={styles.nagrodaNastepny}>{NAGRODA_WSZYSTKO}</Text>
-        )}
-
-        {/* (4) ⭐ R5 — czego NIE UMIEM policzyć, z powodem. ⛔ Nie milczymy. */}
-        {nagroda.nieumiemPoliczyc.map((b) => (
-          <Text key={b.id} style={styles.licznikPodpis}>{NAGRODA_NIEUMIEM(b.nazwa, b.powod)}</Text>
-        ))}
-
-        {/* ⭐ M4 — liczba kończy się rzeczą do zrobienia. Dziennik, bo to jest
-            dziś jedyne miejsce w appce, w którym zawodnik może zapisać pracę
-            tak, żeby ją policzono (`session_verdicts` 0 wierszy,
-            `status='completed'` 0 z 24 — zmierzone 15.08.2026). */}
-        <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/dziennik')}>
-          <Text style={styles.cardAction}>{NAGRODA_ROBOTA_ZAPISZ}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // ⭐ PLAN-D-F1, F1.2 — PRACA WE WSZYSTKICH BLOKACH SKUPIENIA.
-  //
-  // Trzecia liczba na tej karcie i trzecia inna odpowiedź:
-  //   • licznik pasa D1  — RYTM ostatnich 14 dni (może zmaleć i tak ma być);
-  //   • „TWÓJ DOROBEK" C4 — cała wykonana praca w punktach (nie maleje);
-  //   • ten blok         — praca w BLOKACH SKUPIENIA, licząc te domknięte.
-  //
-  // ⛔ DLACZEGO OSOBNO OD „TWOJEGO DOROBKU". Dorobek C4 liczy PUNKTY z wag
-  // (wpis = 1, sesja z dowodem = 3), więc odpowiada na pytanie „ile pracy
-  // razem". Ten blok odpowiada na inne: „co mi zostało z Bloków, które
-  // przepracowałem" — i to jest jedyna liczba w appce, która nie znika
-  // w dniu domknięcia Bloku. Zlanie ich w jedną kazałoby wybrać jedną
-  // z dwóch odpowiedzi na dwa różne pytania.
-  //
-  // ⛔ BEZ ZAKRESU CZASU. Zakres czasu jest dokładnie tym, co pozwala liczbie
-  // zmaleć — ta sama decyzja, co w bloku C4 i w typie `BlockEventLike`, który
-  // nie ma pola z datą.
-  // ⛔ ANI JEDNEGO SŁOWA O DNIACH Z RZĘDU, PASSIE, SERII (N1).
-  // ⛔ ZERO PORÓWNANIA Z KIMKOLWIEK (N3). ⛔ ZERO POWIADOMIEŃ.
-  //
-  // ⚠️ WSZYSTKIE BRZMIENIA POCHODZĄ Z `lib/focusBlockProgress.ts` I ANI JEDNO
-  // NIE JEST NOWE. Sześć brzmień pasów A1 i E2 czeka na decyzję Kuby; ten pas
-  // ich UŻYWA dokładnie tak, jak stoją, i nie dokłada siódmego.
-  // ═══════════════════════════════════════════════════════════════════
-  function renderPracaWBlokach() {
-    if (pracaWBlokach === null) return null;
-
-    // ⭐ R5 — „nie udało się policzyć" to INNE ZDANIE niż „jeszcze nic nie ma",
-    // nie to samo z zerem. Typ `nie_policzony` nie ma pola `sesje`, więc zera
-    // nie da się tu narysować nawet przez pomyłkę.
-    if (pracaWBlokach.rodzaj === 'nie_policzony') {
+    if (arkusz.rodzaj === 'plus') {
       return (
-        <View style={styles.licznikCzesc}>
-          <Text style={styles.odpowiedzNaglowek}>{DOROBEK_BLOKOW_NAGLOWEK}</Text>
-          <Text style={styles.licznikBrakPodstawy}>
-            {dorobekBlokowNiePoliczony(pracaWBlokach.nieodczytaneZrodlo)}
-          </Text>
-        </View>
+        <>
+          <TouchableOpacity style={styles.arkuszWybor} onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' })}>
+            <Text style={styles.cardLabel}>{PLUS_W_PRZYSZLOSCI}</Text>
+            <Text style={styles.licznikPodpis}>{PLUS_W_PRZYSZLOSCI_PODPIS}</Text>
+          </TouchableOpacity>
+          {/* ⭐ A5 — „już się odbyło" NIE PROWADZI PROSTO DO FORMULARZA.
+              Najpierw pytanie o nieocenione rzeczy z planu (`arkuszKolizja`
+              z makiety v3), i dopiero po „nie" powstaje nowy wiersz. */}
+          <TouchableOpacity style={styles.arkuszWybor} onPress={() => setArkusz({ rodzaj: 'kolizja' })}>
+            <Text style={styles.cardLabel}>{PLUS_JUZ_SIE_ODBYLO}</Text>
+            <Text style={styles.licznikPodpis}>{PLUS_JUZ_SIE_ODBYLO_PODPIS}</Text>
+          </TouchableOpacity>
+        </>
       );
     }
 
+    // arkusz.rodzaj === 'kolizja'
+    if (stanDodania.rodzaj === 'pytamy') {
+      return (
+        <>
+          <Text style={styles.cardLabel}>{KOLIZJA_PYTANIE(stanDodania.pozycje.length)}</Text>
+          <Text style={styles.cardBody}>{KOLIZJA_PODPYTANIE}</Text>
+          {stanDodania.pozycje.map((poz) => {
+            const p = bezOceny.find((q) => q.idWydarzenia === poz.idWydarzenia) ?? null;
+            return (
+              <TouchableOpacity
+                key={poz.idWydarzenia}
+                style={styles.arkuszWybor}
+                onPress={() => {
+                  const brama = wolnoUtworzycWydarzenie(stanDodania, {
+                    rodzaj: 'to_bylo_to', idWydarzenia: poz.idWydarzenia,
+                  });
+                  console.log(`dzis: [A5] wolno utworzyć = ${brama.wolno} — ${brama.powod}`);
+                  if (p !== null) setArkusz({ rodzaj: 'ocena', klucz: p.klucz });
+                }}
+              >
+                <Text style={styles.cardLabel}>{poz.tytul}</Text>
+                <Text style={styles.licznikPodpis}>
+                  {(poz.godzina === null ? '' : `${poz.godzina}  ·  `) + KOLIZJA_TO_BYLO_TO}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+          <TouchableOpacity style={styles.inlineLink} onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' })}>
+            <Text style={styles.cardAction}>{KOLIZJA_INNA_RZECZ}</Text>
+          </TouchableOpacity>
+          <Text style={styles.licznikPodpis}>{KOLIZJA_PRZYPIS}</Text>
+        </>
+      );
+    }
     return (
-      <View style={styles.licznikCzesc}>
-        <Text style={styles.odpowiedzNaglowek}>{DOROBEK_BLOKOW_NAGLOWEK}</Text>
-
-        {/* LICZBA — albo jawne „jeszcze nic tu nie ma", NIE „0 sesji". */}
-        {pracaWBlokach.sesje > 0 ? (
-          <Text style={styles.licznikLiczba}>
-            {dorobekBlokowLiczba(pracaWBlokach.sesje, pracaWBlokach.bloki)}
-          </Text>
-        ) : (
-          <Text style={styles.licznikBrakPodstawy}>{DOROBEK_BLOKOW_PUSTO}</Text>
-        )}
-
-        {/* ⭐ POWÓD STANU „NIE WIEM" — jedyne miejsce, w którym jest napisany.
-            Kafelek Celu mówi „Nie wiemy, ile z M sesji się odbyło" i nie ma
-            miejsca na wyjaśnienie; wyjaśnienie stoi tu, przy liczbie, której
-            dotyczy ta sama przyczyna.
-            ⛔ RYSUJEMY GO WYŁĄCZNIE, GDY ODCZYT POWIĄZAŃ PRZESZEDŁ. Zdanie
-            „żaden wpis nie jest jeszcze połączony z sesją" jest TWIERDZENIEM
-            o danych zawodnika — postawione po odczycie, którego nie było,
-            byłoby zgadywaniem podanym jako pewnik (Z0). Po nieudanym odczycie
-            zawodnik czyta zamiast tego zdanie `nie_policzony` z gałęzi wyżej. */}
-        {workProgress !== null && workProgress.stan === 'NIE_WIEM' ? (
-          <Text style={styles.licznikPodpis}>{NIE_WIEM_POWOD}</Text>
-        ) : null}
-
-        {/* ⭐ M4 — liczba kończy się rzeczą do zrobienia, i jest to DOKŁADNIE
-            TA SAMA rzecz, którą wskazuje trzeci stan pasa A1
-            (`DOROBEK_BLOKOW_RZECZ_DO_ZROBIENIA === NIE_WIEM_RZECZ_DO_ZROBIENIA`).
-            ⛔ JEDNO ZDANIE, NIE DWA — tak zdecydował pas E2, przejmując je co
-            do znaku zamiast pisać własne. Dlatego stoi na ekranie RAZ, tutaj,
-            i jest przyciskiem: obie liczby o Blokach odblokowuje ten sam ruch
-            zawodnika, więc dwa razy to samo zdanie byłoby szumem. */}
-        <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/dziennik')}>
-          <Text style={styles.cardAction}>{DOROBEK_BLOKOW_RZECZ_DO_ZROBIENIA}</Text>
+      <>
+        <Text style={styles.cardBody}>
+          {stanDodania.rodzaj === 'nie_wiemy' ? KOLIZJA_NIE_ODCZYTANE : KOLIZJA_NIC_NIE_STALO}
+        </Text>
+        <TouchableOpacity style={styles.inlineLink} onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' })}>
+          <Text style={styles.cardAction}>{PLUS_DODAJ_NOWE}</Text>
         </TouchableOpacity>
-      </View>
+      </>
     );
   }
-
-  const allRecsLinkLabel = otherUnreadCount > 0
-    ? `Wszystkie rekomendacje (${otherUnreadCount} nowe) →`
-    : openActionableCount > 0
-      ? `Wszystkie rekomendacje (${openActionableCount} do sprawdzenia) →`
-      : 'Wszystkie rekomendacje →';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -3441,541 +3333,283 @@ export default function DzisScreen() {
         contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
       >
-        <Text style={styles.eyebrow}>{todayLabel}</Text>
-        <Text style={styles.title}>Dziś</Text>
+        {/* ── 1. NAGŁÓWEK (makieta v3: `naglowek`, 54 dp) ────────────
+            ⭐ TYTUŁ I DATA STOJĄ W JEDNYM WIERSZU, tak jak w makiecie (`shd`:
+            tytuł po lewej, data po prawej, na tej samej linii bazowej).
+            Do 18.08.2026 data stała NAD tytułem i kosztowała 19 dp osobnego
+            wiersza — przy budżecie 850 dp to jest 2,2% ekranu wydane na to,
+            żeby dwie rzeczy tej samej wagi nie stały obok siebie. */}
+        <View style={styles.naglowekDnia}>
+          <Text style={styles.title}>{zakresKarty === 'dzis' ? KARTA_ZAKRES_DZIS : KARTA_ZAKRES_TYDZIEN}</Text>
+          <Text style={styles.eyebrow}>{todayLabel}</Text>
+        </View>
 
-        {/* CEL — element PIERWSZY ekranu (zatwierdzone 06.08.2026), od
-            08.08.2026 mały: nazwa + wskaźnik pracy + pasek, nic więcej.
-            Cały kafelek to przycisk do szczegółów Celu (`/cele`) — patrz
-            punkt 1 w nagłówku pliku.
-            `numberOfLines={1}` na nazwie trzyma wysokość przewidywalną —
-            i wszystkie 13 nazw segmentów faktycznie się w tej jednej linii
-            mieści, także najdłuższa („Technika Specjalistyczna", 24 znaki),
-            także na ekranie 320 dp szerokości. Policzone, nie założone —
-            raport zwrotny B runda 3, sekcja 12. Dlatego rozmiar to 21 px,
-            a nie 22: przy 22 px najdłuższa nazwa wychodziła 5 dp za wąski
-            ekran i zostałaby ucięta wielokropkiem. */}
-        {/* PIERWSZE URUCHOMIENIE 10.08.2026 — kafelek prowadzi do diagnozy,
-            dopóki zawodnik nie ma ani diagnozy, ani Celu. Patrz `showFirstStep`
-            wyżej i komentarz przy `hasDiagnosis` na górze pliku. */}
-        <TouchableOpacity style={styles.heroGoal} onPress={() => router.push(showFirstStep ? '/diagnoza' : '/cele')}>
-          {/* W1: krecha 12° — motyw ścięcia z logo, karta „to jest o Tobie" */}
-          <View style={styles.heroStripe} />
-          {/* PLAN-D-A 08.2026 — kafelek pokazuje `goals`, czyli WĄSKIE GARDŁO
-              (miesiące), a nie CEL (lata). Słowo „Cel" jest w produkcie
-              zarezerwowane dla kierunku na lata — patrz lib/labels.ts. */}
-          <Text style={styles.heroEyebrow}>{showFirstStep ? 'Twój pierwszy krok' : 'Nad czym pracujesz'}</Text>
-          {/* WIEDZA B4 08.08.2026 — dług N2 (znalezisko B18, otwarte od rundy 2).
-              Bez tego zawodnik przy pierwszym wejściu widział przez ułamek
-              sekundy „Nie masz jeszcze Celu" — zdanie nieprawdziwe dla większości
-              zalogowanych. Patrz nagłówek pliku. */}
-          {loading ? (
-            <Text style={styles.heroLoading}>Wczytuję…</Text>
-          ) : showFirstStep ? (
-            /* Brzmienie zatwierdzone przez Kubę 10.08.2026 */
-            <>
-              <Text style={styles.heroTitle}>Zacznij od diagnozy</Text>
-              <Text style={styles.heroFirstStepBody}>
-                Odpowiadasz na pytania o swoją grę, a system pokazuje, co ogranicza Cię dziś
-                najbardziej. Z wyniku sam wskaże Ci pierwsze wąskie gardło — nie musisz zgadywać.
-              </Text>
-              <Text style={styles.heroAction}>Zrób diagnozę →</Text>
-            </>
-          ) : priorityGoal ? (
-            <>
-              <Text style={styles.heroTitle} numberOfLines={1}>{goalSegmentLabel}</Text>
-
-              {/* Wskaźnik PRACY, nie upływu czasu (JEDNA DROGA B2 08.08.2026).
-                  NAWIGACJA B3 08.08.2026 — skrócony do brzmienia z decyzji B5:
-                  „3 z 6 sesji zrobione". Słowa „Bloku Skupienia" zeszły razem
-                  z resztą kontekstu do szczegółów Celu; pod nazwą Celu nie ma
-                  wątpliwości, o jakich sesjach mowa. */}
-              {/* ⚠️ PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — Z TEGO KAFELKA
-                  ZNIKNĘŁY DWA WEZWANIA DO PRACY: „Nowa porcja w Twoim Bloku →"
-                  i „Zaplanuj Blok →". Oba były rzeczami DO ZROBIENIA, wypowiadanymi
-                  przez kafelek, który miał mówić wyłącznie, NAD CZYM zawodnik
-                  pracuje. To był pierwszy z sześciu producentów mówiących naraz.
-                  Oba brzmienia przeniosły się CO DO ZNACZENIA do jednej odpowiedzi
-                  (`lib/jednaOdpowiedz.ts`, stałe BLOK_NOWA_PORCJA
-                  i ZAPROSZENIE_ZAPLANUJ_BLOK) — nie zginęły, zmieniły miejsce
-                  na to, w którym zawodnik szuka odpowiedzi „co dziś zrobić".
-                  ⚠️ KAFELEK ZOSTAJE PIERWSZY (decyzja Kuby z 06.08.2026) i nadal
-                  jest w całości przyciskiem do szczegółów wąskiego gardła. */}
-              {/* ⭐ PLAN-D-F1 15.08.2026 — TRZECI STAN WCHODZI NA KAFELEK.
-                  Do 15.08 stało tu `{workProgress.done} z {workProgress.total}
-                  sesji zrobione` i była to JEDYNA gałąź. Zmierzone tego dnia na
-                  produkcji: `daily_logs.calendar_event_id` jest puste w 10 na
-                  10 wpisach, więc zawodnik `8d7e1ebb…` czytał „0 z 12 sesji
-                  zrobione" — zdanie z rejestru FAKT O TOBIE, twierdzące, że nie
-                  odbył ani jednej sesji, podczas gdy prawdą jest, że NIE WIEMY.
-                  Pas A1 nazwał to złamaniem Z0 i naprawił w bibliotece 14.08;
-                  kontrakt „podmiana wywołania należy do pasa T" stał
-                  niewykonany dobę. To jest jego wykonanie.
-                  ⛔ PASEK RYSUJE SIĘ WYŁĄCZNIE PRZY `WIADOMO`. Pasek na 0%
-                  obok zdania „nie wiemy" byłby tym samym kłamstwem, tylko
-                  narysowanym zamiast napisanym. */}
-              {workProgress && workProgress.stan === 'WIADOMO' && widokDzis.pokazacPostepPracy ? (
-                <>
-                  <Text style={styles.workText}>
-                    {workProgress.done} z {workProgress.total} sesji zrobione
-                  </Text>
-                  <View style={styles.workTrack}>
-                    <View style={[styles.workFill, { width: `${Math.round((workProgress.done / workProgress.total) * 100)}%` }]} />
-                  </View>
-                </>
-              ) : null}
-              {workProgress && workProgress.stan === 'NIE_WIEM' && widokDzis.pokazacPostepPracy ? (
-                <Text style={styles.workText}>{NIE_WIEM_TYTUL(workProgress.total)}</Text>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <Text style={styles.heroTitle}>Nie masz jeszcze wąskiego gardła</Text>
-              <Text style={styles.heroAction}>Wskaż pierwsze wąskie gardło →</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* ═══════════════════════════════════════════════════════════
-            PLAN-D-T 08.2026 (13.08.2026), zadanie T3 — PORZĄDEK EKRANU
-            WYNIKA ZE STANU.
-
-            REGUŁA: element, który stan WYCISZA, nie może stać wyżej niż
-            karta MÓWIĄCA o wyciszeniu.
-
-            Do tej rundy było odwrotnie: jedna odpowiedź (wtedy: sekcja
-            „Co dziś zrobić") stała NAD kartą głosu tygodnia. Przy kontuzji
-            zawodnik widział więc najpierw dziurę po wyciszonej sekcji,
-            a dopiero pod nią zdanie „Wracasz po urazie", które tę dziurę
-            tłumaczyło. Kolejność kazała mu domyślić się przyczyny, zanim ją
-            podaliśmy — i wyglądało to jak awaria, a nie jak decyzja.
-
-            Od tej rundy KARTA GŁOSU I PUNKT POMOCY STOJĄ NAD JEDNĄ
-            ODPOWIEDZIĄ. Zysk jest w każdym z pięciu stanów:
-              • normalny        — karta głosu zwykle się nie rysuje, więc
-                                  jedna odpowiedź i tak jest pierwsza;
-              • Osłona          — powód („Blok nie zwiększa objętości") stoi
-                                  nad odpowiedzią, która z niego wynika;
-              • kontuzja        — „Wracasz po urazie" stoi tam, gdzie ekran
-                                  zamilkł, zamiast pod pustym miejscem;
-              • ścieżka wyjścia — to samo, plus punkt pomocy tuż pod spodem;
-              • cisza           — arbiter policzył i nie ma nic do
-                                  powiedzenia; karta się nie rysuje i jedna
-                                  odpowiedź jest pierwsza, tak jak w stanie
-                                  normalnym.
-            ═══════════════════════════════════════════════════════════ */}
-
-        {/* PLAN-D-F 08.2026 — GŁOS TYGODNIA.
-            Karta pojawia się WYŁĄCZNIE wtedy, gdy arbiter dał głos jednemu
-            z narzędzi osi decyzji. Trzy sytuacje NIE rysują tu niczego i to
-            jest zamierzone:
-              • CISZA — arbiter policzył i zdecydował, że w tym tygodniu żadne
-                narzędzie nie ma nic do powiedzenia. To DECYZJA, nie brak danych;
-                zastępczy komunikat („nic nowego") zamieniłby ją w kolejne
-                odezwanie i unieważnił cały budżet uwagi;
-              • brak wiersza — cron jeszcze nie policzył tego tygodnia;
-              • błąd odczytu — powód idzie do konsoli, nie na ekran.
-            BLOK też nie dostaje karty: ma już kafelek na górze ekranu. */}
-        {/* ⚠️ PLAN-D-P 08.2026 (13.08.2026) — KARTA GŁOSU NIE PROWADZI JUŻ NIGDZIE.
-            Od 12.08.2026 (zadanie I1) miała jedno wejście: „Otwórz Kalibrację".
-            Kalibracja została usunięta z produktu w całości
-            (claude/DECYZJA_KALIBRACJA_USUNIETA_13_08_2026.md), a była JEDYNYM
-            głosem, który miał dokąd prowadzić — pozostałe cztery były kartami
-            bez dotknięcia świadomie (exit i injury mają punkt pomocy, growth
-            i compass nie mają ekranu, do którego dałoby się prowadzić).
-            Dlatego `wejscieZKarty()` zniknęło razem z nią, zamiast zostać
-            funkcją, która ZAWSZE zwraca `null` — martwa funkcja wygląda
-            następnym razem jak defekt do naprawienia, a nie jak decyzja. */}
-        {pokazacKarte(glos) && glos.rodzaj === 'glos' && (
-          <View style={{ marginTop: 24 }}>
-            <View style={styles.glosCard}>
-              <View style={styles.glosStripe} />
-              <Text style={styles.glosTytul}>{glos.tytul}</Text>
-              <Text style={styles.glosTresc}>{glos.tresc}</Text>
-            </View>
-          </View>
-        )}
-
-        {/* ZADANIE E2 12.08.2026 — PUNKT POMOCY WYŻEJ W DWÓCH STANACH.
-            Kontuzja i ścieżka wyjścia trwają tygodniami i w obu zawodnik ma
-            powód czuć się poza drużyną. W tych dwóch — i TYLKO w tych dwóch —
-            numer przysuwa się bliżej, zamiast czekać, aż ktoś go poszuka
-            w zakładce „Ja".
-            ⚠️ To jest podniesienie WIDOCZNOŚCI, nie powiadomienie: nic nie
-            wysyła, nic nie zapisuje, nikogo nie zawiadamia — ani rodzica, ani
-            trenera (claude/R2a_SCIEZKA_ESKALACJI_KRYZYS_11_08_2026.md).
-            ⚠️ I nie jest klasyfikatorem ryzyka: reaguje na dwa JAWNE stany,
-            nie na treść wpisów zawodnika. */}
-        {podniescPunktPomocy(glos) && (
+        {/* ── 2. PRZEŁĄCZNIK (makieta v3: `przelacznik`, 48 dp) ──────
+            ⭐ WYSZEDŁ Z KARTY NA GÓRĘ EKRANU. Do 18.08.2026 stał WEWNĄTRZ
+            karty kalendarza, czyli 4 663 dp niżej — zawodnik musiał przewinąć
+            pięć ekranów, żeby dowiedzieć się, że widok tygodnia w ogóle
+            istnieje. ⛔ Rzecz ważna nie może wymagać przewijania (P0). */}
+        <View style={styles.seg}>
           <TouchableOpacity
-            style={[styles.card, styles.pomocCard, { marginTop: 12 }]}
-            onPress={otworzPunktPomocy}
+            style={[styles.segBtn, zakresKarty === 'dzis' && styles.segBtnOn]}
+            onPress={() => setZakresKarty('dzis')}
             accessibilityRole="button"
           >
-            <Text style={styles.cardLabel}>{POMOC_PRZYCISK}</Text>
-            <Text style={styles.pomocPodpis}>{POMOC_WIERSZ_PODPIS}</Text>
+            <Text style={[styles.segTxt, zakresKarty === 'dzis' && styles.segTxtOn]}>{KARTA_ZAKRES_DZIS}</Text>
           </TouchableOpacity>
-        )}
+          <TouchableOpacity
+            style={[styles.segBtn, zakresKarty === 'tydzien' && styles.segBtnOn]}
+            onPress={() => setZakresKarty('tydzien')}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.segTxt, zakresKarty === 'tydzien' && styles.segTxtOn]}>{KARTA_ZAKRES_TYDZIEN}</Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* ═══════════════════════════════════════════════════════════
-            PLAN-D-T 08.2026 (13.08.2026), zadanie T1 — JEDNA ODPOWIEDŹ.
-
-            TU STAŁY TRZY NIEZALEŻNE KARTY: kafelek Bloku (jego wezwania do
-            pracy), karta rekomendacji i podpowiedź dnia. Każda powstała
-            w innej rundzie i żadna nie wiedziała o pozostałych. Teraz jest
-            JEDNA ODPOWIEDŹ o trzech częściach:
-
-                CO DZIŚ ZROBIĆ · DLACZEGO AKURAT TO · CO TO ZMIENI
-
-            ⚠️ TO NIE JEST CZWARTA KARTA OBOK TRZECH. Kafelek stracił oba
-            wezwania, podpowiedź dnia przestała być osobnym kafelkiem, a stany
-            R5 („nie ma tabeli" / „błąd" / „pusto") przestały rysować własny
-            komunikat o stanie NASZEJ bazy. Elementów na ekranie jest MNIEJ,
-            nie więcej — i to jest kryterium tej rundy.
-
-            ⚠️ „CO TO ZMIENI" JEST PUSTE W ~93% PRZYPADKÓW I TAK MA BYĆ:
-            wychodzi wyłącznie, gdy istnieje dowód Z ŹRÓDŁEM (zmierzone
-            14.08.2026: `component_hints.dowody` wypełnione w 21 z 297 wierszy).
-            Wypełniacz w rodzaju „to pomoże Ci się rozwijać" łamałby Z0.
-            ═══════════════════════════════════════════════════════════ */}
-        {/* ═══════════════════════════════════════════════════════════
-            ⭐ PLAN-D-B2 08.2026 (14.08.2026) — KOLEJKA PODANIA NA EKRANIE.
-
-            TU STAŁA JEDNA ODPOWIEDŹ I NIC POZA NIĄ. Pod nią, jako osobne
-            karty, stały: wpis Dziennika i kalendarz. Od tej rundy jedna
-            odpowiedź jest PIERWSZĄ POZYCJĄ KOLEJKI, a nie sąsiadem kolejki:
-            jej miejsce ustala `lib/kolejkaPodania.ts`, tak samo jak miejsce
-            każdej innej pozycji.
-
-            ⛔ TEN BLOK NIE ZAWIERA ANI JEDNEJ DECYZJI O KOLEJNOŚCI. Rysuje
-            `pozycjeNaDzis` w takiej kolejności, w jakiej je dostał.
-
-            TRZY STANY, TRZY RÓŻNE ZDANIA (R5) — patrz stałe `KOLEJKA_*`:
-              • `sa_pozycje` → lista;
-              • `pusto`      → „odczytałem wszystko i nic nie ma";
-              • `nie_wiem`   → „czegoś nie odczytałem" — ⛔ NIE pustka.
-            Do tego `niepelna` mówi wprost, że lista jest krótsza, niż powinna
-            — zamiast po cichu ją skrócić.
-
-            ⚠️ ŚCIEŻKA WYJŚCIA: przy `wyciszonaCalkowicie` cały ten blok znika.
-            `wezDlaWidoku` oddaje wtedy pustą tablicę, a lista czterech
-            wyszarzonych przypomnień byłaby nadal listą przypomnień.
-            ═══════════════════════════════════════════════════════════ */}
-        {(kolejka === null || !kolejka.wyciszonaCalkowicie) && odpowiedz.pokazac && (
-          <View style={{ marginTop: 24 }}>
+        {zakresKarty === 'tydzien' ? (
+          /* ── WIDOK „TYDZIEŃ" (makieta v3: `ekranTydzien`) ──────────
+             ⭐ Ten sam kod, co dotąd rysował się w karcie — zmieniło się
+             wyłącznie to, że jest teraz OSOBNYM STANEM EKRANU, a nie
+             zakładką schowaną pod pięcioma ekranami przewijania. */
+          renderTydzienNaKarcie()
+        ) : (
+          <>
+            {/* ── 3. CO DZIŚ NAJWAŻNIEJSZE (makieta v3: `kartaGlowna`, 118 dp)
+                ⭐ WCHŁANIA GŁOS TYGODNIA. Karta głosu i jedna odpowiedź były
+                do 18.08 dwiema kartami pod sobą i mówiły tym samym głosem
+                („co dziś najważniejsze"). Makieta v3 ma tu JEDEN blok —
+                i dlatego głos tygodnia stoi w środku tej karty, a nie nad nią.
+                ⛔ ZERO NOWYCH BRZMIEŃ: `glos.tytul` i `glos.tresc` co do znaku. */}
             <View style={styles.odpowiedzCard}>
               <View style={styles.odpowiedzStripe} />
-
-              {/* ── CZĘŚĆ 1: CO DZIŚ ZROBIĆ — DOKŁADNIE JEDNA RZECZ ───── */}
               <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZROBIC}</Text>
-
+              {pokazacKarte(glos) && glos.rodzaj === 'glos' ? (
+                <Text style={styles.glosTresc}>{glos.tytul + '  ·  ' + glos.tresc}</Text>
+              ) : null}
+              {/* ⛔ DOKŁADNIE JEDNA POZYCJA KOLEJKI, NIE CZTERY. Ranker wydaje
+                  prefiks czterech; makieta v3 ma na „Dziś" jedną odpowiedź
+                  i kafle dnia. Pozostałe trzy pozycje ZDJĘTE Z EKRANU —
+                  wymienione w nocie przekazania (B3), nie skasowane z rankera. */}
               {kolejka === null ? (
                 <Text style={styles.odpowiedzTresc}>{KOLEJKA_WCZYTUJE}</Text>
               ) : pozycjeNaDzis.length === 0 ? (
-                /* ⛔ DWA RÓŻNE ZDANIA, NIGDY JEDNO. „Nie masz nic" powiedziane
-                   komuś, czyich danych nie udało się odczytać, jest nieprawdą
-                   o nim — i wygląda dokładnie tak samo jak prawda. */
                 <Text style={styles.kolejkaPustka}>
                   {kolejka.stan === 'nie_wiem' ? KOLEJKA_NIE_WIEM : KOLEJKA_PUSTO}
                 </Text>
               ) : (
                 <>
-                  {/* ⛔ JEDNA PĘTLA, ZERO WYBIERANIA. Ani `.slice()`, ani
-                      `.filter()`, ani `.sort()` — kolejność i liczba przyszły
-                      z rankera. Pierwsza pozycja dostaje dwie dodatkowe części
-                      jednej odpowiedzi, bo pierwsza pozycja JEST tą odpowiedzią. */}
-                  {pozycjeNaDzis.map((p, i) => (
-                    <Fragment key={p.id}>
-                      <PozycjaKolejkiCard
-                        pozycja={p}
-                        /* Pierwsza pozycja jest PODANA: rozwinięta, w pełnym
-                           kształcie. Kolejne są jednolinijkowe — rozwinięcie
-                           na jedno dotknięcie, bez opuszczania ekranu (P0). */
-                        pierwsza={i === 0}
-                        pokazacDlaczego={i !== 0}
-                        dzis={dane === null ? null : dane.wejscia.dzis}
-                        /* Treść i przyciski rekomendacji niesie TEN SAM komponent,
-                           który renderuje Centrum decyzji — zero drugiej kopii
-                           karty. ⚠️ To nie jest drugi producent: miejsce tej
-                           pozycji w kolejności ustalił ranker. */
-                        slot={p.skadToWiemy.klucz === 'rekomendacja' && focusRec && currentUser ? (
-                          <RecommendationCard
-                            rec={focusRec}
-                            currentUserId={currentUser.id}
-                            isUnread={unreadSnapshotRef.current.has(focusRec.id)}
-                            headerSlot={null}
-                            footerSlot={null}
-                            onSubmitted={load}
-                          />
-                        ) : undefined}
-                        onPress={TRASA_POZYCJI[p.skadToWiemy.klucz]
-                          ? () => router.push(TRASA_POZYCJI[p.skadToWiemy.klucz])
-                          : undefined}
-                      />
-
-                      {/* ── CZĘŚĆ 2: DLACZEGO AKURAT TO — JEDNO ZDANIE ──── */}
-                      {/* ⚠️ `null` znaczy „nie mam uzasadnienia, którego bym nie
-                          zmyślił". Zmyślone uzasadnienie jest gorsze niż jego
-                          brak, bo brzmi wiarygodnie — dlatego ta część potrafi
-                          zniknąć w całości. Zdanie bierze się Z POZYCJI, nie
-                          z odpowiedzi: gdyby pozycja nr 1 była inna niż jedna
-                          odpowiedź (bo tamta zamilkła), uzasadnienie odpowiedzi
-                          stałoby przy cudzej pozycji. */}
-                      {i === 0 && p.dlaczego !== null ? (
-                        <View style={styles.odpowiedzCzesc}>
-                          <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_DLACZEGO}</Text>
-                          <Text style={styles.odpowiedzDlaczego}>{p.dlaczego}</Text>
-                        </View>
-                      ) : null}
-
-                      {/* ── ⭐ TRZECIA CZĘŚĆ WGLĄDU: JEDNA RZECZ DO ZROBIENIA ── */}
-                      {/* ⛔ TO JEST NAJWAŻNIEJSZA LINIA PASA B4.
-                          `Kandydat` ma DWA pola tekstowe (`co`, `dlaczego`),
-                          a wgląd ma TRZY części: liczbę, znaczenie i JEDNĄ
-                          RZECZ DO ZROBIENIA. Trzecia nie mieści się w pozycji
-                          kolejki i wychodzi WYŁĄCZNIE przez `wgladDlaPozycji()`.
-                          Bez tego wywołania sześć wglądów kończy się NA WIEDZY —
-                          czyli łamie M4 („żaden materiał nie kończy się na
-                          wiedzy"), dziś złamane w 114 z 297 podpowiedzi.
-                          ⚠️ TO NIE JEST NOWA KARTA. Stoi WEWNĄTRZ tej pozycji,
-                          pod jej „dlaczego", dokładnie tak samo jak część
-                          „co to zmieni" niżej. Pozycja, która nie jest wglądem,
-                          dostaje `null` i nie rysuje się nic. */}
-                      {wglady !== null ? (
-                        <WgladPozycji wglad={wgladDlaPozycji(wglady, p.id)} />
-                      ) : null}
-
-                      {/* ── CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM ─ */}
-                      {/* ⛔ Tej części NIE DA SIĘ zbudować bez źródła: pilnuje
-                          tego typ `CoToZmieni` w lib/jednaOdpowiedz.ts, nie ten
-                          komentarz. ⚠️ Rysuje ją ekran, a nie komponent pozycji,
-                          bo „co to zmieni" NIE JEST polem pozycji kolejki —
-                          ranker takiego pola nie ma i nie powinien mieć. */}
-                      {i === 0 && odpowiedz.coToZmieni ? (
-                        <View style={styles.odpowiedzCzesc}>
-                          <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZMIENI}</Text>
-                          <Text style={styles.odpowiedzDowod}>{odpowiedz.coToZmieni.tekst}</Text>
-                          <Text style={styles.hintSource}>{odpowiedz.coToZmieni.zrodlo}</Text>
-                        </View>
-                      ) : null}
-                    </Fragment>
-                  ))}
-
+                  <PozycjaKolejkiCard
+                    pozycja={pozycjeNaDzis[0]}
+                    pierwsza
+                    pokazacDlaczego={false}
+                    dzis={dane === null ? null : dane.wejscia.dzis}
+                    onPress={TRASA_POZYCJI[pozycjeNaDzis[0].skadToWiemy.klucz]
+                      ? () => router.push(TRASA_POZYCJI[pozycjeNaDzis[0].skadToWiemy.klucz])
+                      : undefined}
+                  />
+                  {/* ── CZĘŚĆ 2: DLACZEGO AKURAT TO — JEDNO ZDANIE ────
+                      ⚠️ `null` znaczy „nie mam uzasadnienia, którego bym nie
+                      zmyślił". Zmyślone uzasadnienie jest gorsze niż jego brak,
+                      bo brzmi wiarygodnie — dlatego ta część potrafi zniknąć. */}
+                  {pozycjeNaDzis[0].dlaczego !== null ? (
+                    <View style={styles.odpowiedzCzesc}>
+                      <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_DLACZEGO}</Text>
+                      <Text style={styles.odpowiedzDlaczego}>{pozycjeNaDzis[0].dlaczego}</Text>
+                    </View>
+                  ) : null}
+                  {/* ⛔ ZDJĘTE Z „DZIŚ" 18.08.2026 (pas A1): `<WgladPozycji>`
+                      razem z osią pomiarów (WG-34). Zmierzone: sam ten blok
+                      niósł 330 dp z 927 — czyli ponad jedną trzecią ekranu,
+                      który ma się zmieścić w 850. Inwentarz A1 §1.3 kieruje go
+                      na „Profil → Skąd to wiemy"; ⛔ zdjęcie z „Dziś" należy do
+                      tego pasa, postawienie na „Profil" — do pasa A3.
+                      ⚠️ To ZDEJMUJE TRZECIĄ CZĘŚĆ WGLĄDU (jedna rzecz do
+                      zrobienia, M4) z tego ekranu i jest wypisane imiennie
+                      w nocie przekazania, a nie przemilczane (B3). */}
+                  {/* ── CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM ── */}
+                  {odpowiedz.coToZmieni ? (
+                    <View style={styles.odpowiedzCzesc}>
+                      <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZMIENI}</Text>
+                      <Text style={styles.odpowiedzDowod}>{odpowiedz.coToZmieni.tekst}</Text>
+                      <Text style={styles.hintSource}>{odpowiedz.coToZmieni.zrodlo}</Text>
+                    </View>
+                  ) : null}
                   {/* ⚠️ LISTA NIEPEŁNA MÓWI O SOBIE. Skrócona po cichu wygląda
                       identycznie jak pełna — i to jest cały problem. */}
-                  {/* ⭐ PLAN-D-B4 — TO SAMO ZDANIE MÓWI TERAZ TAKŻE O WGLĄDACH.
-                      `wglady.niepelna` znaczy, że któregoś z sześciu wejść
-                      producenta NIE UDAŁO SIĘ ODCZYTAĆ — a wtedy lista jest
-                      krótsza, niż powinna, i zawodnik ma o tym wiedzieć.
-                      ⛔ Nie dokładamy drugiego zdania: dwa zdania o tej samej
-                      rzeczy („lista jest niepełna") to dwa producenty tej samej
-                      informacji. `brakDanych` tu NIE WCHODZI — odczyt się
-                      wtedy udał i lista jest pełna, tylko krótka. */}
                   {kolejka.niepelna || (wglady !== null && wglady.niepelna) ? (
                     <Text style={styles.kolejkaNiepelna}>{KOLEJKA_NIEPELNA}</Text>
                   ) : null}
                 </>
               )}
-
               {/* Treść ZAWSZE WIDOCZNA (bezpieczeństwo) — NIE jest podpowiedzią
-                  dnia i nie konkuruje z kolejką. Stoi na dole tej samej karty,
-                  żeby nie stać się kolejnym kafelkiem. */}
+                  dnia i nie konkuruje z kolejką. ⛔ ZOSTAJE mimo braku
+                  w makiecie: to są granice bezpieczeństwa, nie ozdoba. */}
               {renderTrescZawszeWidoczna()}
             </View>
 
-            {/* Jedyne wyjście do reszty rekomendacji. Zostaje, bo jest DROGĄ,
-                nie treścią — i dlatego nie liczy się jako drugi producent. */}
-            {hasAnyGoal ? (
-              <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/centrum-decyzji')}>
-                <Text style={styles.cardAction}>{allRecsLinkLabel}</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity style={styles.inlineLink} onPress={() => router.push(showFirstStep ? '/diagnoza' : '/cele')}>
-                <Text style={styles.cardAction}>{showFirstStep ? 'Zrób diagnozę →' : 'Przejdź do wąskich gardeł →'}</Text>
-              </TouchableOpacity>
-          )}
-          </View>
-        )}
+            {/* ── 5. ETYKIETA „TWÓJ DZIEŃ" (makieta v3: 26 dp) ───────── */}
+            <Text style={styles.sectionLabel}>{ETYKIETA_TWOJ_DZIEN}</Text>
 
-        {/* Diagnoza żywa — Funkcja 10, część 2 (INTEGRACJA_DIAGNOZA_ZYWA.md).
-            Renderuje się sama w null, gdy pulse nie jest dziś należny.
-            ⛔ Zamrożona 06.08.2026 (LIVING_DIAGNOSIS_PULSE_ENABLED = false) —
-            nietknięta w tej sesji, nie odmrażana. */}
-        <LivingDiagnosisPulseCard />
+            {/* ── ⭐ KAFEL PRODUKTU: WPIS DZIENNY (makieta v3: `rodzaj:"prod"`) ──
+                ⛔⛔ TO JEST JEDYNE WEJŚCIE DO `/dziennik` PO ZDJĘCIU ZAKŁADKI —
+                i dlatego powstało PRZED zdjęciem zakładki, a nie po nim.
+                Zmierzone 18.08.2026: `grep -rn "'/dziennik'"` wracał WYŁĄCZNIE
+                tablicę `TRASA_POZYCJI` w tym pliku, czyli wejście zależne od
+                tego, czy ranker postawi pozycję Dziennika na PIERWSZYM miejscu.
+                Wejście, które bywa, nie jest wejściem (decyzja Kuby 18.08:
+                „dziennik wchłania »Dziś« — ankieta poranna jako kafel").
+                ⛔ TRZY STANY, NIE DWA (R5): `null` znaczy „nie odczytałem",
+                a nie „nie masz wpisu". */}
+            <TouchableOpacity
+              style={styles.kafel}
+              accessibilityRole="button"
+              onPress={() => router.push('/dziennik')}
+            >
+              <Text style={styles.kafelTytul}>{DZIENNIK_CO}</Text>
+              <Text style={styles.kafelPodpis}>
+                {brakWpisuDzis === null ? DZIENNIK_NIE_WIEM
+                  : brakWpisuDzis ? DZIENNIK_DLACZEGO : DZIENNIK_JEST}
+              </Text>
+            </TouchableOpacity>
 
-        {/* ⚠️ PLAN-D-B2 08.2026 (14.08.2026) — KARTA „DZIENNIK" ZNIKŁA STĄD
-            I JEST TERAZ POZYCJĄ KOLEJKI. Była ósmym elementem tego ekranu
-            i ósmym producentem: sama decydowała, że stoi tu, pod kalendarzem
-            i nad niczym, choć „zapisz dzisiejszy wpis" jest rzeczą DO ZROBIENIA
-            DZIŚ — czyli dokładnie tym, co kolejka porządkuje.
-            Brzmienia przeniesione CO DO ZNAKU: `DZIENNIK_CO` i `DZIENNIK_DLACZEGO`
-            na górze tego pliku. Wejście do Dziennika nie zginęło — pozycja
-            prowadzi tam jednym dotknięciem (`TRASA_POZYCJI`), a sam Dziennik
-            jest jedną z czterech zakładek paska (EK-16).
-            ⚠️ CO USTĄPIŁO ŚWIADOMIE: potwierdzenie „Dzisiejszy wpis zapisany".
-            Rzecz zrobiona nie jest rzeczą do zrobienia, więc nie ma pozycji
-            w kolejce — a osobna karta tylko po to, żeby pochwalić za wpis,
-            jest dokładnie tym elementem, którego ten pas nie dokłada.
-            To jest DECYZJA, nie skutek uboczny — patrz nota przekazania §5. */}
-
-        {/* Dzisiejszy kalendarz. JEDNA DROGA B2 08.08.2026 — jedna karta z listą
-            zamiast osobnej karty na każde wydarzenie (patrz nagłówek: co ustąpiło). */}
-        <View style={{ marginTop: 24 }}>
-          <Text style={styles.sectionLabel}>Dziś w kalendarzu</Text>
-          {/* ⚠️ PLAN-D-B5 15.08.2026 — KARTA PRZESTAŁA BYĆ JEDNYM WIELKIM
-              PRZYCISKIEM I TO JEST WYMUSZONE, NIE KOSMETYCZNE. Do dziś całe
-              `styles.card` było `TouchableOpacity` prowadzącym do Kalendarza.
-              Przełącznik Dziś / Tydzień wewnątrz takiego przycisku znaczyłby,
-              że każde przełączenie zakładki JEDNOCZEŚNIE opuszcza ekran —
-              czyli przełącznik nie dałby się użyć ani razu.
-              ⛔ WEJŚCIE DO KALENDARZA NIE PODROŻAŁO: link na dole karty jest
-              osobnym przyciskiem i nadal kosztuje JEDNO dotknięcie (§5 pkt 4).
-              To jedyna rzecz, która w tej karcie ustąpiła, i jest wymieniona
-              w nocie przekazania jako odstąpienie. */}
-          <View style={styles.card}>
-            {/* ── ⭐ WT-02: PRZEŁĄCZNIK DZIŚ / TYDZIEŃ ──────────────────
-                Ten sam kształt segmentu, co zakładki Tydzień / Listy
-                w Kalendarzu — jeden wzorzec przełącznika w appce, nie dwa. */}
-            <View style={styles.seg}>
-              <TouchableOpacity
-                style={[styles.segBtn, zakresKarty === 'dzis' && styles.segBtnOn]}
-                onPress={() => setZakresKarty('dzis')}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.segTxt, zakresKarty === 'dzis' && styles.segTxtOn]}>
-                  {KARTA_ZAKRES_DZIS}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.segBtn, zakresKarty === 'tydzien' && styles.segBtnOn]}
-                onPress={() => setZakresKarty('tydzien')}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.segTxt, zakresKarty === 'tydzien' && styles.segTxtOn]}>
-                  {KARTA_ZAKRES_TYDZIEN}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {zakresKarty === 'dzis' ? (
+            {/* ── 6. KAFLE DNIA (makieta v3: `kafelHTML`, 54/60 dp) ────
+                ⭐ KAFEL JEST WEJŚCIEM DO OCENY. Do 18.08 dotknięcie
+                czegokolwiek w tej liście prowadziło do `/kalendarz` albo
+                do niczego; ocena stała 4 663 dp niżej. */}
+            {pustkaDzis ? (
               <>
-                {/* ⚠️ PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — TRZY PUSTKI.
-                    Stało tu jedno zdanie („Nic zaplanowanego na dziś.") na trzy
-                    różne sytuacje. Zawodnik z wygasłym dostępem czytał, że nic nie
-                    ma — zamiast dowiedzieć się, że produkt przestał przyjmować
-                    jego wpisy. ⛔ NIETKNIĘTE PRZEZ PAS B5. */}
-                {pustkaDzis ? (
-                  <>
-                    <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
-                    {/* ⭐ PAS I2 16.08.2026 — WT-33, decyzja Kuby na B3: „NIE MA".
-                        DO 16.08 STAŁ TU GOŁY `<Text>` ZE STRZAŁKĄ. Zawodnik czytał
-                        „Dodaj trening →", dotykał i nie działo się nic — napis
-                        o wyjściu zamiast wyjścia. Drugi taki sam był w Kalendarzu,
-                        w sekcji „Nadchodzące"; oba weszły commitem `0705760`.
-
-                        ⚠️ `blad_odczytu` ZOSTAJE NAPISEM, i to jest decyzja, nie
-                        przeoczenie. Jego CTA brzmi „Pociągnij w dół, żeby sprawdzić
-                        jeszcze raz." — wyjściem jest `RefreshControl`, nie dotknięcie.
-                        Owinięcie instrukcji w `TouchableOpacity` zrobiłoby z niej
-                        drugi rodzaj fałszywego przycisku. Dlatego bez strzałki:
-                        strzałka jest obietnicą akcji.
-
-                        `krokWTekscie` znaczy „krok stoi już w zdaniu wyżej" —
-                        wtedy `cta` jest puste i nie rysujemy nic. */}
-                    {pustkaDzis.krokWTekscie ? null
-                      : pustkaDzis.rodzaj === 'blad_odczytu' ? (
-                        <Text style={styles.cardBody}>{pustkaDzis.cta}</Text>
-                      ) : (
-                        <TouchableOpacity
-                          style={styles.inlineLink}
-                          onPress={() => router.push(pustkaDzis.rodzaj === 'brak_danych' ? '/kalendarz' : '/profil')}
-                        >
-                          <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
-                        </TouchableOpacity>
-                      )}
-                  </>
-                ) : (
-                  // ⭐ PLAN-D-F1 — `?? []` NIE WRACA TU TYLNYMI DRZWIAMI.
-                  // `pustkaDzis` jest `null` wyłącznie wtedy, gdy `maWpisy`
-                  // było prawdą, czyli gdy `todayEvents` NIE JEST `null`
-                  // i ma co najmniej jeden wiersz. `(todayEvents ?? [])`
-                  // zamieniłoby tę gwarancję w ciszę — i wtedy stan „nie udało
-                  // się sprawdzić" renderowałby się jako pusty blok.
-                  (todayEvents === null ? [] : todayEvents).map((e) => {
-                    // ⚠️ PLAN-D 14.08.2026 — DO DZIŚ STAŁO TU
-                    // `EVENT_TYPE_LABELS[e.event_type] || e.event_type`.
-                    // Rodzaj spoza piątki znanej appce (dołożony do CHECK-a w bazie
-                    // i nie dołożony tutaj) pokazywał się zawodnikowi jako SUROWA
-                    // WARTOŚĆ Z KOLUMNY — „club_training" wygląda jak etykieta, więc
-                    // nikt nigdy nie zgłosiłby, że etykiety brakuje. Reguła R5: brak
-                    // wiedzy ma mieć własny, jawny stan, a nie udawać wiedzę.
-                    const opisRodzaju = opiszRodzaj(e.event_type);
-                    if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
-                    return (
-                      <Text key={e.id} style={styles.eventLine}>
-                        <Text style={styles.eventTitle}>{e.title}</Text>
-                        {'  ·  '}
-                        {opisRodzaju.znany ? EVENT_TYPE_LABELS[opisRodzaju.id] : opisRodzaju.komunikat}
-                      </Text>
-                    );
-                  })
-                )}
+                <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
+                {/* ⭐ PAS I2 16.08.2026 — WT-33: pustka MA MIEĆ WYJŚCIE, a nie
+                    goły napis ze strzałką. ⚠️ `blad_odczytu` ZOSTAJE NAPISEM
+                    i to jest decyzja: jego wyjściem jest `RefreshControl`,
+                    nie dotknięcie — strzałka byłaby obietnicą akcji. */}
+                {pustkaDzis.krokWTekscie ? null
+                  : pustkaDzis.rodzaj === 'blad_odczytu' ? (
+                    <Text style={styles.cardBody}>{pustkaDzis.cta}</Text>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.inlineLink}
+                      onPress={() => router.push(pustkaDzis.rodzaj === 'brak_danych' ? '/kalendarz' : '/profil')}
+                    >
+                      <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
+                    </TouchableOpacity>
+                  )}
               </>
             ) : (
-              renderTydzienNaKarcie()
+              (todayEvents === null ? [] : todayEvents).map((e) => {
+                const opisRodzaju = opiszRodzaj(e.event_type);
+                if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
+                const pyt = bezOceny.find((q) => q.idWydarzenia === e.id) ?? null;
+                return (
+                  <TouchableOpacity
+                    key={e.id}
+                    style={styles.kafel}
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (pyt !== null) setArkusz({ rodzaj: 'ocena', klucz: pyt.klucz });
+                      else router.push('/kalendarz');
+                    }}
+                  >
+                    <Text style={styles.kafelTytul}>{e.title}</Text>
+                    <Text style={styles.kafelPodpis}>
+                      {(opisRodzaju.znany ? EVENT_TYPE_LABELS[opisRodzaju.id] : opisRodzaju.komunikat)
+                        + (pyt === null ? '' : '  ·  ' + KAFEL_CZEKA_NA_OCENE)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })
             )}
 
-            {/* ── ⭐ D2.3: „ZROBIŁEŚ?" — PRODUKT PYTA SAM ──────────────
-                ⭐ STOI NAD LICZNIKIEM, BO TO JEST PYTANIE, A LICZNIK JEST
-                ODPOWIEDZIĄ. ⛔ Zero dotknięć, żeby zobaczyć (P0); jedno,
-                żeby odpowiedzieć. Do 15.08 zawodnik nie miał w całym
-                produkcie ANI JEDNEJ drogi, żeby powiedzieć „zrobiłem" —
-                `kalendarz.tsx` zapisuje wyłącznie „nie odbyło się". */}
-            {renderPytaniaOWystapienia()}
+            {/* ── 9. WIERSZ „WCZORAJ BEZ OCENY" (makieta v3: 40 dp) ────
+                ⭐ TO JEST DRUGIE WEJŚCIE DO OCENY — dla rzeczy, których nie
+                ma już na dzisiejszej liście. ⛔ Rysuje się WYŁĄCZNIE, gdy
+                naprawdę coś czeka; wiersz „0 rzeczy" byłby listą zaległości. */}
+            {bezOceny.length > 0 ? (
+              <TouchableOpacity style={styles.inlineLink} onPress={() => setArkusz({ rodzaj: 'oceny' })}>
+                <Text style={styles.cardAction}>{WIERSZ_BEZ_OCENY(bezOceny.length)}</Text>
+              </TouchableOpacity>
+            ) : null}
 
-            {/* ── ⭐ B5.3: LICZNIK PRACY (WG-28, WG-37, WT-15) ─────────
-                Pierwszy konsument `policzWykonanaPrace` w całej appce.
-                Stoi POD zakresem i NIEZALEŻNIE od niego: „ile pracy odbyłem
-                w dwa tygodnie" jest tą samą odpowiedzią bez względu na to,
-                czy patrzę na dziś, czy na tydzień. ⛔ Zero dotknięć (P0). */}
-            {renderLicznikPracy()}
-
-            {/* ── ⭐ C4.3: DOROBEK — NAGRODA ZA WYKONANĄ PRACĘ (N1) ─────
-                Stoi POD licznikiem okna i mówi coś innego: tamten opisuje
-                RYTM ostatnich dwóch tygodni, ten — DOROBEK od początku.
-                ⛔ Zero dotknięć (P0): zawodnik, który wrócił po tygodniu
-                choroby, ma zobaczyć BEZ KLIKANIA, że nic nie stracił. */}
-            {renderNagrodaZaPrace()}
-
-            {/* ── ⭐ F1.2: PRACA WE WSZYSTKICH BLOKACH SKUPIENIA ────────
-                Trzecia liczba i trzecia inna odpowiedź. ⛔ Zero dotknięć (P0):
-                zawodnik, który wczoraj domknął czterotygodniowy Blok, ma
-                zobaczyć BEZ KLIKANIA, że praca z niego nie zniknęła razem
-                z Blokiem. Do 15.08 nie widział tu NIC — funkcja istniała
-                w `lib/` i nie miała ani jednego konsumenta. */}
-            {renderPracaWBlokach()}
-
-            {/* NAWIGACJA B3 08.08.2026 — to jest JEDYNE wejście do Kalendarza
-                po zabraniu jego zakładki z paska, więc link musi nazywać obie
-                rzeczy, które są po drugiej stronie: przeglądanie i dodawanie.
-                „Otwórz Kalendarz →" nie mówiłoby zawodnikowi, że stamtąd
-                planuje się trening. */}
-            <TouchableOpacity style={styles.inlineLink} onPress={() => router.push('/kalendarz')}>
-              <Text style={styles.cardAction}>Kalendarz — dodaj i zaplanuj →</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+            {/* ── 12. PRZYPIS (makieta v3: 42 dp) ─────────────────────── */}
+            <Text style={styles.licznikPodpis}>{PRZYPIS_OCENA_NALEZY_DO_RZECZY}</Text>
+          </>
+        )}
       </ScrollView>
+
+      {/* ── PRZYCISK „+" (makieta v3: `fab`) ───────────────────────────
+          ⛔ STOI POZA `ScrollView` I DLATEGO NIGDY NIE UCIEKA POD ZGIĘCIE.
+          Wszystko, co produkt kiedykolwiek policzy, wchodzi tędy albo przez
+          ankietę poranną. */}
+      <TouchableOpacity
+        style={styles.fab}
+        accessibilityRole="button"
+        accessibilityLabel={PLUS_ETYKIETA}
+        onPress={() => setArkusz({ rodzaj: 'plus' })}
+      >
+        <Text style={styles.fabZnak}>+</Text>
+      </TouchableOpacity>
+
+      {/* ── ARKUSZ (makieta v3: `sheet`) ───────────────────────────────
+          ⛔ STOI POZA `ScrollView`: to jest NAKŁADKA nad ekranem, a nie
+          kolejna rzecz na nim. Dlatego zdejmuje wysokość, zamiast ją
+          przesuwać — i dlatego miara ekranu liczy go na zero. */}
+      <Arkusz
+        widoczny={arkusz !== null}
+        naglowek={naglowekOtwartego}
+        naZamkniecie={() => setArkusz(null)}
+      >
+        {trescArkusza()}
+      </Arkusz>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  /** ⭐ PLAN-D-A1 — nagłówek dnia: tytuł i data w jednym wierszu (makieta `shd`). */
+  naglowekDnia: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-A1 18.08.2026 — KAFEL DNIA, PRZYCISK „+" I WIERSZE ARKUSZA
+  //
+  // ⚠️ ZERO NOWYCH BARW. Wszystkie trzy korzystają z tokenów, które w tym
+  // pliku już były (`surface`, `border`, `brand`) — makieta v3 też nie
+  // dokłada ani jednej barwy.
+  // ═══════════════════════════════════════════════════════════════════
+  /** Kafel dnia. Wysokość z makiety v3 (`kafelHTML`, 54 dp) — stąd `minHeight`. */
+  kafel: {
+    minHeight: 54, justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderLeftWidth: 4, borderLeftColor: colors.brand,
+    borderRadius: radii.md, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6,
+  },
+  kafelTytul: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
+  kafelPodpis: { ...typography.body, fontSize: 11, color: colors.textTertiary, marginTop: 2 },
+  /** Wiersz listy w arkuszu — bez ramki, bo to nie jest przycisk. */
+  arkuszWiersz: { ...typography.body, fontSize: 13, color: colors.textSecondary, paddingVertical: 5 },
+  /** Wybór w arkuszu („+" i kolizja) — to JEST przycisk, więc ma dotyk 48 dp. */
+  arkuszWybor: {
+    minHeight: minTouchHeight, justifyContent: 'center',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.md, padding: 12, marginBottom: 8,
+  },
+  /** ⛔ `position: 'absolute'` — przycisk „+" NIE PODNOSI ekranu ani o dp. */
+  fab: {
+    position: 'absolute', right: 16, bottom: 24, width: 60, height: 60, borderRadius: 30,
+    backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center',
+  },
+  fabZnak: { ...typography.display, fontSize: 30, color: colors.white, lineHeight: 34 },
   // W1: nadtytuły/etykiety sekcji na ink3 (koncepcja: ink3 = podpisy, nadtytuły)
   eyebrow: { ...typography.bodyMedium, fontSize: 12, letterSpacing: 1, textTransform: 'capitalize', color: colors.textTertiary, marginBottom: 4 },
-  title: { ...typography.display, fontSize: 32, marginBottom: spacing.lg, color: colors.textPrimary },
-  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 10 },
+  // ⭐ PLAN-D-A1 18.08.2026 — 32 → 26 px i odstęp lg → md. Makieta v3 (`shd .t`)
+  // rysuje tytuł ekranu w 26 px i mieści datę OBOK niego, w tym samym wierszu.
+  // ⛔ To nie jest zmiana hierarchii: tytuł nadal jest największym tekstem
+  // ekranu. To jest 13 dp oddane blokowi, który niesie treść, a nie nazwę.
+  title: { ...typography.display, fontSize: 26, marginBottom: spacing.md, color: colors.textPrimary },
+  // ⭐ PLAN-D-A1 18.08.2026 — odstęp pod etykietą 10 → 4 dp. Makieta v3 daje
+  // etykiecie „Twój dzień" 26 dp W CAŁOŚCI; te 6 dp to była różnica między
+  // ekranem mieszczącym się nad zgięciem (808 dp) a ekranem, którego przypis
+  // linia zgięcia PRZECINA. ⛔ Rzecz przecięta linią jest defektem, nie ozdobą.
+  sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 4 },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, padding: 16, marginBottom: 10 },
   cardMuted: { opacity: 0.7 },
   // PLAN-D-F 08.2026 — karta głosu tygodnia. Ta sama rodzina co `card`,
@@ -4042,7 +3676,7 @@ const styles = StyleSheet.create({
   // co ta runda likwiduje.
   odpowiedzCard: {
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-    borderRadius: radii.md, padding: 16, overflow: 'hidden',
+    borderRadius: radii.md, padding: 12, overflow: 'hidden',
   },
   odpowiedzStripe: { ...skew.stripe, height: 6, backgroundColor: colors.brand, marginBottom: 12 },
   // Nadtytuły trzech części. Te same wartości co `sectionLabel`, bo to JEST
@@ -4054,7 +3688,13 @@ const styles = StyleSheet.create({
   // Jedna rzecz do zrobienia. Największy tekst w karcie — bo to jest
   // odpowiedź na pytanie, z którym zawodnik na ten ekran wchodzi.
   odpowiedzTresc: { ...typography.bodySemiBold, fontSize: 16, lineHeight: 23, color: colors.textPrimary },
-  odpowiedzCzesc: { marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border },
+  // ⭐ PLAN-D-A1 18.08.2026 — ODSTĘP CZĘŚCI JEDNEJ ODPOWIEDZI: 16+14 → 10+8.
+  // ⚠️ To NIE JEST kosmetyka. Te 30 dp chromu na część powstały wtedy, gdy pod
+  // nimi stały CZTERY pozycje kolejki i trzeba je było od siebie odciąć. Od
+  // 18.08 pozycja jest JEDNA, a kreska zostaje — bo rozdziela „co zrobić" od
+  // „dlaczego". ⛔ Zdejmujemy odstęp, nie kreskę: kreska niesie znaczenie,
+  // odstęp niósł sąsiedztwo, którego już nie ma. Zysk zmierzony: 24 dp z 862.
+  odpowiedzCzesc: { marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border },
   odpowiedzDlaczego: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   odpowiedzDowod: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textPrimary, marginBottom: 4 },
   // PLAN-D-B2 — dwa stany pustej kolejki i zdanie o niepełnej liście.
@@ -4063,7 +3703,7 @@ const styles = StyleSheet.create({
   kolejkaPustka: { ...typography.body, fontSize: 15, lineHeight: 22, color: colors.textSecondary },
   kolejkaNiepelna: {
     ...typography.body, fontSize: 12, lineHeight: 18, color: colors.textTertiary,
-    marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border,
+    marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border,
   },
   // ⭐ PLAN-D-B4 — TRZECIA CZĘŚĆ WGLĄDU.
   // ⚠️ Te same wartości co `odpowiedzCzesc`: kreska u góry zamiast własnej

@@ -145,8 +145,12 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
   const PLIK_LISTA = 'components/ListaZadan.tsx';
   /** Wgląd wychodzi do zawodnika jako POZYCJA KOLEJKI — rysuje ją ta karta. */
   const PLIK_KARTA = 'components/PozycjaKolejkiCard.tsx';
+  /** ⭐ PLAN-D-S1 — JEDYNA kopia rysowania TRZECIEJ CZĘŚCI wglądu, od 18.08.2026. */
+  const PLIK_RYSUJACY = 'components/WgladPozycji.tsx';
   const dzis = bezKomentarzy(surowe(PLIK_DZIS));
   const karta = bezKomentarzy(surowe(PLIK_KARTA));
+  const lista = bezKomentarzy(surowe(PLIK_LISTA));
+  const rysujacy = bezKomentarzy(surowe(PLIK_RYSUJACY));
 
   console.log('0-EK. EKRAN, KTÓRY RYSUJE WGLĄDY (K4 / O75)');
 
@@ -186,13 +190,38 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
   // złapała blok od PIERWSZEGO `import {` w pliku (a `dzis.tsx` ma ich kilkadziesiąt)
   // aż do klamry przy `wgladyZAlgorytmu` i naliczyła 76 „funkcji modułu" zamiast
   // czterech. Strażnik, który liczy nie to, co myśli, jest gorszy niż jego brak.
-  const importyRuntime = Array.from(
-    dzis.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*\/wgladyZAlgorytmu'/g))
+  const importyZ = (tresc: string): string[] => Array.from(
+    tresc.matchAll(/import\s*\{([^}]*)\}\s*from\s*'[^']*\/wgladyZAlgorytmu'/g))
     .flatMap((m) => m[1].split(','))
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith('type '))
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0 && !x.startsWith('type '))
     .sort();
-  const IMPORTY_ZMIERZONE = ['dataPoPolsku', 'liczbaPoPolsku', 'policzWglady', 'wgladDlaPozycji'];
+  const importyRuntime = importyZ(dzis);
+  // ⭐ PLAN-D-S1 18.08.2026 — POWIERZCHNIA IMPORTU MIERZONA PER PLIK.
+  //
+  // Do 18.08 ta asercja pytała o JEDEN plik (`dzis.tsx`) i żądała czterech
+  // funkcji, bo cztery tam stały. Po pasach A1 i S1 te same cztery funkcje
+  // stoją w TRZECH plikach i każdy bierze dokładnie tyle, ile mu potrzeba:
+  // producent na ekranie, wybór wglądu przy pozycji, formatowanie w rysowaniu.
+  // ⛔ RÓWNOŚĆ PER PLIK jest MOCNIEJSZA niż suma po całym produkcie: suma
+  // przeszłaby także wtedy, gdyby to komponent rysujący zaczął LICZYĆ wglądy.
+  //
+  // ⚠️ DO 18.08.2026 RANO `app/(tabs)/dzis.tsx` miał DWA MARTWE IMPORTY
+  // (`dataPoPolsku`, `liczbaPoPolsku`) — zostały po komponencie `WgladPozycji`,
+  // którego pas A1 stamtąd zdjął, a pas S1 wyprowadził do
+  // `components/WgladPozycji.tsx`. Pas S1 nie mógł tknąć tamtego pliku i wpisał
+  // je do noty jako dług „do skreślenia jedną linią".
+  // ⭐ PLAN-D-S2 18.08.2026 — ZAPADKA PRZESTAWIONA 3 → 1 NAZWA DLA `dzis.tsx`.
+  // ⚠️ POPRAWIONY ZOSTAŁ KOD, NIE ASERCJA: obie nazwy zostały z tego pliku
+  // FIZYCZNIE USUNIĘTE (nic nie przestało być rysowane — żyją w pliku, który
+  // te punkty osi naprawdę rysuje). ⛔ Nadal RÓWNOŚĆ, nie „≥ 1": gdyby ekran
+  // sięgnął po którąkolwiek z nich z powrotem, zapali się tak samo.
+  const IMPORTY_ZMIERZONE_PER_PLIK: Readonly<Record<string, string[]>> = {
+    [PLIK_DZIS]: ['policzWglady'],
+    [PLIK_LISTA]: ['policzWglady', 'wgladDlaPozycji'],
+    [PLIK_RYSUJACY]: ['dataPoPolsku', 'liczbaPoPolsku'],
+  };
+  const IMPORTY_ZMIERZONE = IMPORTY_ZMIERZONE_PER_PLIK[PLIK_DZIS];
 
   console.log('[pomiar] 16.08.2026, main=123e09c — lib/wgladyZAlgorytmu.ts: '
     + `konsumenci w app/+components/ = ${konsumenci.length} [${konsumenci.join(', ') || '—'}] · `
@@ -212,7 +241,16 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
   // produkcie JEDNĄ definicję.
   // ⛔ ZAPADKA ZOSTAJE NA RÓWNOŚĆ (O73): „co najmniej dwa" przepuściłoby
   // trzeci ekran, który zacznie rysować wglądy obok rankera.
-  const KONSUMENCI = [PLIK_DZIS, PLIK_LISTA].sort();
+  // ⭐ PLAN-D-S1 18.08.2026 — ZAPADKA PRZESTAWIONA Z DWÓCH MIEJSC NA TRZY.
+  // ⚠️ POPRAWIONA ZOSTAŁA ASERCJA, NIE KOD — i to jest przestawienie, nie
+  // poluzowanie: nadal RÓWNOŚĆ. Doszedł `components/WgladPozycji.tsx`, czyli
+  // JEDYNA kopia rysowania TRZECIEJ CZĘŚCI wglądu („jedna rzecz do zrobienia",
+  // M4), wyprowadzona z `app/(tabs)/dzis.tsx` po tym, jak pas A1 zdjął ją stamtąd
+  // razem z 330 dp i wgląd przez jedną rundę kończył się na wiedzy.
+  // ⛔ To NIE jest trzeci producent: plik bierze z modułu wyłącznie dwie
+  // funkcje formatujące (`dataPoPolsku`, `liczbaPoPolsku`) i gotowy `Wglad` —
+  // pilnuje tego zapadka powierzchni importu niżej, per plik.
+  const KONSUMENCI = [PLIK_DZIS, PLIK_LISTA, PLIK_RYSUJACY].sort();
   const brakujacy = KONSUMENCI.filter((p) => !konsumenci.includes(p));
   const nadmiarowi = konsumenci.filter((p) => !KONSUMENCI.includes(p));
   check('⭐ (A2-0) wglądy rysują DOKŁADNIE te dwa ekrany, co 17.08 — RÓWNOŚĆ, nie „≥ 1" (O73)',
@@ -223,12 +261,28 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
     + 'miejsce podaje wglądy przez `dodatkowi` rankera, a nie obok niego — wgląd o objętości '
     + 'pokazany zawodnikowi po urazie jest dokładnie tym, czemu ranker zapobiega.');
 
-  check('⛔ (I2-0) ekran bierze z modułu DOKŁADNIE te cztery funkcje, co 16.08 — ani jednego progu',
-    JSON.stringify(importyRuntime) === JSON.stringify(IMPORTY_ZMIERZONE),
-    `zaimportowane z modułu: ${JSON.stringify(importyRuntime)} (zmierzone 16.08: `
-    + `${JSON.stringify(IMPORTY_ZMIERZONE)}) — doszło: ekran sięgnął po próg albo po producenta `
-    + 'i zacznie rozstrzygać u siebie; ubyło: któraś funkcja przestała być wołana, '
-    + 'a wtedy albo ekran liczy to samo drugi raz, albo przestał to pokazywać.');
+  for (const [plik, oczekiwane] of Object.entries(IMPORTY_ZMIERZONE_PER_PLIK)) {
+    const wzięte = importyZ(bezKomentarzy(surowe(plik)));
+    check(`⛔ (I2-0) \`${plik}\` bierze z modułu DOKŁADNIE te funkcje, co 18.08 — ani jednego progu`,
+      JSON.stringify(wzięte) === JSON.stringify([...oczekiwane].sort()),
+      `zaimportowane: ${JSON.stringify(wzięte)} (zmierzone 18.08: ${JSON.stringify(oczekiwane)}) — `
+      + 'doszło: plik sięgnął po próg albo po producenta i zacznie rozstrzygać u siebie; '
+      + 'ubyło: któraś funkcja przestała być wołana, a wtedy albo ktoś liczy to samo drugi raz, '
+      + 'albo przestał to pokazywać.');
+  }
+
+  // ⛔ ZAPADKA NA SUMĘ: cztery funkcje modułu mają POKRYCIE w produkcie.
+  // Bez niej trzy równości wyżej dałoby się spełnić, wykreślając funkcję
+  // z oczekiwań i z pliku naraz.
+  const uzyteWProdukcie = new Set(Object.keys(IMPORTY_ZMIERZONE_PER_PLIK)
+    .flatMap((f) => importyZ(bezKomentarzy(surowe(f)))));
+  const CZTERY_FUNKCJE = ['dataPoPolsku', 'liczbaPoPolsku', 'policzWglady', 'wgladDlaPozycji'];
+  check('⭐ (I2-0) WSZYSTKIE CZTERY funkcje modułu mają konsumenta w produkcie (O73)',
+    CZTERY_FUNKCJE.every((f) => uzyteWProdukcie.has(f)) && uzyteWProdukcie.size === CZTERY_FUNKCJE.length,
+    `wołane: ${[...uzyteWProdukcie].sort().join(', ')} — brakuje: `
+    + `${CZTERY_FUNKCJE.filter((f) => !uzyteWProdukcie.has(f)).join(', ') || '—'}. `
+    + '⛔ `wgladDlaPozycji` bez konsumenta znaczy, że trzecia część wglądu („jedna rzecz '
+    + 'do zrobienia", M4) znowu nie ma jak wyjść z producenta.');
 
   // ── ⛔ (I2-0a) PROGI NALEŻĄ DO PRODUCENTA, NIE DO EKRANU ──
   // Defekt, którego pilnuje: `if (noce.length >= 3)` na ekranie. Wtedy próg
@@ -275,13 +329,26 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
   // pokazywać `dlaczego`, liczba oparta na słabym dowodzie zostanie zawodnikowi
   // podana jako fakt bez zastrzeżenia — i nikt tego nie zobaczy, bo część 1
   // i część 3 nadal będą na miejscu.
+  // ⭐ PRZECELOWANA 18.08.2026 (pas S1) — REGUŁA TA SAMA, DRUGA ŚCIEŻKA W INNYM
+  // PLIKU. Do 18.08 obie ścieżki stały na „Dziś": pierwsza pozycja rysowała
+  // `{p.dlaczego}` sama, a pozostałe szły przez kartę z `pokazacDlaczego={i !== 0}`.
+  // Pas A1 zostawił na „Dziś" JEDNĄ pozycję (makieta v3), więc druga ścieżka
+  // przeprowadziła się do listy „Moje zadania" — tam `<PozycjaKolejkiCard>`
+  // dostaje pozycję BEZ `pokazacDlaczego`, czyli na domyślnym `true`.
+  // ⛔ Reguła nie osłabła: nadal żądamy OBU ścieżek, każdej w swoim miejscu,
+  // i nadal żądamy, żeby karta naprawdę rysowała `{pozycja.dlaczego}`.
+  const kartaWListe = lista.slice(lista.indexOf('<PozycjaKolejkiCard'),
+    lista.indexOf('<PozycjaKolejkiCard') + 120);
   check('⭐ (I2-0) `dlaczego` (z doszytym `czegoNieMowi`) rysują OBIE ścieżki — pierwsza i reszta',
-    /\{p\.dlaczego\}/.test(dzis) && /pokazacDlaczego=\{i !== 0\}/.test(dzis)
-    && /\{pozycja\.dlaczego\}/.test(karta),
-    'zniknęła jedna z dwóch ścieżek rysowania `dlaczego`: pierwsza pozycja rysuje je sama '
-    + '(`{p.dlaczego}` pod nagłówkiem „dlaczego akurat to"), pozostałe przez kartę '
-    + '(`pokazacDlaczego={i !== 0}`). `czegoNieMowi` wchodzi WYŁĄCZNIE tędy (WG-33 / Z0-a), '
-    + 'więc bez tego zawodnik czyta liczbę ze słabego dowodu bez ani jednego zastrzeżenia.');
+    /\{pozycjeNaDzis\[0\]\.dlaczego\}/.test(dzis)
+    && /\{pozycja\.dlaczego\}/.test(karta)
+    && /pokazacDlaczego\s*=\s*true/.test(karta)
+    && lista.includes('<PozycjaKolejkiCard') && !/pokazacDlaczego/.test(kartaWListe),
+    'zniknęła jedna z dwóch ścieżek rysowania `dlaczego`: pierwsza pozycja na „Dziś" rysuje je '
+    + 'sama (`{pozycjeNaDzis[0].dlaczego}` pod nagłówkiem „dlaczego akurat to"), pozostałe — '
+    + 'na liście „Moje zadania" — przez kartę na jej domyślnym `pokazacDlaczego = true`. '
+    + '`czegoNieMowi` wchodzi WYŁĄCZNIE tędy (WG-33 / Z0-a), więc bez tego zawodnik czyta '
+    + 'liczbę ze słabego dowodu bez ani jednego zastrzeżenia.');
 
   // ── ⛔ (I2-0d) CZEGO ZAWODNIK NIE MA ZOBACZYĆ ──
   // Pola maszynowe wglądu. „Siła dowodu: słaby" i „rejestr: propozycja" to są
@@ -301,9 +368,12 @@ console.log('wgladyZAlgorytmu.selftest.ts — strażnik producenta wglądów (pa
   // pól maszynowych") spełnia w komplecie ekran, który NIE RYSUJE WGLĄDU WCALE.
   // Ta asercja wymaga, żeby oś pomiarów naprawdę niosła LICZBĘ I JEDNOSTKĘ:
   // sama lista dat nie jest osią, tylko listą dat.
+  // ⭐ PRZECELOWANA 18.08.2026 (pas S1): oś pomiarów przeprowadziła się razem
+  // z całą trzecią częścią wglądu do `components/WgladPozycji.tsx` — jedynej
+  // kopii jej rysowania w produkcie. Warunek co do znaku ten sam.
   check('⭐ (I2-0) oś pomiarów NAPRAWDĘ niesie liczbę i jednostkę, formatowane funkcją modułu',
-    /liczbaPoPolsku\(p\.wartosc\)/.test(dzis) && /\{p\.jednostka\}/.test(dzis)
-    && /dataPoPolsku\(p\.dzien\)/.test(dzis),
+    /liczbaPoPolsku\(p\.wartosc\)/.test(rysujacy) && /\{p\.jednostka\}/.test(rysujacy)
+    && /dataPoPolsku\(p\.dzien\)/.test(rysujacy),
     'z osi zniknęła wartość, jednostka albo data — a wtedy cztery zakazy wyżej są spełnione '
     + 'przez ekran, który wglądu nie pokazuje. Zawodnik traci jedyne miejsce, w którym może '
     + 'sprawdzić, na jakich pomiarach stoi zdanie o nim (WG-34); zostaje mu samo twierdzenie.');

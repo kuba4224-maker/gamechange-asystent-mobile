@@ -221,8 +221,14 @@ function check(label: string, cond: boolean, detail: string) {
 {
   const KORZENIE = ['app', 'components', 'lib', 'tests', 'constants'];
   const przemiec = (dir: string, zebrane: string[] = []): string[] => {
-    let wpisy: ReturnType<typeof readdirSync>;
-    try { wpisy = readdirSync(dir, { withFileTypes: true }); } catch { return zebrane; }
+    // ⚠️ BEZ ADNOTACJI TYPU — świadomie. `ReturnType<typeof readdirSync>` wybiera
+    // przeciążenie oddające `Dirent<Buffer>`, więc na nowszym `@types/node`
+    // `w.name` przestaje być napisem i plik nie kompiluje się (6 błędów, 18.08).
+    // ⛔ Ten defekt NIE pochodzi z rundy przebudowy — stoi w repozytorium od dawna.
+    const wpisy = (() => {
+      try { return readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+    })();
+    if (wpisy === null) return zebrane;
     for (const w of wpisy) {
       if (w.name === 'node_modules' || w.name.startsWith('.') || w.name === '_diag_backup') continue;
       const pelna = join(dir, w.name);
@@ -260,9 +266,20 @@ function check(label: string, cond: boolean, detail: string) {
   // i `lib/sladZachowania.selftest.ts` razem z ich modułami (D7, dowód zera
   // konsumentów). ⛔ Nie naprawiono tam niczego: pliki po prostu przestały
   // istnieć. Nagrobek jest w `claude/PRZEKAZANIE_PAS_L1_17_08_2026.md`.
-  const PLIKOW_Z_WZORCEM_17_08_2026 = 33;
-  check(`⭐ D6 ZAPADKA NA RÓWNOŚĆ — plików z wzorcem „blok przed linią" jest DOKŁADNIE ${PLIKOW_Z_WZORCEM_17_08_2026}`,
-    zWzorcem.length === PLIKOW_Z_WZORCEM_17_08_2026,
+  // ⭐ AKTUALIZACJA 18.08.2026, PAS S1: 33 → 37. Liczba WZROSŁA O CZTERY i to
+  // NIE JEST regres: pas A1 dopisał 18.08.2026 czterech nowych strażników
+  // (`lib/arkusz.selftest.ts`, `lib/dodanieWstecz.selftest.ts`,
+  // `lib/meczWiecej.selftest.ts`, `lib/nawigacja.selftest.ts`), a każdy z nich
+  // używa TEGO SAMEGO, poprawnego idiomu `bezKomentarzy` co pozostałe 33 —
+  // czyli ma wzorzec w pliku, ale nie zjada nim własnego źródła. Dowodzi tego
+  // asercja D5 niżej, która na wszystkich 37 plikach nadal pokazuje ZERO.
+  // ⛔ Liczba jest przestawiona, nie poluzowana: nadal jest to RÓWNOŚĆ, więc
+  // piąty taki plik zapali ją tak samo jak dotąd.
+  // ⚠️ Nowe pliki pasa S1 (`components/WgladPozycji.tsx`) NIE SĄ na tej liście
+  // — sprawdzone uruchomieniem 18.08.2026.
+  const PLIKOW_Z_WZORCEM_18_08_2026 = 37;
+  check(`⭐ D6 ZAPADKA NA RÓWNOŚĆ — plików z wzorcem „blok przed linią" jest DOKŁADNIE ${PLIKOW_Z_WZORCEM_18_08_2026}`,
+    zWzorcem.length === PLIKOW_Z_WZORCEM_18_08_2026,
     `${zWzorcem.length}: ${zWzorcem.join(', ')} — ⛔ jeżeli liczba WZROSŁA, ktoś dopisał `
     + 'strażnika, który może zjeść własne źródło: przejdź tekst RAZ, jak `bezKomentarzy` '
     + 'w tym pliku. Jeżeli SPADŁA — napraw tę liczbę, to dobra wiadomość.');
