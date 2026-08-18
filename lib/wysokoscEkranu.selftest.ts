@@ -254,11 +254,11 @@ const ZAPADKI_POZOSTALE = [
     ustawiona: '17.08.2026',
     powod: 'pas M2 — historia wpisów rysuje do 20 wierszy (`.limit(20)` w tym ekranie), '
       + 'a liczyła się jako jeden; 1 570 → 3 712 dp' },
-  { ekran: 'mecz', pozycji: 20, widocznych: 6, przecietych: 1, wysokoscDp: 5761,
+  { ekran: 'mecz', pozycji: 20, widocznych: 6, przecietych: 1, wysokoscDp: 5863,
     ustawiona: '17.08.2026',
     powod: 'pas M2 — cztery listy naraz: pytania segmentowe, opcje stanu, historia meczów '
       + 'i wiersze urazów; 3 229 → 5 761 dp' },
-  { ekran: 'kalendarz', pozycji: 16, widocznych: 4, przecietych: 1, wysokoscDp: 2650,
+  { ekran: 'kalendarz', pozycji: 16, widocznych: 4, przecietych: 1, wysokoscDp: 2802,
     ustawiona: '17.08.2026',
     powod: 'pas M2 — ekran, od którego ten pas się zaczął: 536 → 2 650 dp. Mierzona jest '
       + 'zakładka „Listy" (najgorszy przypadek); zakładka „Tydzień" ma 1 466 dp i pilnuje jej '

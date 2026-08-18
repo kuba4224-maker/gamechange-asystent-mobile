@@ -164,6 +164,13 @@ export default function MeczScreen() {
   const [opponentScore, setOpponentScore] = useState('');
   const [role, setRole] = useState('');
   const [minutes, setMinutes] = useState('');
+  /**
+   * ⭐ PLAN-D-W2 17.08.2026 — DŁUGOŚĆ CAŁEGO MECZU, nie minuty zawodnika.
+   * ⛔ To jest MIANOWNIK wagi meczu. Bez niego produkt zakłada 90 minut,
+   * a zawodnik U13 grający pełne 60 dostaje 3 punkty zamiast 4 — czyli karę
+   * za to, że jego mecz jest krótszy. Pusto = nie wiemy, i to jest dozwolone.
+   */
+  const [dlugoscMeczu, setDlugoscMeczu] = useState('');
   const [matchRpe, setMatchRpe] = useState<number>();
   // PLAN-D-A7 — godzina rozpoczęcia meczu, WYŁĄCZNIE do kafla w kalendarzu.
   // ⚠️ `match_contexts` NIE MA kolumny na czas ani na datę meczu (zmierzone
@@ -367,7 +374,7 @@ export default function MeczScreen() {
   });
 
   const resetForm = () => {
-    setOwnScore(''); setOpponentScore(''); setRole(''); setMinutes(''); setMatchRpe(undefined);
+    setOwnScore(''); setOpponentScore(''); setRole(''); setMinutes(''); setDlugoscMeczu(''); setMatchRpe(undefined);
     setGodzinaMeczu('');
     setPlayedDifferentPosition(false); setPositionPlayedToday('');
     setEnteredRecoveryState(null); setDemandingConditions(false);
@@ -409,7 +416,7 @@ export default function MeczScreen() {
     // różnica między jednym torem a dwoma.
     const { data: istniejaceSurowe, error: odczytErr } = await supabase
       .from('calendar_events')
-      .select('id,event_type,status,scheduled_date,scheduled_time')
+      .select('id,event_type,status,scheduled_date,scheduled_time,planned_minutes')
       .eq('user_id', currentUser.id)
       .eq('event_type', RODZAJ_MECZ)
       .eq('scheduled_date', data);
@@ -426,6 +433,9 @@ export default function MeczScreen() {
       data,
       godzina,
       tytul,
+      // ⭐ PLAN-D-W2 — pusto zostaje pustem: nie podstawiamy tu 90 minut,
+      // bo zmyślona długość weszłaby do wagi pracy jako pomiar (Z0).
+      dlugoscMeczu: dlugoscMeczu.trim() === '' ? null : Number(dlugoscMeczu),
       istniejace: (istniejaceSurowe ?? []) as WierszKalendarzaDoDecyzji[],
     });
     console.log(`[PLAN-D-A7] mecz → kalendarz: ${decyzja.powod}`);
@@ -769,6 +779,12 @@ export default function MeczScreen() {
 
         <Text style={styles.label}>Minuty na boisku</Text>
         <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={minutes} onChangeText={setMinutes} placeholder="np. 90" />
+
+        {/* ⭐ PLAN-D-W2 — długość CAŁEGO meczu. Dwie różne liczby i muszą
+            stać obok siebie, żeby nikt ich nie pomylił: „ile grałeś"
+            i „ile trwał mecz". Pusto jest poprawne. */}
+        <Text style={styles.label}>Ile trwał cały mecz (opcjonalnie)</Text>
+        <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={dlugoscMeczu} onChangeText={setDlugoscMeczu} placeholder="np. 60 przy młodszych rocznikach" />
 
         {/* PLAN-D-A7 08.2026 — GODZINA ROZPOCZĘCIA, WYŁĄCZNIE DO KALENDARZA.
             To NIE jest kolejne pole ankiety meczowej: nie idzie do

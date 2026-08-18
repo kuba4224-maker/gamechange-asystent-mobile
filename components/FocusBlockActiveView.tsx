@@ -515,6 +515,25 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
         // niż rzucić błąd i nie pozwolić kontynuować wcale.
         if (dayCodes.length > 0) {
           const newDates = buildContinuationDates(dayCodes, CONTINUE_EXTRA_WEEKS, lastDate);
+          // ⭐ PLAN-D-W2 — odczyt długości z ostatniej sesji tego Bloku.
+          let dlugoscZOstatniejSesji: number | null = null;
+          {
+            const { data: ostatnia, error: dlErr } = await supabase
+              .from('calendar_events')
+              .select('planned_minutes')
+              .eq('focus_block_id', focusBlock.id)
+              .not('planned_minutes', 'is', null)
+              .order('scheduled_date', { ascending: false })
+              .limit(1);
+            // ⛔ O83 — klient Supabase NIE RZUCA. Błąd odczytany jawnie:
+            // nieudany odczyt zostawia `null`, czyli „nie wiemy", a nie liczbę.
+            if (dlErr) {
+              console.warn(`FocusBlockActiveView: [PLAN-D-W2] nie odczytałem długości sesji Bloku — ${dlErr.message}`);
+            } else if (Array.isArray(ostatnia) && ostatnia.length > 0
+              && typeof ostatnia[0]?.planned_minutes === 'number') {
+              dlugoscZOstatniejSesji = ostatnia[0].planned_minutes;
+            }
+          }
           const eventsBody = newDates.map((d) => ({
             user_id: currentUserId,
             event_type: 'micro_session',
@@ -522,6 +541,13 @@ export default function FocusBlockActiveView({ focusBlock, elementLabel, current
             // PLAN-D-A 08.2026 — tytuł widoczny w Kalendarzu.
             title: `Blok: ${elementLabel}`,
             status: 'scheduled',
+            // ⭐ PLAN-D-W2 — długość sesji z konfiguracji Bloku, nie z pytania.
+            // ⚠️ `focus_blocks` NIE MA kolumny na czas trwania (zmierzone 17.08),
+            // więc przedłużenie Bloku odtwarza ją z OSTATNIEJ zaplanowanej sesji
+            // tego Bloku. Gdy i tej nie ma — zostaje `null`, czyli „nie wiemy" (R5).
+            // ⛔ Nie wpisujemy tu liczby domyślnej: zmyślona długość weszłaby
+            // do wagi pracy jako pomiar.
+            planned_minutes: dlugoscZOstatniejSesji,
             scheduled_date: d,
             goal_id: goalIdFromHistory,
             focus_block_id: focusBlock.id,

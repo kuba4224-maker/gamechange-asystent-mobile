@@ -666,5 +666,104 @@ function check(label: string, cond: boolean, detail: string) {
     `kalendarz=${kalendarz.length}B mecz=${mecz.length}B dzis=${dzis.length}B`);
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+// W2. ⭐ „ILE TO POTRWA" — kalendarz zaczyna znać długość (17.08.2026)
+// ═══════════════════════════════════════════════════════════════════
+console.log('\nW2. ⭐ DŁUGOŚĆ WYDARZENIA W KALENDARZU');
+{
+  const MIEJSCA_WSTAWIAJACE = [
+    'app/(tabs)/kalendarz.tsx',
+    'app/(tabs)/mecz.tsx',
+    'components/FocusBlockPlanner.tsx',
+    'components/FocusBlockActiveView.tsx',
+  ] as const;
+
+  // ⛔ ZAPADKA NA RÓWNOŚĆ, nie na „≥1": kto dołoży PIĄTE miejsce wstawiające
+  // wiersz do kalendarza, zobaczy czerwień, a nie ciszę.
+  {
+    const wstawiajace = MIEJSCA_WSTAWIAJACE.filter((f) =>
+      /from\('calendar_events'\)\s*\.?\s*\n?\s*\.insert\(|from\('calendar_events'\)\.insert\(/.test(zrodlo(f)));
+    const zDlugoscia = MIEJSCA_WSTAWIAJACE.filter((f) => /planned_minutes/.test(zrodlo(f)));
+    check('⭐⭐ (W2, D1) KAŻDE miejsce wstawiające wydarzenie podaje `planned_minutes` — zapadka na RÓWNOŚĆ',
+      zDlugoscia.length === MIEJSCA_WSTAWIAJACE.length,
+      `z długością: ${zDlugoscia.length} z ${MIEJSCA_WSTAWIAJACE.length} — brakuje: `
+      + MIEJSCA_WSTAWIAJACE.filter((f) => !zDlugoscia.includes(f)).join(', '));
+    check('⛔ (W2) lista miejsc wstawiających jest AKTUALNA — żadne z czterech nie przestało wstawiać',
+      wstawiajace.length + (/insert\(decyzja\.wiersz\)/.test(zrodlo('app/(tabs)/mecz.tsx')) ? 1 : 0) >= 4,
+      `wstawiających: ${wstawiajace.join(', ')}`);
+  }
+
+  // ⛔ D2 — pominięte pole daje `null`, a NIE zero.
+  {
+    const kal = zrodlo('app/(tabs)/kalendarz.tsx');
+    check('⛔ (W2, D2, R5) pominięta długość NIE JEST wysyłana jako 0 — pole idzie tylko wtedy, gdy zawodnik je wskazał',
+      /if \(dlugoscMin !== null\) body\.planned_minutes = dlugoscMin;/.test(kal)
+      && !/planned_minutes:\s*0\b/.test(kal),
+      'ekran kalendarza wysyła długość bezwarunkowo albo zerem');
+
+    const decyzja = zdecydujOWierszuMeczu({
+      userId: 'u', data: '2026-08-17', godzina: null, tytul: 'Mecz', istniejace: [],
+    });
+    check('⭐ (W2, D2, R5) mecz BEZ podanej długości daje wiersz z `null`, ⛔ nie z 90 i nie z 0',
+      decyzja.rodzaj === 'utworz' && decyzja.wiersz.planned_minutes === null,
+      JSON.stringify(decyzja.rodzaj === 'utworz' ? decyzja.wiersz : decyzja));
+
+    const zDlugoscia = zdecydujOWierszuMeczu({
+      userId: 'u', data: '2026-08-17', godzina: null, tytul: 'Mecz', dlugoscMeczu: 60, istniejace: [],
+    });
+    check('⭐ (W2) …a mecz Z podaną długością niesie DOKŁADNIE tę liczbę',
+      zDlugoscia.rodzaj === 'utworz' && zDlugoscia.wiersz.planned_minutes === 60,
+      JSON.stringify(zDlugoscia.rodzaj === 'utworz' ? zDlugoscia.wiersz : zDlugoscia));
+
+    const bezsens = zdecydujOWierszuMeczu({
+      userId: 'u', data: '2026-08-17', godzina: null, tytul: 'Mecz', dlugoscMeczu: 0, istniejace: [],
+    });
+    check('⛔ (W2) długość 0 albo ujemna NIE WCHODZI do wiersza — zero minut meczu nie istnieje',
+      bezsens.rodzaj === 'utworz' && bezsens.wiersz.planned_minutes === null,
+      JSON.stringify(bezsens.rodzaj === 'utworz' ? bezsens.wiersz : bezsens));
+  }
+
+  // ⛔ D3 — Blok nie pyta zawodnika o rzecz, którą produkt wie.
+  {
+    const planer = zrodlo('components/FocusBlockPlanner.tsx');
+    check('⭐ (W2, D3, P0) planer Bloku NIE PYTA o długość — bierze `suggestion.durationMinutes`, którą zawodnik już podał',
+      /planned_minutes: suggestion\.durationMinutes/.test(planer),
+      'planer nie przekazuje długości z konfiguracji Bloku');
+
+    const widok = zrodlo('components/FocusBlockActiveView.tsx');
+    check('⭐ (W2, D3) przedłużenie Bloku ODTWARZA długość z ostatniej sesji, ⛔ nie podstawia liczby domyślnej',
+      /planned_minutes: dlugoscZOstatniejSesji/.test(widok)
+      && /let dlugoscZOstatniejSesji: number \| null = null/.test(widok),
+      'przedłużenie Bloku zmyśla długość albo jej nie niesie');
+    check('⛔ (W2, O83) …i odczytuje `error` tej dodatkowej rozmowy z bazą — cichy brak nie przechodzi',
+      /if \(dlErr\)/.test(widok),
+      'nowy odczyt nie ma odczytanego błędu');
+  }
+
+  // ⭐ D4 — jedna lista długości w całym produkcie (O92).
+  {
+    const kal = zrodlo('app/(tabs)/kalendarz.tsx');
+    check('⭐ (W2, D4, O92) ekran kalendarza bierze szóstkę długości ZE STAŁEJ `MINUTY_DO_WYBORU`, nie z własnej listy',
+      /import \{ MINUTY_DO_WYBORU \} from '\.\.\/\.\.\/lib\/ocenaZKafla'/.test(kal)
+      && /MINUTY_DO_WYBORU\.map/.test(kal)
+      && !/\[15, 30, 45, 60, 90, 120\]/.test(kal),
+      'ekran kalendarza ma własną kopię listy długości');
+    check('⛔ (W2, D4) ⛔ ani jedna długość nie jest zaznaczona na starcie',
+      /useState<number \| null>\(null\)/.test(kal),
+      'pole długości startuje z wartością — czyli podpowiada');
+  }
+
+  // ⛔ D5 — próg punktowy nie pokazuje się zawodnikowi.
+  {
+    const kal = readFileSync(join(root, 'app', '(tabs)', 'kalendarz.tsx'), 'utf8');
+    const napisy = (kal.match(/(?:placeholder|label)[^\n]*?["'`]([^"'`]{3,})["'`]/g) ?? []).join(' ')
+      + (kal.match(/>\s*\{?\s*['"`][^'"`]{3,}['"`]/g) ?? []).join(' ');
+    check('⛔ (W2, D5) na ekranie kalendarza NIE MA ani słowa o punktach ani o progu 45 minut',
+      !/punkt|Punkt|próg 45|45 minut/.test(napisy),
+      'ekran zdradza skalę punktową — zawodnik zacznie wpisywać liczbę pod skalę, a nie prawdę');
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} asercji nie przeszło`);

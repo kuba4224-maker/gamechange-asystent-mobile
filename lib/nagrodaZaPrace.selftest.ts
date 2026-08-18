@@ -62,6 +62,12 @@ import {
   maPomiarObciazenia,
   PROGI,
   WAGI_PRACY,
+  WAGA_ZOBOWIAZANIA,
+  wagaSesji,
+  wagaMeczu,
+  PROG_DLUGOSCI_SESJI_MIN,
+  MECZ_BEZ_MINUT_NA_BOISKU,
+  MAKS_PUNKTOW_ZA_MECZ,
   ZASADY_NAGRODY_PRAWDZIWE,
   type JednostkaPracy,
   type NagrodaZaPrace,
@@ -175,6 +181,23 @@ function sesje(ile: number, segment: string | null, od = '2026-01-01', maWpis = 
   return out;
 }
 
+/**
+ * ⭐ PLAN-D-W1 — N TRENINGÓW KLUBOWYCH (waga 3, dowód zewnętrzny).
+ * ⛔ Progi punktowe buduje się TYM, a nie wpisami Dziennika: od 17.08.2026
+ * wpis Dziennika waży zero i nie da się nim przekroczyć żadnego progu (O100).
+ */
+function treningiKlubowe(ile: number, segment: string | null = null, od = '2026-01-01'): WierszSesji[] {
+  const out: WierszSesji[] = [];
+  for (let i = 0; i < ile; i++) {
+    out.push({
+      idWydarzenia: 5000 + i, dzien: przesun(od, i), segment, maWpisWDzienniku: false,
+      eventType: 'club_training', source: 'coach', maSesjeTrenera: false,
+      minutyZmierzone: null, minutyZPlanu: null,
+    });
+  }
+  return out;
+}
+
 function przesun(data: string, oDni: number): string {
   return new Date(Date.parse(`${data}T00:00:00Z`) + oDni * 86400000).toISOString().slice(0, 10);
 }
@@ -254,8 +277,22 @@ console.log('\nG0. KONTRAKT PLIKU');
     PROGI.every((p) => typeof p.uzasadnienieProgu === 'string' && p.uzasadnienieProgu.trim().length > 15),
     JSON.stringify(PROGI.map((p) => [p.id, p.uzasadnienieProgu?.length])));
 
-  check('⛔ każda waga pracy jest ≥ 1 — praca ważąca zero nie jest pracą',
-    Object.values(WAGI_PRACY).every((w) => Number.isInteger(w) && w >= 1),
+  // ⭐ PLAN-D-W1 (O99 + O100). Stara asercja brzmiała „każda waga ≥ 1" i była
+  // prawdziwa dopóty, dopóki wypełnienie ankiety uchodziło za pracę sportową.
+  // ⛔ Decyzja Kuby 17.08.2026: nie uchodzi.
+  check('⛔ (W1, O100) ANI JEDNA jednostka OPISOWA nie daje punktu — ankieta, formularz, odpowiedź kontrolna',
+    WAGI_PRACY.wpis_dziennika === 0 && WAGI_PRACY.wpis_potreningowy === 0
+    && WAGI_PRACY.odpowiedz_kontrolna === 0,
+    JSON.stringify(WAGI_PRACY));
+
+  check('⛔ (W1, O99) OPIS PRACY NIGDY NIE WAŻY WIĘCEJ NIŻ SAMA PRACA — zapadka na porównanie, nie na liczby',
+    Math.max(WAGI_PRACY.wpis_dziennika, WAGI_PRACY.wpis_potreningowy, WAGI_PRACY.odpowiedz_kontrolna)
+      < Math.min(WAGI_PRACY.sesja_z_dowodem, WAGI_PRACY.mecz),
+    JSON.stringify(WAGI_PRACY));
+
+  check('⛔ (W1) jednostki PRACY mają wagę awaryjną ≥ 1 — sesja, która się odbyła, nie waży zera',
+    Number.isInteger(WAGI_PRACY.sesja_z_dowodem) && WAGI_PRACY.sesja_z_dowodem >= 1
+    && Number.isInteger(WAGI_PRACY.mecz) && WAGI_PRACY.mecz >= 1,
     JSON.stringify(WAGI_PRACY));
 
   check('⛔ ani jedno brzmienie progu nie mówi o dniach, serii ani passie',
@@ -306,14 +343,14 @@ console.log('\nG1. MONOTONICZNOŚĆ');
     utrata === null, `odebrana odznaka: ${utrata}`);
 
   // Dołożenie pracy nie może też ODDALIĆ następnego progu.
-  const male = policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisy(3))) }));
-  const wieksze = policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisy(6))) }));
+  const male = policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(treningiKlubowe(1))) }));
+  const wieksze = policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(treningiKlubowe(2))) }));
   check('⭐ dołożenie pracy PRZYBLIŻA następny próg, nigdy go nie oddala',
     male.rodzaj === 'policzona' && wieksze.rodzaj === 'policzona'
     && male.nastepnyProg !== null && wieksze.nastepnyProg !== null
     && wieksze.nastepnyProg.brakuje < male.nastepnyProg.brakuje,
-    `3 wpisy → brakuje ${male.rodzaj === 'policzona' ? male.nastepnyProg?.brakuje : '?'}, `
-    + `6 wpisów → brakuje ${wieksze.rodzaj === 'policzona' ? wieksze.nastepnyProg?.brakuje : '?'}`);
+    `1 trening → brakuje ${male.rodzaj === 'policzona' ? male.nastepnyProg?.brakuje : '?'}, `
+    + `2 treningi → brakuje ${wieksze.rodzaj === 'policzona' ? wieksze.nastepnyProg?.brakuje : '?'}`);
 
   // Ten sam wiersz przeczytany dwa razy to jedna praca, a nie dwie.
   const raz = jednostkiZDziennika(wpisy(5));
@@ -446,18 +483,16 @@ console.log('\nG3. KAŻDY PRÓG MA POKRYCIE W PRACY');
   // Dla KAŻDEGO progu: o jeden mniej — nie ma; dokładnie tyle — jest.
   for (const p of PROGI) {
     const zbuduj = (ile: number): NagrodaZaPrace => {
-      if (p.miara === 'punkty') {
-        // 1 punkt = 1 wpis Dziennika bez pomiaru (waga 1) — najczystsza skala.
-        return policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisy(ile))) }));
-      }
       if (p.miara === 'odpowiedzi_kontrolne') {
         return policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisyZPomiarem(ile))) }));
       }
-      // punkty_w_celu: sesja w segmencie celu waży 3
-      const sesjiTrzeba = Math.ceil(ile / WAGI_PRACY.sesja_z_dowodem);
-      return policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(sesje(sesjiTrzeba, 'wytrzymalosc'))) }));
+      // ⭐ PLAN-D-W1: skalę punktową buduje się TRENINGAMI KLUBOWYMI (waga 3),
+      // bo wpis Dziennika waży od 17.08.2026 zero.
+      const segment = p.miara === 'punkty_w_celu' ? 'wytrzymalosc' : null;
+      const trzeba = Math.ceil(ile / WAGA_ZOBOWIAZANIA);
+      return policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(treningiKlubowe(trzeba, segment))) }));
     };
-    const ponizej = p.miara === 'punkty_w_celu' ? p.prog - WAGI_PRACY.sesja_z_dowodem : p.prog - 1;
+    const ponizej = p.prog - WAGA_ZOBOWIAZANIA;
     check(`⛔ „${p.id}" NIE powstaje przy ${Math.max(ponizej, 0)} w mierze ${p.miara}`,
       ponizej <= 0 ? !ma(zbuduj(0), p.id) : !ma(zbuduj(ponizej), p.id),
       `odznaka pojawiła się poniżej progu ${p.prog}`);
@@ -480,25 +515,26 @@ console.log('\nG4. JAKOŚĆ OBOK OBJĘTOŚCI');
 {
   // 500 wierszy czystej objętości. Wszystkie progi objętości — tak.
   // Ani jednej odznaki jakości — nie.
-  const samaObjetosc = policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisy(500))) }));
-  check('⭐ 500 wpisów bez odpowiedzi kontrolnej NIE DAJE odznaki „praca domknięta"',
-    !ma(samaObjetosc, 'odpowiedz_kontrolna'),
-    'oś jakości jest tylko inną nazwą na liczbę wierszy');
-  check('⭐ 500 wpisów bez segmentu NIE DAJE odznaki „praca nad swoim celem"',
+  const samaObjetosc = policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(treningiKlubowe(500))) }));
+  check('⭐ 500 treningów bez segmentu NIE DAJE odznaki „praca nad swoim celem"',
     !ma(samaObjetosc, 'praca_w_celu'),
     'praca bez przypisania do celu policzyła się jako praca nad celem');
-  check('500 wpisów daje jednak WSZYSTKIE progi objętości — objętość nadal się liczy',
+  check('500 treningów daje jednak WSZYSTKIE progi objętości — objętość nadal się liczy',
     PROGI.filter((p) => p.miara === 'punkty').every((p) => ma(samaObjetosc, p.id)),
     'objętość przestała cokolwiek dawać');
 
   // Pięć rzeczy domkniętych odpowiedzią wystarcza, mimo mniejszej objętości.
+  // ⭐ PLAN-D-W1: odznaka „praca domknięta" USUNIĘTA (decyzja Kuby 1.3 A),
+  // a wpis potreningowy waży zero. Oś jakości ZOSTAJE jako liczba i to jest
+  // to, co ta asercja pilnuje: pięć domknięć jest widoczne, ale nie kupuje punktu.
   const malaAleDomknieta = policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisyZPomiarem(5))) }));
-  check('⭐ pięć rzeczy DOMKNIĘTYCH odpowiedzią daje odznakę jakości przy 10 punktach objętości',
-    ma(malaAleDomknieta, 'odpowiedz_kontrolna') && punkty(malaAleDomknieta) === 10,
-    `punkty=${punkty(malaAleDomknieta)}`);
+  check('⭐ (W1) pięć DOMKNIĘTYCH wpisów widać na osi jakości, ale ⛔ NIE dają ani jednego punktu',
+    malaAleDomknieta.rodzaj === 'policzona' && malaAleDomknieta.odpowiedziKontrolne === 5
+    && punkty(malaAleDomknieta) === 0,
+    `punkty=${punkty(malaAleDomknieta)} jakość=${malaAleDomknieta.rodzaj === 'policzona' ? malaAleDomknieta.odpowiedziKontrolne : '?'}`);
 
   // Praca w SEGMENCIE, którego zawodnik nie nazwał celem, nie liczy się do celu.
-  const obcySegment = policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(sesje(20, 'moc'))) }));
+  const obcySegment = policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(treningiKlubowe(20, 'moc'))) }));
   check('⭐ praca w segmencie SPOZA celów nie liczy się do „pracy nad swoim celem"',
     !ma(obcySegment, 'praca_w_celu')
     && obcySegment.rodzaj === 'policzona' && obcySegment.punktyWCelu === 0,
@@ -506,7 +542,7 @@ console.log('\nG4. JAKOŚĆ OBOK OBJĘTOŚCI');
 
   // …ale nadal liczy się do objętości. ⛔ Praca poza celem nie znika.
   check('⛔ praca w segmencie spoza celów NIE ZNIKA — liczy się do objętości',
-    punkty(obcySegment) === 20 * WAGI_PRACY.sesja_z_dowodem,
+    punkty(obcySegment) === 20 * WAGA_ZOBOWIAZANIA,
     `punkty=${punkty(obcySegment)}`);
 
   // Domknięcie sesji wpisem Dziennika jest osią jakości, nie objętości.
@@ -552,7 +588,7 @@ console.log('\nG5. TRZECI STAN — brak danych ≠ zero pracy');
 
   // Niepełny zbiór celów: odznaka celu NIE POWSTAJE i mówi dlaczego.
   const niepelneCele = policzNagrode(we({
-    sesje: zrodlo(jednostkiZSesji(sesje(20, 'wytrzymalosc'))),
+    sesje: zrodlo(jednostkiZSesji(treningiKlubowe(20, 'wytrzymalosc'))),
     segmentyCelow: { rodzaj: 'niepelne', powod: 'ekran pyta o cele z filtrem status=active' },
   }));
   check('⭐ niepełny zbiór celów → odznaka celu NIE POWSTAJE…',
@@ -562,7 +598,7 @@ console.log('\nG5. TRZECI STAN — brak danych ≠ zero pracy');
     && niepelneCele.nieumiemPoliczyc.some((b) => b.id === 'praca_w_celu' && b.powod.includes('status=active')),
     JSON.stringify(niepelneCele.rodzaj === 'policzona' ? niepelneCele.nieumiemPoliczyc : []));
   check('⛔ niepełny zbiór celów NIE odbiera odznak objętości',
-    ma(niepelneCele, 'dziesiec') && ma(niepelneCele, 'trzydziesci'),
+    ma(niepelneCele, 'dziesiec') && ma(niepelneCele, 'czterdziesci'),
     'niepełna wiedza o celach zabrała odznaki, które z celami nie mają nic wspólnego');
   check('⭐ `punktyWCelu` jest wtedy `null`, a nie zerem',
     niepelneCele.rodzaj === 'policzona' && niepelneCele.punktyWCelu === null,
@@ -750,26 +786,26 @@ console.log('\nG6. EKRAN — app/(tabs)/dzis.tsx');
 const DZIS_L1 = '2026-08-17';
 
 /** Osiem wpisów objętości (waga 1): cztery W OKNIE 7 dni, cztery sprzed miesięcy. */
+// ⭐ PLAN-D-W1: fixtury L1 przepisane z wpisów Dziennika na TRENINGI KLUBOWE.
+// ⛔ Powód nie jest kosmetyczny: od 17.08.2026 wpis Dziennika waży ZERO (O100),
+// więc na wpisach nie da się już pokazać różnicy między oknem a dorobkiem —
+// obie liczby byłyby zerami i asercja świeciłaby na zielono, nic nie mierząc.
 const WEJSCIE_POLOWA_STARSZA: WejscieNagrody = we({
-  dziennik: zrodlo(jednostkiZDziennika([
-    ...[0, 1, 2, 3].map((i) => ({
-      id: 9100 + i, entry_type: 'morning', created_at: `${przesun('2026-08-11', i)}T07:00:00Z`,
-      payload: { sleep_hours: 7 },
-    })),
-    ...[0, 1, 2, 3].map((i) => ({
-      id: 9200 + i, entry_type: 'morning', created_at: `${przesun('2026-06-01', i)}T07:00:00Z`,
-      payload: { sleep_hours: 7 },
-    })),
+  sesje: zrodlo(jednostkiZSesji([
+    ...treningiKlubowe(4, null, '2026-08-11'),
+    ...treningiKlubowe(4, null, '2026-06-01').map((w, i) => ({ ...w, idWydarzenia: 6100 + i })),
   ])),
 });
-const PUNKTY_POLOWY = 4;
-const PUNKTY_CALOSCI = 8;
+const PUNKTY_POLOWY = 4 * WAGA_ZOBOWIAZANIA;
+const PUNKTY_CALOSCI = 8 * WAGA_ZOBOWIAZANIA;
 
 /** Dwie jednostki, których nie da się umieścić w czasie — źródło nie ma daty. */
 const WEJSCIE_BEZ_DATY: WejscieNagrody = we({
-  dziennik: zrodlo(jednostkiZDziennika([
-    { id: 9300, entry_type: 'morning', created_at: null, payload: { sleep_hours: 7 } },
-    { id: 9301, entry_type: 'morning', created_at: 'nie data', payload: { sleep_hours: 7 } },
+  sesje: zrodlo(jednostkiZSesji([
+    { idWydarzenia: 9300, dzien: 'nie-jest-data', segment: null, maWpisWDzienniku: false,
+      eventType: 'club_training', source: 'coach' },
+    { idWydarzenia: 9301, dzien: 'tez-nie-data', segment: null, maWpisWDzienniku: false,
+      eventType: 'club_training', source: 'coach' },
   ])),
 });
 
@@ -819,9 +855,9 @@ console.log('\nL1-D2. ⭐⭐ ZAPADKA: DOROBEK CAŁKOWITY NADAL NIE MA OKNA');
   // liczby RÓŻNE. Bez tego zdania asercja wyżej mogłaby być zielona dlatego,
   // że okno w ogóle nie działa.
   const komplet = (dni: readonly number[]): WejscieNagrody => we({
-    dziennik: zrodlo(jednostkiZDziennika(dni.map((d, i) => ({
-      id: 9400 + i, entry_type: 'morning', created_at: `${przesun('2026-08-17', -d)}T07:00:00Z`,
-      payload: { sleep_hours: 7 },
+    sesje: zrodlo(jednostkiZSesji(dni.map((d, i) => ({
+      idWydarzenia: 9400 + i, dzien: przesun('2026-08-17', -d), segment: null,
+      maWpisWDzienniku: false, eventType: 'club_training', source: 'coach',
     })))),
   });
   const oknoSkupione = policzObciazenieWOknie(komplet(wJednymDniu), { dzis: DZIS_L1, oknoDni: OKNO_OBCIAZENIA_DNI });
@@ -967,10 +1003,10 @@ console.log('\nL1-D6/D8. TRZY WARTOŚCI, TRZY ZDANIA — I BRAK DATY, KTÓRY NIE
     opisObciazeniaDoLogu(bezDaty));
   check('⭐ (L1-D8) …i NIE ZNIKA po cichu: jest policzona i nazwana z rodzaju',
     bezDaty.rodzaj === 'brak_pracy_w_oknie' && bezDaty.pozaPomiarem.length === 2
-    && bezDaty.pozaPomiarem.every((p) => p.rodzaj === 'wpis_dziennika' && p.powod.length > 5),
+    && bezDaty.pozaPomiarem.every((p) => p.rodzaj === 'sesja_z_dowodem' && p.powod.length > 5),
     JSON.stringify(bezDaty.rodzaj === 'nie_policzone' ? [] : bezDaty.pozaPomiarem));
   check('⭐⛔ (L1-D8) …a DOROBEK liczy ją normalnie — brak daty nie odbiera wykonanej pracy',
-    punkty(policzNagrode(WEJSCIE_BEZ_DATY)) === 2,
+    punkty(policzNagrode(WEJSCIE_BEZ_DATY)) === 2 * WAGA_ZOBOWIAZANIA,
     `dorobek=${punkty(policzNagrode(WEJSCIE_BEZ_DATY))}`);
 
   // ── (D8) dzień pracy ≠ dzień zapisu, i wynik to rozróżnia ──────────
@@ -1084,9 +1120,12 @@ function bateria(zasady: ZasadyNagrody, obc: ZasadyObciazenia): Wynik[] {
     `odznaki: ${puste.rodzaj === 'policzona' ? puste.odznaki.map((o) => o.id).join(',') : '—'}`);
 
   // 4. duplikat liczy się raz
-  const raz = jednostkiZDziennika(wpisy(5));
-  const dwa = policzNagrode(we({ dziennik: zrodlo([...raz, ...raz]) }), zasady);
-  push('ten sam wiersz liczy się raz', punkty(dwa) === 5, `punkty=${punkty(dwa)}`);
+  // ⭐ PLAN-D-W1: duplikat liczony na TRENINGACH KLUBOWYCH, nie na wpisach.
+  // ⛔ Na wpisach (waga 0) ta asercja porównywałaby zero z zerem i przepuściłaby
+  // każdą mutację odsiewu duplikatów.
+  const raz = jednostkiZSesji(treningiKlubowe(5));
+  const dwa = policzNagrode(we({ sesje: zrodlo([...raz, ...raz]) }), zasady);
+  push('ten sam wiersz liczy się raz', punkty(dwa) === 5 * WAGA_ZOBOWIAZANIA, `punkty=${punkty(dwa)}`);
 
   // 5. niepełne cele nie dają odznaki celu
   const niepelne = policzNagrode(we({
@@ -1272,6 +1311,253 @@ console.log('\nG8. DANE PRODUKCYJNE — czy oba stany są osiągalne');
   check('⭐ zawodnik bez ani jednego wiersza dostaje POMIAR zera, nie awarię',
     zeroWszedzie.rodzaj === 'policzona' && zeroWszedzie.punkty === 0 && zeroWszedzie.odznaki.length === 0,
     opisNagrodyDoLogu(zeroWszedzie));
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// W1. ⭐ O100 — PUNKT JEST ZA PRACĘ, KTÓRA MA DOWÓD (17.08.2026)
+// ═══════════════════════════════════════════════════════════════════
+console.log('\nW1. ⭐ PUNKT ZA PRACĘ, KTÓRA MA DOWÓD');
+{
+  const wlasny = (min: number | null, plan: number | null = null) => wagaSesji({
+    eventType: 'own_training', source: 'player', maSesjeTrenera: false,
+    minutyZmierzone: min, minutyZPlanu: plan,
+  });
+  const klubowy = (min: number | null = null, plan: number | null = null) => wagaSesji({
+    eventType: 'club_training', source: 'coach', maSesjeTrenera: false,
+    minutyZmierzone: min, minutyZPlanu: plan,
+  });
+
+  // ── ASERCJA GŁÓWNA: deklaracja nie jest pracą ──────────────────────
+  const zadeklarowany90 = wlasny(null, 90);
+  const zmierzony90 = wlasny(90);
+  check('⭐⭐ (W1, O100) trening własny ZADEKLAROWANY na 90 minut i tylko odhaczony waży 1 — deklaracja NIE JEST pracą',
+    zadeklarowany90.punkty === 1 && zadeklarowany90.pochodzenie === 'bez_dowodu',
+    JSON.stringify(zadeklarowany90));
+  check('⭐⭐ (W1, O100) …a TEN SAM trening z PODANYM czasem waży 2 — liczba jest tym, co odblokowuje punkt',
+    zmierzony90.punkty === 2 && zmierzony90.pochodzenie === 'zmierzony',
+    JSON.stringify(zmierzony90));
+  check('⭐ (W1) różnica między nimi jest DODATNIA — inaczej wypełnianie formularza nic by nie dawało',
+    zmierzony90.punkty > zadeklarowany90.punkty,
+    `${zadeklarowany90.punkty} vs ${zmierzony90.punkty}`);
+
+  // ── ASERCJA ODWROTNA: dowód zewnętrzny nie potrzebuje wpisu ────────
+  check('⭐⭐ (W1, O100) trening KLUBOWY BEZ ŻADNEGO WPISU waży 3 — dowód jest zewnętrzny i brak wpisu go nie kasuje',
+    klubowy().punkty === WAGA_ZOBOWIAZANIA && klubowy().pochodzenie === 'z_rodzaju',
+    JSON.stringify(klubowy()));
+  check('⛔ (W1) treningu klubowego NIE DA SIĘ obniżyć krótkim czasem — kara jest za BRAK DOWODU, nie za NISKĄ LICZBĘ',
+    klubowy(15).punkty === WAGA_ZOBOWIAZANIA && klubowy(null, 20).punkty === WAGA_ZOBOWIAZANIA,
+    `${klubowy(15).punkty} / ${klubowy(null, 20).punkty}`);
+
+  // ── D6: pomiar może PODNIEŚĆ, nigdy obniżyć ───────────────────────
+  check('⭐ (W1, D6) własna praca: plan 90 / pomiar 20 → 1 · plan 20 / pomiar 90 → 2',
+    wlasny(20, 90).punkty === 1 && wlasny(90, 20).punkty === 2,
+    `${wlasny(20, 90).punkty} / ${wlasny(90, 20).punkty}`);
+  check('⛔ (W1) SAM PLAN nie podnosi wagi własnej pracy — plan jest deklaracją, nie pomiarem',
+    wlasny(null, 120).punkty === 1 && wlasny(null, 120).pochodzenie === 'bez_dowodu',
+    JSON.stringify(wlasny(null, 120)));
+
+  // ── D4: próg 45 stoi w JEDNYM miejscu ─────────────────────────────
+  check(`⭐ (W1, D4) próg ${PROG_DLUGOSCI_SESJI_MIN} minut jest granicą: ${PROG_DLUGOSCI_SESJI_MIN - 1} → 1, ${PROG_DLUGOSCI_SESJI_MIN} → 2`,
+    wlasny(PROG_DLUGOSCI_SESJI_MIN - 1).punkty === 1 && wlasny(PROG_DLUGOSCI_SESJI_MIN).punkty === 2,
+    `${wlasny(PROG_DLUGOSCI_SESJI_MIN - 1).punkty} / ${wlasny(PROG_DLUGOSCI_SESJI_MIN).punkty}`);
+  {
+    const lib = readFileSync(join(root, 'lib', 'nagrodaZaPrace.ts'), 'utf8');
+    const kodBezKomentarzy = lib.split('\n')
+      .filter((l) => !l.trimStart().startsWith('//') && !l.trimStart().startsWith('*') && !l.trimStart().startsWith('/*'))
+      .join('\n');
+    const wystapienia = (kodBezKomentarzy.match(/\b45\b/g) ?? []).length;
+    check('⛔ (W1, D4) próg 45 pada w KODZIE modułu DOKŁADNIE RAZ — w definicji stałej. Zapadka na RÓWNOŚĆ, nie na „≥1"',
+      wystapienia === 1, `wystąpień: ${wystapienia}`);
+  }
+
+  // ── D8: nieznany rodzaj to TRZECIA WARTOŚĆ ────────────────────────
+  const nieznany = wagaSesji({
+    eventType: 'cokolwiek_nowego', source: 'player', maSesjeTrenera: false,
+    minutyZmierzone: null, minutyZPlanu: null,
+  });
+  const mikro = wagaSesji({
+    eventType: 'micro_session', source: 'player', maSesjeTrenera: false,
+    minutyZmierzone: null, minutyZPlanu: null,
+  });
+  check('⭐ (W1, D8, R5) nieznany `event_type` → waga 1 i pochodzenie `nieznany_rodzaj`, ⛔ JAWNIE różne od mikrosesji',
+    nieznany.punkty === 1 && nieznany.pochodzenie === 'nieznany_rodzaj'
+    && mikro.pochodzenie !== nieznany.pochodzenie,
+    `${JSON.stringify(nieznany)} vs ${JSON.stringify(mikro)}`);
+
+  // ── D5: pięć pochodzeń, nie trzy ──────────────────────────────────
+  {
+    const zebrane = new Set<string>([
+      wlasny(90).pochodzenie,
+      wlasny(null).pochodzenie,
+      klubowy().pochodzenie,
+      klubowy(null, 90).pochodzenie,
+      nieznany.pochodzenie,
+      wagaMeczu(45, 90).pochodzenie,
+      wagaMeczu(null, 90).pochodzenie,
+    ]);
+    // ⭐ SZEŚĆ, nie pięć — i ta liczba jest wynikiem POMIARU, nie planu.
+    // ⛔ Siódme pochodzenie (`zaplanowany`) zostało USUNIĘTE z typu w tym samym
+    // pasie, bo okazało się nieosiągalne: waga z minut to najwyżej 2, a waga
+    // zobowiązania to 3, więc plan nigdy nie mógłby jej podnieść.
+    check('⭐ (W1, D5) zbiór oddawanych POCHODZEŃ wagi ma rozmiar 6 — zapadka na RÓWNOŚĆ, i każde jest OSIĄGALNE',
+      zebrane.size === 6, `${zebrane.size}: ${[...zebrane].sort().join(' · ')}`);
+  }
+
+  // ── D2: mecz z minut na boisku ────────────────────────────────────
+  {
+    const tabela: readonly (readonly [number | null, number])[] = [
+      [90, 4], [68, 3], [45, 2], [30, 1], [10, 1], [5, 1], [0, 0], [null, 1],
+    ];
+    const zle = tabela.filter(([min, ocz]) => wagaMeczu(min, 90).punkty !== ocz);
+    check('⭐⭐ (W1, D2) mecz 90-minutowy: 90→4 · 68→3 · 45→2 · 30→1 · 10→1 · 5→1 · 0→0 · nieznane→1',
+      zle.length === 0,
+      zle.map(([min, ocz]) => `${min}: jest ${wagaMeczu(min, 90).punkty}, ma być ${ocz}`).join(' · '));
+
+    check('⭐ (W1, D2) mecz KRÓTSZY: 60 minut z 60 → 4. Trzynastolatek nie jest karany za to, że jego mecz jest krótszy',
+      wagaMeczu(60, 60).punkty === 4 && wagaMeczu(30, 60).punkty === 2,
+      `${wagaMeczu(60, 60).punkty} / ${wagaMeczu(30, 60).punkty}`);
+
+    check('⛔ (W1, D2) waga meczu NIGDY nie przekracza 4, także przy dogrywce',
+      wagaMeczu(120, 90).punkty === MAKS_PUNKTOW_ZA_MECZ,
+      `${wagaMeczu(120, 90).punkty}`);
+
+    check('⭐ (W1, D2) brak zaplanowanej długości → 90 minut, jako DECYZJA PRODUKTOWA, nie pomiar',
+      wagaMeczu(45, null).punkty === wagaMeczu(45, 90).punkty,
+      `${wagaMeczu(45, null).punkty} vs ${wagaMeczu(45, 90).punkty}`);
+  }
+
+  // ── D3: mecz na ławce nie znika ───────────────────────────────────
+  check('⭐ (W1, D3) 0 minut na boisku → 0 punktów, ⛔ ale mecz MA ZDANIE i nie znika z historii',
+    wagaMeczu(0, 90).punkty === 0
+    && typeof MECZ_BEZ_MINUT_NA_BOISKU === 'string' && MECZ_BEZ_MINUT_NA_BOISKU.length > 30,
+    MECZ_BEZ_MINUT_NA_BOISKU);
+  check('⛔ (W1, D3) brzmienie meczu bez minut NIE OCENIA zawodnika i nie mówi o serii ani obecności',
+    !/lenist|nie chc|słab|zmarnowa|passa|seri|z rzędu/i.test(MECZ_BEZ_MINUT_NA_BOISKU),
+    MECZ_BEZ_MINUT_NA_BOISKU);
+  {
+    const naLawce = jednostkiZMeczow([{ id: 77, created_at: '2026-08-17T20:00:00Z', minutes_played: 0 }]);
+    check('⭐ (W1, D3) mecz z 0 minut NADAL JEST JEDNOSTKĄ — zero punktów, ale nie zero wydarzeń',
+      naLawce.length === 1 && naLawce[0].punkty === 0,
+      JSON.stringify(naLawce));
+  }
+
+  // ── D1: rzetelność — 30 ankiet nie kupuje ani jednego punktu ──────
+  {
+    const samGrafoman = policzNagrode(we({
+      dziennik: zrodlo(jednostkiZDziennika(wpisy(30))),
+      odpowiedziKontrolne: zrodlo(jednostkiZOdpowiedziKontrolnych(
+        Array.from({ length: 20 }, (_, i) => ({ id: `k${i}`, answered_at: '2026-08-10T10:00:00Z', segment: 'wytrzymalosc' })),
+      )),
+    }));
+    check('⭐⭐⭐ (W1, O100) 30 ANKIET i 20 ODPOWIEDZI KONTROLNYCH, ZERO TRENINGÓW → ⛔ DOKŁADNIE 0 PUNKTÓW i ZERO odznak',
+      punkty(samGrafoman) === 0
+      && samGrafoman.rodzaj === 'policzona' && samGrafoman.odznaki.length === 0,
+      opisNagrodyDoLogu(samGrafoman));
+
+    const jedenTrening = policzNagrode(we({ sesje: zrodlo(jednostkiZSesji(treningiKlubowe(1))) }));
+    check('⭐⭐ (W1, O100) …a JEDEN trening klubowy daje 3 punkty i pierwszą odznakę. To jest cała różnica.',
+      punkty(jedenTrening) === WAGA_ZOBOWIAZANIA && ma(jedenTrening, 'pierwsza'),
+      opisNagrodyDoLogu(jedenTrening));
+  }
+
+  // ── D9: progi i skasowana odznaka ─────────────────────────────────
+  {
+    const progiPunktowe = PROGI.filter((p) => p.miara === 'punkty').map((p) => p.prog);
+    check('⭐ (W1, D9) progi punktowe to DOKŁADNIE [1, 10, 40, 150, 400]',
+      JSON.stringify(progiPunktowe) === JSON.stringify([1, 10, 40, 150, 400]),
+      JSON.stringify(progiPunktowe));
+    const lib = readFileSync(join(root, 'lib', 'nagrodaZaPrace.ts'), 'utf8');
+    const kod = lib.split('\n').filter((l) => !l.trimStart().startsWith('//') && !l.trimStart().startsWith('*')).join('\n');
+    check('⛔ (W1, D9, O88) odznaki „praca domknięta" NIE MA W KODZIE — sprawdzone po TREŚCI, nie po nazwie stałej',
+      !/Praca domknięta/.test(kod) && !PROGI.some((p) => p.miara === 'odpowiedzi_kontrolne'),
+      'brzmienie albo próg odznaki jakości nadal stoi w module');
+    check('⭐ (W1) …ale MIARA jakości nadal jest liczona i zwracana — odznaka i miara to dwie różne rzeczy',
+      policzNagrode(we({ dziennik: zrodlo(jednostkiZDziennika(wpisyZPomiarem(5))) })).rodzaj === 'policzona',
+      'oś jakości zniknęła razem z odznaką');
+  }
+
+  // ── D10: dorobek nadal bez okna ───────────────────────────────────
+  {
+    const rozklad = (przesuniecia: readonly number[]) => policzNagrode(we({
+      sesje: zrodlo(jednostkiZSesji(przesuniecia.map((d, i) => ({
+        idWydarzenia: 7700 + i, dzien: przesun('2026-08-17', -d), segment: null,
+        maWpisWDzienniku: false, eventType: 'club_training', source: 'coach',
+      })))),
+    }));
+    let rozne: string | null = null;
+    const wzorzec = punkty(rozklad(Array.from({ length: 12 }, () => 0)));
+    for (let k = 0; k < 50; k++) {
+      const dni = Array.from({ length: 12 }, (_, i) => (i * (k + 1)) % 900);
+      if (punkty(rozklad(dni)) !== wzorzec) { rozne = `k=${k}: ${punkty(rozklad(dni))} ≠ ${wzorzec}`; break; }
+    }
+    check('⭐ (W1, D10) 50 rozkładów tej samej pracy w czasie — DOROBEK identyczny co do znaku',
+      rozne === null, rozne ?? `stale ${wzorzec}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// W1-M. ⭐ BATERIA MUTACJI — OSIEM, Z ASERCJĄ ODWROTNĄ
+// ═══════════════════════════════════════════════════════════════════
+console.log('\nW1-M. ⭐ BATERIA MUTACJI');
+{
+  type Predykat = { nazwa: string; ok: () => boolean };
+  const wlasny = (min: number | null, plan: number | null, wS: typeof wagaSesji) => wS({
+    eventType: 'own_training', source: 'player', maSesjeTrenera: false,
+    minutyZmierzone: min, minutyZPlanu: plan,
+  });
+
+  const bateria = (wS: typeof wagaSesji, wM: typeof wagaMeczu, wagi: Record<string, number>): Predykat[] => [
+    { nazwa: 'ankieta nie daje punktu', ok: () => wagi.wpis_dziennika === 0 },
+    { nazwa: 'wpis potreningowy nie daje punktu', ok: () => wagi.wpis_potreningowy === 0 },
+    { nazwa: 'odpowiedź kontrolna nie daje punktu', ok: () => wagi.odpowiedz_kontrolna === 0 },
+    { nazwa: 'sesja bez zmierzonego czasu waży 1, choćby zadeklarowano 120 min', ok: () => wlasny(null, 120, wS).punkty === 1 },
+    { nazwa: 'sesja z czasem ≥ progu waży 2', ok: () => wlasny(90, null, wS).punkty === 2 },
+    { nazwa: 'pomiar NIE obniża wagi treningu klubowego', ok: () => wS({ eventType: 'club_training', source: 'coach', maSesjeTrenera: false, minutyZmierzone: 10, minutyZPlanu: null }).punkty === 3 },
+    { nazwa: 'mecz rozróżnia minuty: 90 ≠ 45 ≠ 10', ok: () => wM(90, 90).punkty !== wM(45, 90).punkty && wM(45, 90).punkty !== wM(10, 90).punkty },
+    { nazwa: 'pochodzenie wagi jest zwracane', ok: () => typeof wlasny(90, null, wS).pochodzenie === 'string' && wlasny(90, null, wS).pochodzenie.length > 0 },
+    { nazwa: 'nieznany rodzaj jest odróżnialny od mikrosesji', ok: () => wS({ eventType: 'xxx', source: 'player', maSesjeTrenera: false, minutyZmierzone: null, minutyZPlanu: null }).pochodzenie !== wS({ eventType: 'micro_session', source: 'player', maSesjeTrenera: false, minutyZmierzone: null, minutyZPlanu: null }).pochodzenie },
+  ];
+
+  const ileFail = (b: readonly Predykat[]): number => b.filter((p) => !p.ok()).length;
+
+  // ⭐ ASERCJA ODWROTNA — bez niej „każda mutacja zapala" spełniłby strażnik zapalony zawsze.
+  check('⭐⭐ (W1-M) ASERCJA ODWROTNA — na PRAWDZIWYCH regułach bateria ma ZERO FAIL-i',
+    ileFail(bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY })) === 0,
+    bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY }).filter((p) => !p.ok()).map((p) => p.nazwa).join(' · '));
+
+  const mutacje: readonly (readonly [string, () => number])[] = [
+    ['MW1 ⛔ ankieta wraca z wagą 1', () => ileFail(bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY, wpis_dziennika: 1 }))],
+    ['MW2 ⛔ wpis potreningowy wraca z wagą 2', () => ileFail(bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY, wpis_potreningowy: 2 }))],
+    ['MW3 ⛔ odpowiedź kontrolna wraca z wagą 2', () => ileFail(bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY, odpowiedz_kontrolna: 2 }))],
+    ['MW4 ⛔ sesja bez dowodu dostaje wagę z DEKLARACJI', () => ileFail(bateria(
+      (f) => (f.minutyZmierzone ?? f.minutyZPlanu ?? 0) >= PROG_DLUGOSCI_SESJI_MIN
+        ? { punkty: 2, pochodzenie: 'zaplanowany' } : wagaSesji(f), wagaMeczu, { ...WAGI_PRACY }))],
+    ['MW5 ⛔ pomiar MOŻE obniżyć wagę treningu klubowego', () => ileFail(bateria(
+      (f) => (typeof f.minutyZmierzone === 'number'
+        ? { punkty: f.minutyZmierzone >= PROG_DLUGOSCI_SESJI_MIN ? 2 : 1, pochodzenie: 'zmierzony' }
+        : wagaSesji(f)), wagaMeczu, { ...WAGI_PRACY }))],
+    ['MW6 ⛔ mecz wraca do JEDNEJ wagi, bez minut', () => ileFail(bateria(
+      wagaSesji, () => ({ punkty: 3, pochodzenie: 'z_rodzaju' }), { ...WAGI_PRACY }))],
+    ['MW7 ⛔ próg długości przesunięty z 45 na 5', () => ileFail(bateria(
+      (f) => (typeof f.minutyZmierzone === 'number' && f.minutyZmierzone >= 5
+        ? { punkty: 2, pochodzenie: 'zmierzony' } : wagaSesji(f)), wagaMeczu, { ...WAGI_PRACY }))],
+    ['MW8 ⛔ nieznany rodzaj liczony po cichu jak mikrosesja', () => ileFail(bateria(
+      (f) => wagaSesji({ ...f, eventType: 'micro_session' }), wagaMeczu, { ...WAGI_PRACY }))],
+  ];
+
+  let nieZapalone: string | null = null;
+  for (const [nazwa, uruchom] of mutacje) {
+    const n = uruchom();
+    console.log(`       ${nazwa}   →   ${n} FAIL`);
+    if (n === 0 && nieZapalone === null) nieZapalone = nazwa;
+  }
+  check(`⭐⭐ (W1-M) KAŻDA z ${mutacje.length} mutacji zapala strażnika`,
+    nieZapalone === null, `nie zapaliła: ${nieZapalone}`);
+  check('⭐ (W1-M) …a prawdziwe reguły są po baterii NIETKNIĘTE',
+    ileFail(bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY })) === 0
+    && WAGI_PRACY.wpis_dziennika === 0 && PROG_DLUGOSCI_SESJI_MIN === 45,
+    'bateria zostawiła po sobie ślad w prawdziwych regułach');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

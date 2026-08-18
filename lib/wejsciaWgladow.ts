@@ -123,7 +123,11 @@ export type WierszKataloguWgl = { min_age: number | null };
 
 /** Kaskada meczowa (WG-30, WG-34). */
 export const TABELA_MECZOW = 'match_contexts';
-export const SELECT_MECZOW = 'id,created_at,match_rpe,entered_recovery_state';
+// ⭐ PLAN-D-W1 17.08.2026 — doszło `minutes_played`. Kolumna istniała od dawna
+// (CHECK 0–130) i była WYRZUCANA: waga meczu liczyła się bez minut na boisku,
+// więc dziesięciominutowe wejście ważyło tyle, co pełne 90 minut.
+// ⚠️ To jest ROZSZERZENIE istniejącego zapytania, nie nowe zapytanie.
+export const SELECT_MECZOW = 'id,created_at,match_rpe,entered_recovery_state,minutes_played';
 
 /**
  * Rocznik zawodnika (WT-26). JEDYNE źródło wieku, jakie appka ma

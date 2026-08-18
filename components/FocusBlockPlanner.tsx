@@ -507,6 +507,13 @@ export default function FocusBlockPlanner({ goal, segmentLabel, pillar, currentU
         title: `Blok: ${confirmedText} (${suggestion.durationMinutes} min)`,
         notes: `Planowany czas sesji: ${suggestion.durationMinutes} min.\n${suggestion.reasoning}`,
         status: 'scheduled',
+        // ⭐ PLAN-D-W2 17.08.2026 — TA LICZBA PRZESTAJE BYĆ NAPISEM.
+        // Komentarz wyżej (audyt 06.08) mówił, że `durationMinutes` nie ma
+        // gdzie wylądować i idzie do tytułu oraz notatki jako tekst. Od 17.08
+        // `calendar_events.planned_minutes` istnieje — i to jest jej miejsce.
+        // ⛔ Zawodnika o nic tu nie pytamy: on tę liczbę PODAŁ przy planowaniu
+        // Bloku, a pytanie o rzecz, którą produkt wie, to zmarnowane dotknięcie (P0).
+        planned_minutes: suggestion.durationMinutes,
         scheduled_date: d,
         goal_id: goal.id,
         focus_block_id: fbRow.id,

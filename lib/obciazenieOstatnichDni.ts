@@ -242,11 +242,18 @@ export function policzObciazenieWOknie(
   const wgRodzaju = PUSTY_ROZBIOR();
   const pozaPomiarem: JednostkaPozaPomiarem[] = [];
 
+  // ⭐ PLAN-D-W1 — waga jest WŁASNOŚCIĄ JEDNOSTKI, nie jej rodzaju (O100).
+  // ⛔ `WAGI_PRACY[rodzaj]` zostaje wyłącznie jako wartość awaryjna: jednostka
+  // bez policzonej wagi nie może wpaść do sumy jako zero, bo zero znaczyłoby
+  // „tej pracy nie było". ⚠️ Ta funkcja przechodzi na minuty × RPE w pasie W3.
+  const wagaJednostki = (j: JednostkaPracy): number =>
+    typeof j.punkty === 'number' && Number.isFinite(j.punkty) ? j.punkty : WAGI_PRACY[j.rodzaj];
+
   for (const j of jednostki) {
     const kiedy = j.kiedy;
     if (!kiedy || kiedy.rodzaj === 'nieznana') {
       if (zasady.bezDatyWchodziDoOkna) {
-        punkty += WAGI_PRACY[j.rodzaj];
+        punkty += wagaJednostki(j);
         wOknie += 1;
         wgRodzaju[j.rodzaj] += 1;
         continue;
@@ -261,7 +268,7 @@ export function policzObciazenieWOknie(
       ? kiedy.dzien >= odDnia && kiedy.dzien <= doDnia
       : true;
     if (!mieciSie) continue;
-    punkty += WAGI_PRACY[j.rodzaj];
+    punkty += wagaJednostki(j);
     wOknie += 1;
     wgRodzaju[j.rodzaj] += 1;
     if (kiedy.rodzaj === 'dzien_pracy') zDniaPracy += 1; else zDniaZapisu += 1;

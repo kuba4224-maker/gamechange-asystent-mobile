@@ -104,6 +104,10 @@ import {
 //     udaje, ekran milczy, nikt nie ma jak tego zauważyć.
 // ═══════════════════════════════════════════════════════════════════
 import { formatujGodzine } from '../../lib/godzinaWydarzenia';
+// ⭐ PLAN-D-W2 — TA SAMA szóstka długości, której używa ocena sesji na „Dziś".
+// ⛔ Jedna rzecz, jedno słowo, jedna lista (O92): druga kopia rozjechałaby się
+// przy pierwszej poprawce i oba ekrany wyglądałyby poprawnie.
+import { MINUTY_DO_WYBORU } from '../../lib/ocenaZKafla';
 import {
   przygotujGodzineDoZapisu,
   opiszRodzaj,
@@ -251,6 +255,14 @@ export default function KalendarzScreen() {
   const router = useRouter();
 
   const [eventType, setEventType] = useState('club_training');
+  /**
+   * ⭐ PLAN-D-W2 17.08.2026 — „ile to potrwa".
+   * ⛔ `null` = NIE WIEMY i to jest dozwolone (R5). Zawodnik, który pominie
+   * to pole, nie traci nic: waga jego pracy policzy się z rodzaju wydarzenia.
+   * ⛔ Na tym ekranie NIE MA ani słowa o punktach ani o progu długości —
+   * inaczej zawodnik zacząłby wpisywać liczbę pod skalę, a nie prawdę.
+   */
+  const [dlugoscMin, setDlugoscMin] = useState<number | null>(null);
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [frequency, setFrequency] = useState<'once' | 'recurring'>('once');
@@ -480,6 +492,10 @@ export default function KalendarzScreen() {
     };
     if (notes.trim()) body.notes = notes.trim();
     if (goalId) body.goal_id = Number(goalId);
+    // ⭐ PLAN-D-W2 — wysyłamy pole TYLKO wtedy, gdy zawodnik je wskazał.
+    // ⛔ Jawne `null` przy każdym zapisie kasowałoby długość przy edycji —
+    // ten sam powód, dla którego tak samo traktowana jest godzina (pas A7).
+    if (dlugoscMin !== null) body.planned_minutes = dlugoscMin;
 
     // PLAN-D-A7 — GODZINA ROZSTRZYGA SIĘ PRZED WYSŁANIEM, NIE W BAZIE.
     // `chk_calendar_events_scheduled_time` odrzuca sekundy i `>= 24:00` kodem
@@ -948,6 +964,19 @@ export default function KalendarzScreen() {
 
           <Text style={styles.label}>Tytuł</Text>
           <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} value={title} onChangeText={setTitle} placeholder="np. Trening siłowy" />
+
+          <Text style={styles.label}>Ile to potrwa (opcjonalnie)</Text>
+          <View style={styles.toggle}>
+            {MINUTY_DO_WYBORU.map((m) => (
+              <TouchableOpacity
+                key={m}
+                style={[styles.toggleBtn, dlugoscMin === m && styles.toggleBtnActive]}
+                onPress={() => setDlugoscMin(dlugoscMin === m ? null : m)}
+              >
+                <Text style={[styles.toggleTxt, dlugoscMin === m && styles.toggleTxtActive]}>{m} min</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
           <Text style={styles.label}>Notatka (opcjonalnie)</Text>
           <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={notes} onChangeText={setNotes} multiline placeholder="Dodatkowe informacje" />

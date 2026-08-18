@@ -1293,7 +1293,11 @@ export default function DzisScreen() {
       // PLAN-D-B2 — doszły `status` i `scheduled_time`: obu wymaga
       // `WydarzenieKalendarza` (kontrakt rankera §3). ⚠️ To jest ROZSZERZENIE
       // istniejącego zapytania, nie nowe zapytanie.
-      supabase.from('calendar_events').select('id,title,event_type,scheduled_date,scheduled_time,status,recurrence_rule,focus_block_id')
+      // ⭐ PLAN-D-W1 — doszły `source`, `coach_session_id` i `planned_minutes`.
+      // Bez nich waga jednostki pracy nie ma z czego się policzyć: rodzaj mówi,
+      // kto tę pozycję założył (dowód zewnętrzny), a `planned_minutes` niesie
+      // długość, o którą chodzi w progu 45 minut. ⚠️ ROZSZERZENIE zapytania.
+      supabase.from('calendar_events').select('id,title,event_type,source,coach_session_id,planned_minutes,scheduled_date,scheduled_time,status,recurrence_rule,focus_block_id')
         .eq('user_id', currentUser.id).in('status', ['scheduled', 'completed']),
       // WIEDZA B4 08.08.2026 — doszło `component_id` (Element Bloku Skupienia),
       // żeby podpowiedź dało się wycelować w to, nad czym zawodnik pracuje.
@@ -1751,6 +1755,27 @@ export default function DzisScreen() {
     // awarii. Pas F1 kasuje tamten i podaje TEN do obu liczb o Blokach, bo
     // to jest ten sam dyskryminator: „czy mechanizm powiązań u tego zawodnika
     // demonstrowalnie zadziałał". Jedno rozumienie „zrobione" w całym pliku.
+    // ⭐ PLAN-D-W1 — `calendar_events.id` → ZMIERZONA długość sesji w minutach.
+    // ⛔ To jest jedyna droga, którą własna praca zdobywa wagę wyższą niż 1:
+    // deklaracja nie jest pracą, liczba jest (O100).
+    const minutyZWpisow: ReadonlyMap<number, number> | null = (() => {
+      if (dziennikRes.error) return null;
+      if (!Array.isArray(dziennikRes.data)) return null;
+      const m = new Map<number, number>();
+      for (const l of dziennikRes.data as (WierszDziennika & { payload?: unknown })[]) {
+        const id = l?.calendar_event_id;
+        if (typeof id !== 'number') continue;
+        const p = l?.payload;
+        if (p === null || typeof p !== 'object') continue;
+        const min = (p as Record<string, unknown>).duration_minutes;
+        if (typeof min !== 'number' || !Number.isFinite(min) || min <= 0) continue;
+        // ⛔ Przy dwóch wpisach o tej samej sesji wygrywa DŁUŻSZY — pomiar może
+        // wagę podnieść, nigdy obniżyć (decyzja C Kuby, 17.08.2026).
+        m.set(id, Math.max(m.get(id) ?? 0, min));
+      }
+      return m;
+    })();
+
     const wpisyDziennikaIds: ReadonlySet<number> | null = (() => {
       if (dziennikRes.error) return null;
       if (!Array.isArray(dziennikRes.data)) return null;
@@ -1843,12 +1868,19 @@ export default function DzisScreen() {
     const wydarzeniaDoNagrody: WierszWydarzeniaDoNagrody[] | null =
       eventsRes.error || !Array.isArray(eventsRes.data)
         ? null
-        : (eventsRes.data as unknown as CalEvent[]).map((e) => ({
+        : (eventsRes.data as unknown as (CalEvent & {
+          source?: string | null; coach_session_id?: string | null; planned_minutes?: number | null;
+        })[]).map((e) => ({
           id: e.id,
           scheduled_date: e.scheduled_date,
           status: e.status,
           recurrence_rule: e.recurrence_rule,
           focus_block_id: e.focus_block_id,
+          // ⭐ PLAN-D-W1 (O100) — fakty, z których liczy się waga pracy.
+          event_type: e.event_type ?? null,
+          source: e.source ?? null,
+          coach_session_id: e.coach_session_id ?? null,
+          planned_minutes: typeof e.planned_minutes === 'number' ? e.planned_minutes : null,
         }));
     if (wydarzeniaDoNagrody === null) {
       console.warn(`dzis: [PLAN-D-C4] nie odczytałem wydarzeń — ${powodBledu(eventsRes.error)}`);
@@ -1887,6 +1919,7 @@ export default function DzisScreen() {
         werdykty: werdyktyWe,
         wpisyDziennika: wpisyDziennikaIds,
         segmentBloku,
+        minutyZWpisow,
       }),
       dziennik: dziennikRes.error || !Array.isArray(dziennikRes.data)
         ? zrodloNieczytane(`Dziennik: ${powodBledu(dziennikRes.error)}`)

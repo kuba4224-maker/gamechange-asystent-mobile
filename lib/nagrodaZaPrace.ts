@@ -68,6 +68,7 @@
 // Komplet do decyzji zebrany w nocie `PRZEKAZANIE_PAS_C4_15_08_2026.md` §9.
 
 import type { WejscieWerdyktow } from './wykonanieSesji';
+import { rozpoznajRodzajPozycji } from './ocenaZKafla';
 
 export const BRZMIENIE_DO_PRZEJRZENIA_C4 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-C4, 15.08.2026)';
 
@@ -95,18 +96,184 @@ export type RodzajPracy =
  * jest nagroda za obecność przebrana za nagrodę za pracę (N1).
  */
 export const WAGI_PRACY: Readonly<Record<RodzajPracy, number>> = {
-  /** 3 — sesja z dowodem jest jednostką, o którą chodzi w całym produkcie. */
-  sesja_z_dowodem: 3,
-  /** 3 — mecz jest najcięższą jednostką obciążenia w tygodniu zawodnika. */
-  mecz: 3,
-  /** 2 — wpis z pomiarem obciążenia: praca WYKONANA i DOMKNIĘTA liczbą. */
-  wpis_potreningowy: 2,
-  /** 2 — odpowiedź kontrolna: to samo domknięcie, po stronie Bloku Skupienia. */
-  odpowiedz_kontrolna: 2,
-  /** 1 — najmniejsza policzalna praca. Jest pracą (bez niej reszty nie da się
-   *  zmierzyć), ale nie może ważyć tyle, co trening. */
-  wpis_dziennika: 1,
+  /**
+   * 1 — ⭐ TO JEST WYŁĄCZNIE WAGA AWARYJNA, gdy o sesji nie wiadomo NIC poza tym,
+   * że się odbyła. Prawdziwą wagę liczy `wagaSesji()` z rodzaju wydarzenia
+   * i z długości. ⛔ Nigdy nie dodawaj tej liczby wprost — dodaje się `j.punkty`.
+   */
+  sesja_z_dowodem: 1,
+  /** 1 — jw. Prawdziwą wagę meczu liczy `wagaMeczu()` z minut na boisku. */
+  mecz: 1,
+  /**
+   * ⛔ 0 — decyzja Kuby 17.08.2026. Wpis potreningowy PRZESTAJE być nagrodą
+   * i staje się DOWODEM: nie daje punktu, tylko ODBLOKOWUJE punkt sesji,
+   * której dotyczy (O100). Nagrodą za wypełnienie nie jest liczba w liczniku,
+   * tylko to, że sesja przestaje być deklaracją.
+   */
+  wpis_potreningowy: 0,
+  /** ⛔ 0 — jw. Odpowiedź kontrolna nie jest pracą sportową. */
+  odpowiedz_kontrolna: 0,
+  /**
+   * ⛔ 0 — decyzja Kuby 17.08.2026, dosłownie: „dawanie punktów za wypełnianie
+   * ankiety/dziennika to nie jest nic rzetelnego". Ankieta poranna nadal jest
+   * potrzebna produktowi — ale nagrodą za nią ma być LEPSZA PODPOWIEDŹ,
+   * a nie punkt w liczniku pracy.
+   */
+  wpis_dziennika: 0,
 };
+
+// ═══════════════════════════════════════════════════════════════════
+// 1a. ⭐ O100 — PUNKT JEST ZA PRACĘ, KTÓRA MA DOWÓD (PLAN-D-W1, 17.08.2026)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Słowa Kuby: „to musi być poprawne logicznie i dawać realny feedback
+// zawodnikom, którzy mają prawo robić duże postępy tym, że robią więcej,
+// a nie dawać punkty za to, że ktoś uzupełnia udawane treningi i ankietę
+// poranną".
+//
+// ⛔ CO BYŁO ZEPSUTE: czytnik brał z kalendarza id, datę i segment, a wagę
+// dawał rodzaj `sesja_z_dowodem` — czyli 20-minutowa mikrosesja ważyła tyle,
+// co 90-minutowy trening klubowy. Do tego ankieta ważyła 1, a formularz 2,
+// więc zawodnik wypełniający formularze wyprzedzał tego, który trenował.
+
+/** ⛔ DECYZJA KUBY 17.08.2026, nie wynik badania. Granica między 1 a 2 punktem. */
+export const PROG_DLUGOSCI_SESJI_MIN = 45;
+
+/** ⛔ DECYZJA PRODUKTOWA, nie pomiar. Używana, gdy mecz nie ma zaplanowanej długości. */
+export const DOMYSLNA_DLUGOSC_MECZU_MIN = 90;
+
+/** ⛔ DECYZJA KUBY: cały mecz = 4, połowa = 2, wejście na 10 minut = 1. */
+export const MAKS_PUNKTOW_ZA_MECZ = 4;
+
+/** ⛔ DECYZJA KUBY: trening klubowy jest jednostką główną, niezależnie od długości. */
+export const WAGA_ZOBOWIAZANIA = 3;
+
+/**
+ * ⭐ SKĄD WZIĘŁA SIĘ WAGA TEJ JEDNOSTKI. ⛔ Sama liczba bez pochodzenia to
+ * dokładnie ten błąd, który pas W1 naprawia: po roku nie da się odróżnić
+ * pomiaru od założenia (Z0), a różnicy nie da się POLICZYĆ, tylko podejrzewać.
+ */
+export type PochodzenieWagi =
+  /** czas trwania podany przez zawodnika we wpisie wskazującym TĘ pozycję */
+  | 'zmierzony'
+  /** dowód zewnętrzny (trener), waga z rodzaju wydarzenia */
+  | 'z_rodzaju'
+  /**
+   * ⛔ własna praca BEZ ZMIERZONEJ DŁUGOŚCI — deklaracja, nie pomiar.
+   * ⚠️ Znaczy dokładnie tyle: „nie znam długości tej sesji", więc waga
+   * nie ma pokrycia i spada do najniższej. NIE znaczy „zawodnik nic nie napisał".
+   */
+  | 'bez_dowodu'
+  /** mecz z podanymi minutami na boisku */
+  | 'z_minut_meczu'
+  /** ⛔ mecz bez minut — tak samo nieudowodniony jak trening bez liczby */
+  | 'minuty_nieznane'
+  /** ⛔ `event_type` spoza CHECK-a bazy — TRZECIA WARTOŚĆ, nie „najniższa waga" (R5) */
+  | 'nieznany_rodzaj';
+
+export type WagaJednostki = { punkty: number; pochodzenie: PochodzenieWagi };
+
+/** Fakty o sesji, z których liczy się waga. ⛔ Zero tytułu — same kolumny (O84). */
+export type FaktySesji = {
+  eventType: string | null;
+  source: string | null;
+  maSesjeTrenera: boolean;
+  /** `daily_logs.payload.duration_minutes` wpisu wskazującego TĘ pozycję. */
+  minutyZmierzone: number | null;
+  /** `calendar_events.planned_minutes`. */
+  minutyZPlanu: number | null;
+};
+
+function dodatniaLiczba(x: unknown): number | null {
+  return typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null;
+}
+
+function wagaZMinut(minuty: number): number {
+  return minuty >= PROG_DLUGOSCI_SESJI_MIN ? 2 : 1;
+}
+
+/**
+ * ⭐ WAGA SESJI. Trzy poziomy dowodu (O100) rozstrzygają, nie deklaracja.
+ *
+ * ⛔ DECYZJA C KUBY: zmierzony czas może wagę PODNIEŚĆ, NIGDY OBNIŻYĆ.
+ * Gdyby przyznanie się do skróconego treningu kosztowało punkt, żaden zawodnik
+ * nigdy nie podałby prawdziwej liczby — i wtedy zgniłaby także miara obciążenia,
+ * która na tej liczbie stoi. ⛔ Kara jest za BRAK DOWODU, nie za NISKĄ LICZBĘ.
+ */
+export function wagaSesji(f: FaktySesji): WagaJednostki {
+  const r = rozpoznajRodzajPozycji({
+    idWydarzenia: 1,
+    eventType: f.eventType,
+    source: f.source,
+    maSesjeTrenera: f.maSesjeTrenera === true,
+  });
+
+  const zmierzone = dodatniaLiczba(f.minutyZmierzone);
+
+  if (!r.znany) {
+    // ⛔ Nieznany rodzaj to TRZECIA WARTOŚĆ, a nie cicha najniższa waga (R5).
+    return { punkty: 1, pochodzenie: 'nieznany_rodzaj' };
+  }
+
+  if (r.rodzaj === 'zobowiazanie') {
+    // ⭐ Dowód jest ZEWNĘTRZNY — założył to trener. Brak wpisu go nie kasuje,
+    // a krótki czas go nie obniża: kara jest za BRAK DOWODU, nie za NISKĄ LICZBĘ.
+    //
+    // ⛔ ZNALEZISKO PASA W1, ZAPISANE ZAMIAST PRZEMILCZANE: gałąź „podnieś wagę
+    // zobowiązania zmierzonym albo zaplanowanym czasem" JEST NIEOSIĄGALNA, bo
+    // waga z minut wynosi najwyżej 2, a zobowiązanie waży 3. Napisanie jej
+    // dałoby kod, który wygląda jak funkcja i nigdy się nie wykonuje (pas Y4).
+    // Dlatego jej tu NIE MA, a pochodzenie `zaplanowany` nie istnieje w typie.
+    return { punkty: WAGA_ZOBOWIAZANIA, pochodzenie: 'z_rodzaju' };
+  }
+
+  if (r.rodzaj === 'rzecz_produktu') {
+    // ⛔ Ankieta i wgląd nie są pracą sportową zawodnika.
+    return { punkty: 0, pochodzenie: 'z_rodzaju' };
+  }
+
+  // ── własna praca ──
+  if (f.eventType === 'task') return { punkty: 1, pochodzenie: 'z_rodzaju' };
+
+  if (zmierzone === null) {
+    // ⛔ O100: zadeklarowana sesja bez ANI JEDNEJ liczby waży 1, choćby zawodnik
+    // wpisał sobie 120 minut. Deklaracja nie jest pracą.
+    return { punkty: 1, pochodzenie: 'bez_dowodu' };
+  }
+  return { punkty: wagaZMinut(zmierzone), pochodzenie: 'zmierzony' };
+}
+
+/**
+ * ⭐ WAGA MECZU — jedna formuła zamiast tabeli przedziałów.
+ *
+ *   punkty = max(1, round(4 × minuty / długość meczu))
+ *
+ * Trzy kotwice Kuby: cały mecz → 4 · połowa meczu → 2 · wejście na 10 minut → 1.
+ * ⭐ Działa dla meczu o DOWOLNEJ długości, więc trzynastolatek grający pełne
+ * 60 minut dostaje 4, a nie karę za to, że jego mecz jest krótszy.
+ *
+ * ⛔ 0 minut na boisku = 0 punktów. Licznik nagradza wykonaną pracę (N1),
+ * nie obecność. Mecz mimo to NIE ZNIKA z listy — patrz `MECZ_BEZ_MINUT_NA_BOISKU`.
+ */
+export function wagaMeczu(minutyNaBoisku: number | null, dlugoscMeczu: number | null): WagaJednostki {
+  const dlugosc = dodatniaLiczba(dlugoscMeczu) ?? DOMYSLNA_DLUGOSC_MECZU_MIN;
+  if (typeof minutyNaBoisku !== 'number' || !Number.isFinite(minutyNaBoisku)) {
+    // ⛔ Mecz bez minut jest deklaracją, tak samo jak trening bez liczby.
+    return { punkty: 1, pochodzenie: 'minuty_nieznane' };
+  }
+  if (minutyNaBoisku <= 0) return { punkty: 0, pochodzenie: 'z_minut_meczu' };
+  const surowe = Math.round((MAKS_PUNKTOW_ZA_MECZ * minutyNaBoisku) / dlugosc);
+  return { punkty: Math.min(MAKS_PUNKTOW_ZA_MECZ, Math.max(1, surowe)), pochodzenie: 'z_minut_meczu' };
+}
+
+/**
+ * ⚠️ BRZMIENIE — DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-W1).
+ * ⛔ Zero punktów nie może wyglądać jak zero wydarzenia. Zawodnik, który
+ * pojechał, rozgrzał się i nie wszedł, ma to zobaczyć jako FAKT — bez oceny
+ * jego osoby i bez punktu pocieszenia.
+ */
+export const MECZ_BEZ_MINUT_NA_BOISKU =
+  'Nie wszedłeś na boisko — ten mecz nie dokłada pracy do licznika. Mecz zostaje w Twojej historii.';
 
 /** Miara, w której wyrażony jest próg. ⛔ Żadna z nich nie jest jednostką czasu. */
 export type MiaraProgu = 'punkty' | 'odpowiedzi_kontrolne' | 'punkty_w_celu';
@@ -114,10 +281,9 @@ export type MiaraProgu = 'punkty' | 'odpowiedzi_kontrolne' | 'punkty_w_celu';
 export type OdznakaId =
   | 'pierwsza'
   | 'dziesiec'
-  | 'trzydziesci'
-  | 'siedemdziesiat_piec'
+  | 'czterdziesci'
   | 'sto_piecdziesiat'
-  | 'odpowiedz_kontrolna'
+  | 'czterysta'
   | 'praca_w_celu';
 
 export type Prog = {
@@ -157,23 +323,15 @@ export const PROGI: readonly Prog[] = [
     zaJakaPrace: 'Za dziesięć punktów wykonanej i zapisanej pracy.',
     miara: 'punkty',
     prog: 10,
-    uzasadnienieProgu: 'Około tygodnia realnej pracy przy trzech sesjach i wpisach. Decyzja produktowa.',
+    uzasadnienieProgu: 'Niecały tydzień pracy zawodnika trenującego w klubie (13 pkt/tydzień). Decyzja Kuby 17.08.2026.',
   },
   {
-    id: 'trzydziesci',
-    nazwa: '30 punktów pracy',
-    zaJakaPrace: 'Za trzydzieści punktów wykonanej i zapisanej pracy.',
+    id: 'czterdziesci',
+    nazwa: '40 punktów pracy',
+    zaJakaPrace: 'Za czterdzieści punktów wykonanej i zapisanej pracy.',
     miara: 'punkty',
-    prog: 30,
-    uzasadnienieProgu: 'Trzykrotność poprzedniego progu. Odstępy rosną, żeby kolejna odznaka nie przychodziła sama.',
-  },
-  {
-    id: 'siedemdziesiat_piec',
-    nazwa: '75 punktów pracy',
-    zaJakaPrace: 'Za siedemdziesiąt pięć punktów wykonanej i zapisanej pracy.',
-    miara: 'punkty',
-    prog: 75,
-    uzasadnienieProgu: 'Skala jednego Bloku Skupienia (4 tygodnie × 3 sesje) z zapisami. Decyzja produktowa.',
+    prog: 40,
+    uzasadnienieProgu: 'Około trzech tygodni pracy w klubie, dwóch przy własnej pracy domkniętej liczbą. Decyzja Kuby 17.08.2026.',
   },
   {
     id: 'sto_piecdziesiat',
@@ -181,15 +339,15 @@ export const PROGI: readonly Prog[] = [
     zaJakaPrace: 'Za sto pięćdziesiąt punktów wykonanej i zapisanej pracy.',
     miara: 'punkty',
     prog: 150,
-    uzasadnienieProgu: 'Dwa Bloki. Ostatni próg tej skali — kolejne dokłada się, gdy ktoś tu dojdzie.',
+    uzasadnienieProgu: 'Około kwartału. Odstępy rosną, żeby kolejna odznaka nie przychodziła sama. Decyzja Kuby 17.08.2026.',
   },
   {
-    id: 'odpowiedz_kontrolna',
-    nazwa: 'Praca domknięta',
-    zaJakaPrace: 'Za pięć rzeczy, które nie tylko zrobiłeś, ale i domknąłeś odpowiedzią — RPE, czasem trwania albo odpowiedzią na pytanie kontrolne Bloku.',
-    miara: 'odpowiedzi_kontrolne',
-    prog: 5,
-    uzasadnienieProgu: 'Pięć, bo to jest okno, którym ranker już liczy Dziennik (`OKNO_WPISOW` = 5). Jedna liczba w dwóch miejscach zamiast dwóch.',
+    id: 'czterysta',
+    nazwa: '400 punktów pracy',
+    zaJakaPrace: 'Za czterysta punktów wykonanej i zapisanej pracy.',
+    miara: 'punkty',
+    prog: 400,
+    uzasadnienieProgu: 'Sezon pracy w klubie (31 tygodni) albo 17 tygodni, gdy zawodnik dokłada własną pracę i domyka ją liczbą. ⭐ Ta różnica JEST nagrodą za robienie więcej. Decyzja Kuby 17.08.2026.',
   },
   {
     id: 'praca_w_celu',
@@ -200,6 +358,11 @@ export const PROGI: readonly Prog[] = [
     uzasadnienieProgu: 'Tyle samo, co drugi próg objętości — żeby „praca nad celem" była porównywalnie trudna, a nie tańsza.',
   },
 ];
+
+// ⛔ ODZNAKA „PRACA DOMKNIĘTA" (5 odpowiedzi kontrolnych) USUNIĘTA 17.08.2026,
+// decyzja Kuby 1.3 A. ⚠️ Miara `odpowiedzi_kontrolne` ZOSTAJE liczona i zwracana —
+// odznaka i miara to dwie różne rzeczy, a miara jest potrzebna jako oś JAKOŚCI.
+// Wpis w `claude/REJESTR_UTRACONEGO_DOSTEPU.md`, pozycja 2.
 
 // ═══════════════════════════════════════════════════════════════════
 // 2. JEDNOSTKA PRACY I TRZY STANY WEJŚCIA
@@ -255,6 +418,14 @@ export type JednostkaPracy = {
    */
   klucz: string;
   rodzaj: RodzajPracy;
+  /**
+   * ⭐ PLAN-D-W1 (O100) — waga TEJ jednostki, policzona z dowodu i długości.
+   * ⛔ `policzNagrode` dodaje TO POLE, a nie `WAGI_PRACY[rodzaj]`. Tabela wag
+   * jest wyłącznie wartością awaryjną dla jednostek, o których nie wiadomo nic.
+   */
+  punkty: number;
+  /** ⭐ PLAN-D-W1 — skąd ta waga wyszła. Liczba bez pochodzenia kłamie (Z0). */
+  pochodzenieWagi: PochodzenieWagi;
   /**
    * Segment, w którym ta praca leży. `null` znaczy „nie wiem, do czego ją
    * przypisać" — ⛔ NIE „do niczego". Praca bez segmentu liczy się do objętości
@@ -344,6 +515,16 @@ export type WierszSesji = {
   segment: string | null;
   /** Czy istnieje wpis w Dzienniku wskazujący DOKŁADNIE tę pozycję. */
   maWpisWDzienniku: boolean;
+  /**
+   * ⭐ PLAN-D-W1 — fakty, z których liczy się waga (O100). Wszystkie pola
+   * są opcjonalne, bo czytnik może ich nie dostać; ⛔ brak faktów NIE ZNACZY
+   * zera pracy, tylko wagę „bez dowodu" (1 punkt).
+   */
+  eventType?: string | null;
+  source?: string | null;
+  maSesjeTrenera?: boolean;
+  minutyZmierzone?: number | null;
+  minutyZPlanu?: number | null;
 };
 
 export function jednostkiZSesji(wiersze: readonly WierszSesji[]): JednostkaPracy[] {
@@ -352,9 +533,18 @@ export function jednostkiZSesji(wiersze: readonly WierszSesji[]): JednostkaPracy
     if (!w || typeof w.idWydarzenia !== 'number' || !Number.isFinite(w.idWydarzenia)) continue;
     if (typeof w.dzien !== 'string' || w.dzien.length < 10) continue;
     const dzien = dzienZe(w.dzien);
+    const waga = wagaSesji({
+      eventType: w.eventType ?? null,
+      source: w.source ?? null,
+      maSesjeTrenera: w.maSesjeTrenera === true,
+      minutyZmierzone: w.minutyZmierzone ?? null,
+      minutyZPlanu: w.minutyZPlanu ?? null,
+    });
     out.push({
       klucz: `sesja:${w.idWydarzenia}@${w.dzien.slice(0, 10)}`,
       rodzaj: 'sesja_z_dowodem',
+      punkty: waga.punkty,
+      pochodzenieWagi: waga.pochodzenie,
       segment: typeof w.segment === 'string' && w.segment.length > 0 ? w.segment : null,
       zOdpowiedziaKontrolna: w.maWpisWDzienniku === true,
       // ⭐ `occurred_on` / `scheduled_date` MÓWIĄ o dniu sesji, nie o dniu zapisu.
@@ -407,6 +597,12 @@ export function jednostkiZDziennika(wiersze: readonly WierszDziennika[]): Jednos
     out.push({
       klucz: `dziennik:${w.id}`,
       rodzaj: zPomiarem ? 'wpis_potreningowy' : 'wpis_dziennika',
+      // ⛔ ZERO punktów — decyzja Kuby 17.08.2026. Wpis potreningowy jest
+      // DOWODEM sesji, nie osobną nagrodą (O100); ankieta poranna nie jest
+      // pracą sportową. Jednostka zostaje, bo niesie `zOdpowiedziaKontrolna`
+      // (oś jakości) i `kiedy` (miara obciążenia).
+      punkty: 0,
+      pochodzenieWagi: 'z_rodzaju',
       // ⛔ Dziennik nie niesie segmentu i nie udajemy, że niesie.
       segment: null,
       zOdpowiedziaKontrolna: zPomiarem,
@@ -444,6 +640,9 @@ export function jednostkiZOdpowiedziKontrolnych(
     out.push({
       klucz: `kontrola:${w.id}`,
       rodzaj: 'odpowiedz_kontrolna',
+      // ⛔ ZERO punktów — decyzja Kuby 17.08.2026 (O100).
+      punkty: 0,
+      pochodzenieWagi: 'z_rodzaju',
       segment: typeof w.segment === 'string' && w.segment.length > 0 ? w.segment : null,
       zOdpowiedziaKontrolna: true,
       // ⭐ Pracą JEST odpowiedź, a `answered_at` mówi, kiedy padła. Dzień pracy
@@ -467,6 +666,17 @@ export type WierszMeczu = {
    * WIERSZA i tylko tym się staje w polu `kiedy`.
    */
   created_at: string | null;
+  /**
+   * ⭐ PLAN-D-W1 — `match_contexts.minutes_played`. Kolumna istniała od dawna
+   * (CHECK 0–130) i była WYRZUCANA przez ten czytnik: dziesięciominutowe
+   * wejście ważyło tyle, co pełne 90 minut. `null` = nie wiemy (R5).
+   */
+  minutes_played?: number | null;
+  /**
+   * ⭐ PLAN-D-W1 — długość CAŁEGO meczu (`calendar_events.planned_minutes`).
+   * ⛔ To jest MIANOWNIK wagi. `null` → 90 minut, jako decyzja produktowa.
+   */
+  dlugoscMeczu?: number | null;
 };
 
 export function jednostkiZMeczow(wiersze: readonly WierszMeczu[]): JednostkaPracy[] {
@@ -474,9 +684,15 @@ export function jednostkiZMeczow(wiersze: readonly WierszMeczu[]): JednostkaPrac
   for (const w of wiersze) {
     if (!w || typeof w.id !== 'number' || !Number.isFinite(w.id)) continue;
     const dzien = dzienZe(w.created_at);
+    const waga = wagaMeczu(
+      typeof w.minutes_played === 'number' ? w.minutes_played : null,
+      typeof w.dlugoscMeczu === 'number' ? w.dlugoscMeczu : null,
+    );
     out.push({
       klucz: `mecz:${w.id}`,
       rodzaj: 'mecz',
+      punkty: waga.punkty,
+      pochodzenieWagi: waga.pochodzenie,
       segment: null,
       zOdpowiedziaKontrolna: false,
       // ⛔ Mecz odbył się kiedyś, a wiersz powstał, gdy zawodnik go zapisał.
@@ -519,6 +735,11 @@ export type WierszWydarzeniaDoNagrody = {
   recurrence_rule: string | null;
   /** Blok Skupienia, z którego ta pozycja pochodzi — nośnik segmentu. */
   focus_block_id: string | null;
+  /** ⭐ PLAN-D-W1 — kolumny, z których liczy się waga (O100). */
+  event_type?: string | null;
+  source?: string | null;
+  coach_session_id?: string | null;
+  planned_minutes?: number | null;
 };
 
 /**
@@ -542,6 +763,13 @@ export function zrodloSesji(args: {
   wpisyDziennika: ReadonlySet<number> | null;
   /** `focus_block_id` → `segment_id`. `null` = nie znam mapy; NIE blokuje. */
   segmentBloku: ReadonlyMap<string, string> | null;
+  /**
+   * ⭐ PLAN-D-W1 — `calendar_events.id` → ZMIERZONA długość sesji w minutach,
+   * z `daily_logs.payload.duration_minutes` wpisu wskazującego TĘ pozycję.
+   * ⛔ Brak wpisu w mapie NIE BLOKUJE źródła — daje wagę „bez zmierzonej
+   * długości" (1 punkt), zgodnie z O100.
+   */
+  minutyZWpisow?: ReadonlyMap<number, number> | null;
 }): WejscieZrodla {
   if (args.wydarzenia === null) {
     return zrodloNieczytane('nie odczytałem wydarzeń kalendarza');
@@ -554,6 +782,12 @@ export function zrodloSesji(args: {
   }
 
   const wpisy = args.wpisyDziennika;
+  const minuty = args.minutyZWpisow ?? null;
+  const minutyDla = (id: number): number | null => {
+    if (minuty === null) return null;
+    const m = minuty.get(id);
+    return typeof m === 'number' && Number.isFinite(m) ? m : null;
+  };
   const segmentDla = (idBloku: string | null): string | null => {
     if (args.segmentBloku === null || typeof idBloku !== 'string' || idBloku.length === 0) return null;
     return args.segmentBloku.get(idBloku) ?? null;
@@ -566,10 +800,19 @@ export function zrodloSesji(args: {
   // nie ma gdzie trzymać werdyktu, więc werdyktu nie ma. Ta sama gałąź,
   // co w `czytajWerdykty`.
   const segmentWydarzenia = new Map<number, string | null>();
+  // ⭐ PLAN-D-W1 — fakty wagowe wydarzenia, dostępne przy obu drogach dowodu.
+  const faktyWydarzenia = new Map<number, Pick<WierszSesji,
+    'eventType' | 'source' | 'maSesjeTrenera' | 'minutyZPlanu'>>();
   const cykliczne = new Set<number>();
   for (const w of args.wydarzenia) {
     if (!w || typeof w.id !== 'number' || !Number.isFinite(w.id)) continue;
     segmentWydarzenia.set(w.id, segmentDla(w.focus_block_id));
+    faktyWydarzenia.set(w.id, {
+      eventType: w.event_type ?? null,
+      source: w.source ?? null,
+      maSesjeTrenera: typeof w.coach_session_id === 'string' && w.coach_session_id.length > 0,
+      minutyZPlanu: typeof w.planned_minutes === 'number' ? w.planned_minutes : null,
+    });
     if (typeof w.recurrence_rule === 'string' && w.recurrence_rule.length > 0) cykliczne.add(w.id);
   }
   if (args.werdykty.rodzaj === 'jest') {
@@ -581,6 +824,8 @@ export function zrodloSesji(args: {
         dzien: w.dzien,
         segment: segmentWydarzenia.get(w.idWydarzenia) ?? null,
         maWpisWDzienniku: wpisy.has(w.idWydarzenia),
+        ...(faktyWydarzenia.get(w.idWydarzenia) ?? {}),
+        minutyZmierzone: minutyDla(w.idWydarzenia),
       });
     }
   }
@@ -597,6 +842,8 @@ export function zrodloSesji(args: {
       dzien: w.scheduled_date,
       segment: segmentWydarzenia.get(w.id) ?? null,
       maWpisWDzienniku: maWpis,
+      ...(faktyWydarzenia.get(w.id) ?? {}),
+      minutyZmierzone: minutyDla(w.id),
     });
   }
 
@@ -754,10 +1001,16 @@ export function policzNagrode(
     : new Set<string>();
 
   for (const j of jednostki) {
-    punkty += WAGI_PRACY[j.rodzaj];
+    // ⭐ PLAN-D-W1 (O100): waga jest WŁASNOŚCIĄ JEDNOSTKI, nie jej rodzaju.
+    // ⛔ Jednostka bez policzonej wagi spada do wartości awaryjnej rodzaju —
+    // nie do zera, bo zero znaczyłoby „tej pracy nie było".
+    const waga = typeof j.punkty === 'number' && Number.isFinite(j.punkty)
+      ? j.punkty
+      : WAGI_PRACY[j.rodzaj];
+    punkty += waga;
     if (j.zOdpowiedziaKontrolna) odpowiedziKontrolne += 1;
     if (celePelne && j.segment !== null && segmentyCelu.has(j.segment)) {
-      punktyWCelu += WAGI_PRACY[j.rodzaj];
+      punktyWCelu += waga;
     }
   }
 

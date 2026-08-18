@@ -194,6 +194,8 @@ export type WierszKalendarzaDoDecyzji = {
   status: string;
   scheduled_date: string | null;
   scheduled_time: string | null;
+  /** ⭐ PLAN-D-W2 — długość meczu, jeżeli wiersz już ją niesie. */
+  planned_minutes?: number | null;
 };
 
 export type WierszMeczuDoZapisu = {
@@ -204,6 +206,8 @@ export type WierszMeczuDoZapisu = {
   title: string;
   scheduled_date: string;
   scheduled_time: string | null;
+  /** ⭐ PLAN-D-W2 — długość MECZU (mianownik wagi), nie minuty zawodnika. `null` = nie wiemy. */
+  planned_minutes: number | null;
 };
 
 export type DecyzjaOMeczu =
@@ -216,6 +220,12 @@ export type WejscieDecyzjiOMeczu = {
   data: string;
   /** `HH:MM` albo `null`, gdy zawodnik godziny nie podał. */
   godzina: string | null;
+  /**
+   * ⭐ PLAN-D-W2 — ile trwał mecz, w minutach. `null` = nie wiemy (R5).
+   * ⛔ Nie mylić z `match_contexts.minutes_played` — to jest długość CAŁEGO
+   * meczu, a tamto liczba minut, które zawodnik na nim spędził NA BOISKU.
+   */
+  dlugoscMeczu?: number | null;
   /** Tytuł kafla, np. „Mecz oficjalny". */
   tytul: string;
   /** WSZYSTKIE wydarzenia zawodnika, jakie ekran zdążył pobrać. */
@@ -240,6 +250,9 @@ export type WejscieDecyzjiOMeczu = {
  */
 export function zdecydujOWierszuMeczu(wejscie: WejscieDecyzjiOMeczu): DecyzjaOMeczu {
   const { userId, data, godzina, tytul, istniejace } = wejscie;
+  const dlugoscMeczu = typeof wejscie.dlugoscMeczu === 'number'
+    && Number.isFinite(wejscie.dlugoscMeczu) && wejscie.dlugoscMeczu > 0
+    ? wejscie.dlugoscMeczu : null;
 
   const pasujace = istniejace
     .filter((e) => e.event_type === RODZAJ_MECZ)
@@ -260,6 +273,12 @@ export function zdecydujOWierszuMeczu(wejscie: WejscieDecyzjiOMeczu): DecyzjaOMe
         title: tytul,
         scheduled_date: data,
         scheduled_time: godzina,
+        // ⭐ PLAN-D-W2 17.08.2026 — DŁUGOŚĆ MECZU, nie minuty zawodnika.
+        // ⛔ To jest MIANOWNIK wagi meczu: punkty liczą się jako udział minut
+        // na boisku w długości meczu. Bez tej liczby trzynastolatek grający
+        // pełne 60 minut dostałby 3 punkty zamiast 4, bo produkt założyłby 90.
+        // `null` = nie wiemy, i wtedy dopiero wchodzi założenie (R5).
+        planned_minutes: dlugoscMeczu,
       },
     };
   }
@@ -269,6 +288,11 @@ export function zdecydujOWierszuMeczu(wejscie: WejscieDecyzjiOMeczu): DecyzjaOMe
   // Godzina wpisana teraz NIE nadpisuje godziny, którą zawodnik podał,
   // planując ten mecz — nadpisanie skasowałoby jego wcześniejszą decyzję.
   // Uzupełnia wyłącznie pustkę.
+  if (dlugoscMeczu !== null && (cel.planned_minutes === null || cel.planned_minutes === undefined)) {
+    // ⛔ Tylko UZUPEŁNIAMY brak. Nadpisanie istniejącej długości zmieniłoby
+    // mianownik wagi meczu, który już raz policzył zawodnikowi punkty.
+    zmiany.planned_minutes = dlugoscMeczu;
+  }
   if (godzina !== null && (cel.scheduled_time === null || cel.scheduled_time === undefined)) {
     zmiany.scheduled_time = godzina;
   }
