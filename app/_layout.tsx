@@ -280,7 +280,12 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={colors.background} />
+      {/* ⭐ PAS W1 18.08.2026 (D-A) — MOTYW JEST JASNY, WIĘC IKONY PASKA
+          STANU MUSZĄ BYĆ CIEMNE. `style="light"` znaczy „jasne ikony",
+          czyli ikony na tło CIEMNE. Po przestrojeniu palety zostawienie
+          `light` dałoby białe ikony na tle #f5f2ec — czyli pasek stanu
+          nieczytelny na każdym telefonie. */}
+      <StatusBar style="dark" backgroundColor={colors.background} />
       <AuthProvider>
         <RootGate />
       </AuthProvider>

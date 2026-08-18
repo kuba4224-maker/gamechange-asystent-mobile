@@ -380,60 +380,81 @@ console.log('\n6. (T8/R1) NA „DZIŚ" NIE MA ELEMENTU POZA REJESTREM');
     odScrollView > 0 && doScrollView > odScrollView,
     `${odScrollView} / ${doScrollView} — jeśli -1, ten blok niczego nie pilnuje`);
 
-  const cialo = zrodlo.slice(odScrollView, doScrollView).replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
-  const linie = cialo.split('\n');
+  // ⭐ PAS W1 18.08.2026 — „CIAŁO EKRANU” TO OD DZIŚ DWIE RZECZY.
+  // JEDNYM ZDANIEM: obie gałęzie przełącznika („Dziś” i „Tydzień”) są od
+  // pasa W1 WYWOŁANIAMI PO NAZWIE — bez tego miara wysokości nie umie
+  // NAZWAĆ gałęzi, której nie opisuje, i gałąź „Dziś” wypadałaby z raportu
+  // bez śladu (O97). Ciało `ScrollView` samo w sobie zawiera więc już tylko
+  // nagłówek, przełącznik i dwa wywołania — a treść ekranu siedzi w ciele
+  // `renderDzisNaEkranie()`. ⛔ To NIE JEST osłabienie asercji: arkusz
+  // (`trescArkusza`) nadal NIE należy do żadnej z tych funkcji, więc każda
+  // reguła „to ma / nie ma stać na ekranie” działa tak samo jak dotąd.
+  const cialoGalezi = (nazwa: string): string => {
+    const od = zrodlo.indexOf(`function ${nazwa}(`);
+    if (od < 0) return '';
+    const start = zrodlo.indexOf('{', od);
+    let g = 0;
+    for (let i = start; i < zrodlo.length; i++) {
+      if (zrodlo[i] === '{') g++;
+      else if (zrodlo[i] === '}') { g--; if (g === 0) return zrodlo.slice(start, i + 1); }
+    }
+    return '';
+  };
+  const cialoScroll = zrodlo.slice(odScrollView, doScrollView);
+  const cialoDzis = cialoGalezi('renderDzisNaEkranie');
+  const cialoTydzien = cialoGalezi('renderTydzienNaKarcie');
+  const cialo = (cialoScroll + cialoDzis + cialoTydzien
+    + cialoGalezi('renderWierszDnia')
+    + cialoGalezi('renderTrzyFakty')
+    + cialoGalezi('renderKafel')).replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
   /** Numery linii, od których zaczyna się blok JSX na zadanym wcięciu. */
-  const poczatkiNa = (od: number, doExcl: number, wciecie: number): number[] => {
+  const poczatkiNa = (linie: string[], od: number, doExcl: number, wciecie: number): number[] => {
     const w = ' '.repeat(wciecie);
     const out: number[] = [];
     for (let i = od; i < doExcl; i++) {
       const l = linie[i];
       if (!l.startsWith(`${w}<`) && !l.startsWith(`${w}{`)) continue;
-      if (l[wciecie - 1] === ' ' && wciecie > 0 && linie[i][wciecie - 1] !== undefined
-        && l.slice(0, wciecie).trim() !== '') continue;
+      if (l[wciecie] === ' ') continue;
       if (l.startsWith(`${w}</`) || l.startsWith(`${w})}`)) continue;
       out.push(i);
     }
     return out;
   };
-  const wytnij = (poczatki: number[], koniec: number): string[] =>
+  const wytnij = (linie: string[], poczatki: number[], koniec: number): string[] =>
     poczatki.map((i, j) => linie.slice(i, j + 1 < poczatki.length ? poczatki[j + 1] : koniec).join('\n'));
 
-  // ⭐ PRZEPISANE 18.08.2026 (PAS S1) — DLACZEGO WYCINANIE MA DWA POZIOMY.
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐ PRZEPISANE 18.08.2026 (PAS W1) — WYCINANIE PO GAŁĘZIACH, NIE PO
+  //    JEDNYM CIELE.
   //
-  // Do 18.08.2026 „blok najwyższego poziomu" znaczyło „linia z wcięciem 8
-  // wewnątrz `<ScrollView>`" i to była prawda: ekran był płaską listą kart.
-  // Pas A1 wchłonął widok „Tydzień" jako STAN EKRANU, więc na wcięciu 8 stoją
-  // dziś TRZY rzeczy — nagłówek dnia, przełącznik i JEDNO wyrażenie warunkowe
-  // `{zakresKarty === 'tydzien' ? (…) : (<>…</>)}`, w którym siedzi cała reszta.
-  // ⛔ Stary sposób wycinał wtedy 3 bloki zamiast 8 i strażnik strażnika
-  // zapalił się dokładnie tak, jak go zaprojektowano: powiedział, że PRZESTAŁ
-  // WIDZIEĆ EKRAN, zamiast po cichu przepuścić rejestr.
+  // JEDNYM ZDANIEM: obie gałęzie ekranu są od pasa W1 WYWOŁANIAMI PO NAZWIE
+  // (`renderDzisNaEkranie()` i `renderTydzienNaKarcie()`), bo bez tego miara
+  // wysokości nie umie nazwać gałęzi, której nie opisuje (O97) — więc bloki
+  // trzeba wycinać z CIAŁ TYCH FUNKCJI, a nie z ciała `ScrollView`.
   //
-  // ⛔ REGUŁA NIE ZOSTAŁA OSŁABIONA. Nadal: „jeden blok = jeden element ekranu,
-  // każdy musi mieć wpis w rejestrze". Zmieniło się to, że przełącznik stanu
-  // ekranu jest OTWIERANY, a nie liczony jako jeden element — bo inaczej jeden
-  // wpis (`styles.odpowiedzCard`) rozpoznawałby cały ekran i siódmy kafelek
-  // dołożony za rok wjechałby do środka niezauważony.
-  const poczatkiZewnetrzne = poczatkiNa(0, linie.length, 8);
-  const bloki: string[] = [];
-  let otwartychGalezi = 0;
-  poczatkiZewnetrzne.forEach((i, j) => {
-    const koniec = j + 1 < poczatkiZewnetrzne.length ? poczatkiZewnetrzne[j + 1] : linie.length;
-    const blok = linie.slice(i, koniec).join('\n');
-    // Przełącznik STANU EKRANU: `{cos ? ( … ) : ( … )}` rozciągnięty na wiele
-    // linii. Jego gałęzie są ekranami, więc otwieramy je i liczymy ICH bloki.
-    if (/^ {8}\{[^\n]*\?\s*\($/.test(linie[i])) {
-      otwartychGalezi += 1;
-      bloki.push(...wytnij(poczatkiNa(i + 1, koniec, 12), koniec));
-    } else {
-      bloki.push(blok);
-    }
-  });
+  // ⛔ REGUŁA NIE ZOSTAŁA OSŁABIONA, ZOSTAŁA ZAOSTRZONA. Do 18.08 sufit
+  // dziewięciu elementów liczył OBIE gałęzie razem, więc przełożenie rzeczy
+  // z „Dziś" na „Tydzień" nie zmieniało nic. Od dziś sufit obowiązuje KAŻDĄ
+  // gałąź OSOBNO: ekran, który zawodnik naprawdę widzi naraz, to jedna gałąź.
+  // ═════════════════════════════════════════════════════════════════
+  const blokiGalezi = (cialoGalezi_: string, wciecie: number): string[] => {
+    const l = cialoGalezi_.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').split('\n');
+    return wytnij(l, poczatkiNa(l, 0, l.length, wciecie), l.length);
+  };
+  const blokiDzis = blokiGalezi(cialoDzis, 12);
+  const blokiTydzien = blokiGalezi(cialoTydzien, 8);
+  const linieScroll = cialoScroll.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').split('\n');
+  const poczatkiScroll = poczatkiNa(linieScroll, 0, linieScroll.length, 8);
+  const blokiScroll = wytnij(linieScroll, poczatkiScroll, linieScroll.length)
+    .filter((b) => !/^ {8}\{[^\n]*\?\s*\($/.test(b.split('\n')[0]));
+  const otwartychGalezi = poczatkiScroll.length - blokiScroll.length;
+  const bloki = [...blokiScroll, ...blokiDzis, ...blokiTydzien];
 
   check('(strażnik strażnika) umiem wyciąć bloki najwyższego poziomu',
-    bloki.length >= 8, `wyciąłem ${bloki.length} bloków — jeśli 0, reguła niżej niczego nie pilnuje`);
+    blokiDzis.length >= 5 && blokiTydzien.length >= 3 && blokiScroll.length >= 2,
+    `Dziś ${blokiDzis.length} · Tydzień ${blokiTydzien.length} · ScrollView ${blokiScroll.length} `
+    + '— jeśli któraś jest 0, reguła niżej niczego nie pilnuje');
 
   // ⛔ ZAPADKA NA RÓWNOŚĆ — ILE STANÓW MA TEN EKRAN.
   // Ustawiona 18.08.2026 na JEDEN (`Dziś / Tydzień`). Drugi przełącznik stanu
@@ -451,8 +472,11 @@ console.log('\n6. (T8/R1) NA „DZIŚ" NIE MA ELEMENTU POZA REJESTREM');
     nierozpoznane.length === 0,
     `element bez wpisu (pierwsza linia): ${nierozpoznane.map((b) => b.split('\n')[0].trim().slice(0, 80)).join(' | ')}`);
 
-  check(`(T8) liczba elementów nie przekracza sufitu ${SUFIT_ELEMENTOW_DZIS} — ta liczba ma MALEĆ, nigdy rosnąć`,
-    bloki.length <= SUFIT_ELEMENTOW_DZIS, `elementów: ${bloki.length}`);
+  check(`(T8) liczba elementów KAŻDEJ gałęzi nie przekracza sufitu ${SUFIT_ELEMENTOW_DZIS} — ta liczba ma MALEĆ, nigdy rosnąć`,
+    blokiScroll.length + blokiDzis.length <= SUFIT_ELEMENTOW_DZIS
+    && blokiScroll.length + blokiTydzien.length <= SUFIT_ELEMENTOW_DZIS,
+    `gałąź „Dziś": ${blokiScroll.length + blokiDzis.length} · gałąź „Tydzień": `
+    + `${blokiScroll.length + blokiTydzien.length}`);
 
   // Odwrotna strona tej samej reguły: rejestr nie opisuje rzeczy, których
   // na ekranie już nie ma. Bez tego lista rosłaby o martwe wpisy.
@@ -494,15 +518,28 @@ console.log('\n6. (T8/R1) NA „DZIŚ" NIE MA ELEMENTU POZA REJESTREM');
     const koniec = cialo.indexOf('styles.sectionLabel', iOdpowiedz);
     return koniec < 0 ? cialo.slice(iOdpowiedz) : cialo.slice(iOdpowiedz, koniec);
   })();
-  check('(T3) ⭐ głos tygodnia jest WCHŁONIĘTY przez jedną odpowiedź — nie ma własnej karty',
+  // ⭐ PRZECELOWANE 18.08.2026 (PAS W1, defekt D-1 + decyzja D-B Kuby).
+  // JEDNYM ZDANIEM: karta „co dziś zrobić" pokazuje od dziś DWA ZDANIA
+  // (co zrobić · dlaczego akurat to), a cały materiał — w tym PEŁNĄ treść
+  // głosu tygodnia — otwiera się dotknięciem, w arkuszu, za 0 dp. Dlatego
+  // `glos.tresc` nie stoi już w ciele `ScrollView`.
+  // ⛔ ASERCJA NIE ZOSTAŁA OSŁABIONA — żąda teraz TRZECH rzeczy zamiast dwóch:
+  //   1. `glos.tytul` NADAL PADA NA EKRANIE (trzeci fakt „Z Twoich wpisów"),
+  //      czyli głos się nie schował w całości za dotknięciem;
+  //   2. `glos.tresc` istnieje W PLIKU, czyli pełna treść nie wyparowała
+  //      przy okazji skracania karty (B3);
+  //   3. `styles.glosCard` nadal NIE ISTNIEJE — głos nie odzyskał własnej karty.
+  check('(T3) ⭐ głos tygodnia: tytuł NA EKRANIE, treść w arkuszu, ⛔ własnej karty brak',
     kartaOdpowiedzi !== null
-    && /glos\.tytul/.test(kartaOdpowiedzi) && /glos\.tresc/.test(kartaOdpowiedzi)
+    && /glos\.tytul/.test(kartaOdpowiedzi)
+    && /glos\.tresc/.test(zrodlo)
     && !cialo.includes('styles.glosCard'),
     kartaOdpowiedzi === null
       ? 'nie znajduję karty jednej odpowiedzi — nie da się powiedzieć, gdzie stoi głos'
-      : `glos w karcie: ${/glos\.tytul/.test(kartaOdpowiedzi)} · własna karta wróciła: `
+      : `tytuł na ekranie: ${/glos\.tytul/.test(kartaOdpowiedzi)} · treść w pliku: `
+        + `${/glos\.tresc/.test(zrodlo)} · własna karta wróciła: `
         + `${cialo.includes('styles.glosCard')} — głos tygodnia albo zniknął z ekranu, `
-        + 'albo odzyskał osobny blok, czyli wrócił kolaż pod nową nazwą');
+        + 'albo zgubił treść, albo odzyskał osobny blok, czyli wrócił kolaż pod nową nazwą');
 
   // ⛔ 2. PUNKT POMOCY — ZDJĘTY DECYZJĄ KUBY 17.08.2026. CYTAT:
   //    „najważniejsza jest prostota. Nie chcę, żebyś nawrzucał mi tam rzeczy
@@ -549,10 +586,26 @@ console.log('\n6. (T8/R1) NA „DZIŚ" NIE MA ELEMENTU POZA REJESTREM');
   // ⚠️ Sprawdzamy STAŁE, nie napisy: brzmienie należy do Kuby i może się
   // zmienić, a struktura „trzy części" ma zostać. Test na literał zapalałby
   // się przy poprawce brzmienia, czyli pilnowałby nie tego, co trzeba.
-  for (const stala of ['NAGLOWEK_CO_ZROBIC', 'NAGLOWEK_DLACZEGO', 'NAGLOWEK_CO_ZMIENI']) {
-    check(`(T1) jedna odpowiedź renderuje część `.concat(stala),
-      cialo.includes(`{${stala}}`), `brak {${stala}} w ciele ScrollView`);
+  // ⭐ PRZECELOWANE 18.08.2026 (PAS W1, defekt D-1 + decyzja D-B Kuby).
+  // JEDNYM ZDANIEM: zmierzone `lib/wysokoscEkranu.ts` — karta „co dziś zrobić"
+  // niosła 547 dp z 806,5, czyli 68% ekranu, i Kuba nazwał ją „ścianą tekstu";
+  // od dziś na ekranie stoi nagłówek karty i dwa zdania, a NAZWANE części
+  // „dlaczego akurat to" i „co to zmieni" stoją w arkuszu „cały materiał".
+  // ⛔ TRZY CZĘŚCI NADAL MUSZĄ BYĆ RYSOWANE — zmienia się tylko to, że dwie
+  // z nich są o jedno dotknięcie dalej i kosztują 0 dp. Sprawdzamy je
+  // W PLIKU EKRANU, a nie w ciele `ScrollView`.
+  check('(T1) jedna odpowiedź renderuje część NAGLOWEK_CO_ZROBIC — NA EKRANIE',
+    cialo.includes('{NAGLOWEK_CO_ZROBIC}'), 'brak {NAGLOWEK_CO_ZROBIC} w ciele ScrollView');
+  for (const stala of ['NAGLOWEK_DLACZEGO', 'NAGLOWEK_CO_ZMIENI']) {
+    check(`(T1) jedna odpowiedź renderuje część `.concat(stala).concat(' — w arkuszu „cały materiał"'),
+      zrodlo.includes(`{${stala}}`), `brak {${stala}} w całym pliku ekranu`);
   }
+  // ⛔ ZAPADKA NA POWRÓT ŚCIANY TEKSTU: pełna pozycja kolejki (z rozwiniętym
+  // „skąd to wiemy", 215 dp) ma stać W ARKUSZU, a nie w ciele `ScrollView`.
+  check('(T1, W1) ⛔ pełna `<PozycjaKolejkiCard>` NIE stoi w ciele `ScrollView` — '
+    + 'inaczej wraca 215 dp ściany tekstu',
+    !cialo.includes('<PozycjaKolejkiCard') && zrodlo.includes('<PozycjaKolejkiCard'),
+    'pozycja kolejki wróciła na ekran albo zniknęła z pliku w całości');
   check('(T1) …a same brzmienia stoją w lib/, nie w JSX (dają się sprawdzić bez appki)',
     NAGLOWEK_CO_ZROBIC.length > 0 && NAGLOWEK_DLACZEGO.length > 0 && NAGLOWEK_CO_ZMIENI.length > 0,
     `${NAGLOWEK_CO_ZROBIC} / ${NAGLOWEK_DLACZEGO} / ${NAGLOWEK_CO_ZMIENI}`);

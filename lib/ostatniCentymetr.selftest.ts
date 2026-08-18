@@ -277,7 +277,15 @@ function check(label: string, cond: boolean, detail: string) {
   // piąty taki plik zapali ją tak samo jak dotąd.
   // ⚠️ Nowe pliki pasa S1 (`components/WgladPozycji.tsx`) NIE SĄ na tej liście
   // — sprawdzone uruchomieniem 18.08.2026.
-  const PLIKOW_Z_WZORCEM_18_08_2026 = 37;
+  // ⭐ AKTUALIZACJA 18.08.2026, PAS W1: 37 → 38. Liczba WZROSŁA O JEDEN i to
+  // NIE JEST regres: pas W1 dopisał `lib/wygladW1.selftest.ts` — strażnika
+  // umowy o wyglądzie (§7 polecenia W1: czerwień tylko przy ostrzeżeniu, zero
+  // oceny przy obciążeniu, dwa nośniki na kafel, zero „AU", nic pod „+",
+  // zero rzeczy przeciętych zgięciem). Powstał, bo bateria mutacji tego pasa
+  // wykazała, że PIĘĆ z tych reguł nie miało w repozytorium ANI JEDNEJ asercji.
+  // Używa tego samego, poprawnego idiomu `bezKomentarzy` co pozostałe 37.
+  // ⛔ Liczba jest przestawiona, nie poluzowana: nadal RÓWNOŚĆ.
+  const PLIKOW_Z_WZORCEM_18_08_2026 = 38;
   check(`⭐ D6 ZAPADKA NA RÓWNOŚĆ — plików z wzorcem „blok przed linią" jest DOKŁADNIE ${PLIKOW_Z_WZORCEM_18_08_2026}`,
     zWzorcem.length === PLIKOW_Z_WZORCEM_18_08_2026,
     `${zWzorcem.length}: ${zWzorcem.join(', ')} — ⛔ jeżeli liczba WZROSŁA, ktoś dopisał `

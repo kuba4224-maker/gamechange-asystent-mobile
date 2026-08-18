@@ -520,10 +520,15 @@ console.log('\n══ F. IMPORTY URUCHOMIONE, NIE PRZECZYTANE ══════
       let sciezka: string | null = null;
       for (const ext of ['.ts', '.tsx']) {
         const kandydat = `${katalog}/${m[2]}${ext}`.replace(/\/\.\//g, '/');
-        try { readFileSync(kandydat, 'utf8'); sciezka = relative(process.cwd(), resolve(kandydat)); break; } catch { /* szukamy dalej */ }
+        // ⛔ `.replace` na ukośniki — powód przy warunku niżej.
+        try { readFileSync(kandydat, 'utf8'); sciezka = relative(process.cwd(), resolve(kandydat)).replace(/\\/g, '/'); break; } catch { /* szukamy dalej */ }
       }
       if (sciezka === null) { brakujace.push(`${plik}: nie znajduję modułu ${m[2]}`); continue; }
       let klucze: Set<string> | null = null;
+      // ⛔⛔ UKOŚNIKI — ZMIERZONE U KUBY 18.08.2026. Na Windowsie `relative()`
+      // oddaje `lib\widokTygodnia.ts`, więc ten warunek NIGDY się nie spełniał
+      // i ⛔ ANI JEDEN moduł nie był sprawdzany URUCHOMIENIEM — asercja (F4b)
+      // padała, a reszta cicho schodziła do samego odczytu tekstu.
       if (/^lib\//.test(sciezka) && !/react-native|expo-/.test(readFileSync(sciezka, 'utf8'))) {
         try {
           const mod = await import(pathToFileURL(resolve(sciezka)).href);

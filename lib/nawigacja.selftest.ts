@@ -96,6 +96,14 @@ check('⛔ (A4) pasek nie wymienia ekranu, którego nie ma na dysku',
 // pliku `app/`, `components/` albo `lib/` — Z ODJĘCIEM pliku samej trasy
 // (ekran, który prowadzi sam do siebie, nie jest wejściem).
 const KORZENIE = ['app', 'components', 'lib'];
+// ⛔⛔ UKOŚNIKI — ZMIERZONE U KUBY 18.08.2026, NIE PRZYPUSZCZONE.
+// `join()` na Windowsie oddaje `app\(tabs)\dzis.tsx`, a asercje niżej
+// porównują ścieżki z napisami pisanymi po linuksowemu (`app/(tabs)/dzis.tsx`).
+// Skutek: te same pliki dawały ZIELONO na Linuksie i CZERWONO u Kuby.
+// ⛔ Strażnik, który zależy od systemu operacyjnego, nie pilnuje reguły —
+// pilnuje tego, kto go uruchomił. Ścieżka staje się napisem TYLKO tutaj.
+const naUkosniki = (p: string): string => p.replace(/\\/g, '/');
+
 function przemiec(kat: string): string[] {
   if (!existsSync(kat)) return [];
   return readdirSync(kat, { withFileTypes: true }).flatMap((d) => {
@@ -111,7 +119,7 @@ function wejsciaDo(trasa: string): string[] {
   return wszystkiePliki
     .filter((f) => f !== join(katalogEkranow, `${trasa}.tsx`))
     .filter((f) => wzorzec.test(bezKomentarzy(readFileSync(f, 'utf8'))))
-    .map((f) => f.slice(root.length + 1))
+    .map((f) => naUkosniki(f.slice(root.length + 1)))
     .sort();
 }
 

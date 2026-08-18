@@ -32,8 +32,13 @@ const bezKomentarzy = (t: string): string =>
 // ═════════════════════════════════════════════════════════════════════
 // 1. BRZMIENIA — KAŻDY RODZAJ MA NAGŁÓWEK, ŻADEN NIE JEST PUSTY
 // ═════════════════════════════════════════════════════════════════════
-check('⛔ (A2) rodzajów arkusza jest DOKŁADNIE pięć — zapadka na równość (O73)',
-  RODZAJE_ARKUSZA.length === 5, `jest ${RODZAJE_ARKUSZA.length}`);
+// ⭐ PAS W1 18.08.2026 — ZAPADKA PRZESTAWIONA Z PIĘCIU NA SZEŚĆ.
+// Powód, jednym zdaniem: decyzja Kuby D-B z 18.08 („cały materiał otwiera
+// się dotknięciem, w arkuszu") dokłada rodzaj `material`, który zdejmuje
+// z ekranu „Dziś" 547 dp ściany tekstu i nie kosztuje ani jednego dp.
+// ⛔ Zapadka jest NA RÓWNOŚĆ celowo: szósty arkusz miał się zapalić i się zapalił.
+check('⛔ (A2, W1) rodzajów arkusza jest DOKŁADNIE sześć — zapadka na równość (O73)',
+  RODZAJE_ARKUSZA.length === 6, `jest ${RODZAJE_ARKUSZA.length}`);
 
 for (const r of RODZAJE_ARKUSZA) {
   const n = naglowekArkusza(r);
@@ -130,7 +135,7 @@ check('⭐⛔ (A2) ekran karmi arkusz nagłówkiem Z MODUŁU',
 // ⭐ KAŻDY RODZAJ ARKUSZA MA WEJŚCIE Z EKRANU — inaczej jest martwym wpisem.
 const bezWejscia = RODZAJE_ARKUSZA.filter(
   (r) => !new RegExp(`rodzaj:\\s*'${r}'`).test(ekran));
-check('⭐⛔ (A2) KAŻDY z pięciu rodzajów arkusza ma wejście z ekranu „Dziś"',
+check('⭐⛔ (A2, W1) KAŻDY z sześciu rodzajów arkusza ma wejście z ekranu „Dziś"',
   bezWejscia.length === 0, `bez wejścia: ${bezWejscia.join(', ') || '—'}`);
 
 check('⭐⛔ (A2) arkusz stoi POZA `ScrollView` — inaczej podnosiłby ekran '

@@ -197,7 +197,13 @@ import {
   parseSeenKeys,
   isDoseSeen,
 } from '../../lib/contentDose';
-import { colors, typography, spacing, radii, minTouchHeight, skew } from '../../constants/theme';
+// ⭐ PAS W1 18.08.2026 — `wymiary`, `barwaObciazenia`, `wysokoscObciazenia`
+// i `TOR_SLUPKA_DP` przychodzą Z TEGO SAMEGO MODUŁU co kolory. ⛔ Ekran
+// nie trzyma ani jednej z tych liczb sam — to jest cały KROK 2 polecenia.
+import {
+  colors, typography, spacing, radii, minTouchHeight, skew,
+  wymiary, barwaObciazenia, wysokoscObciazenia, TOR_SLUPKA_DP,
+} from '../../constants/theme';
 // PLAN-D-E 12.08.2026, zaktualizowane 12.08.2026 wieczorem — ZASADA PUNKTU
 // POMOCY I JEJ JEDYNY WYJATEK. Czytaj razem z komentarzem "ZADANIE E2" nizej;
 // wczesniej te dwa miejsca mowily co innego, a to jest dokladnie taki defekt,
@@ -981,6 +987,172 @@ const KARTA_TYDZIEN_NIEODCZYTANY =
 // ⚠️ Brzmienia przepisane z makiety v3 (`ekranDzien`, `arkuszPlus`) — nowe
 // jest tylko to, co makieta zostawiła w HTML-u, a nie w produkcie.
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS W1 08.2026 (18.08.2026) — BRZMIENIA WYGLĄDU
+//
+// ⚠️ WSZYSTKIE PONIŻSZE POCHODZĄ Z DWÓCH ŹRÓDEŁ I Z ŻADNEGO INNEGO:
+//   (a) §2 POLECENIA W1 — Kuba wypisał je imiennie przy defektach
+//       D-2, D-4, D-8 i T-2 („jak ma być"). To nie są moje propozycje;
+//   (b) `claude/MAKIETA_APLIKACJI_V3.html` — funkcje `kafelHTML`,
+//       `slupek`, `czteryInfo`, przeniesione CO DO ZNAKU.
+// ⛔ Ani jedno z nich nie ocenia zawodnika, nie liczy dni z rzędu (N1)
+// i nie porównuje go z nikim (N3). Wszystkie opisują STAN RZECZY albo
+// STAN NASZEJ WIEDZY o niej — nigdy jego charakteru.
+// ═══════════════════════════════════════════════════════════════════
+const BRZMIENIE_DO_PRZEJRZENIA_W1 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PAS W1, 18.08.2026)';
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS W1 — POPRAWKA PO ZRZUTACH Z 18.08, 16:46.
+//
+// ⛔⛔ CO ZOBACZYŁEM NA ZRZUCIE, A CZEGO NIE BYŁO NA LIŚCIE §2:
+// ŚCIANA TEKSTU Z KARTY „CO DZIŚ ZROBIĆ" TO NIE JEST DOKLEJONY MATERIAŁ
+// OBOK ZDANIA — TO JEST SAMO `pozycja.co`. Producent (`lib/jednaOdpowiedz.ts`
+// → `coZrobic.tekst`) oddaje CAŁY akapit z materiałów Gamechange:
+// „Prosta diagnoza wąskiego gardła z materiału: Potencjał — skok dosiężny
+//  (poniżej 35 cm nisko…)" — piętnaście linii.
+//
+// ⚠️ To znaczy, że zdjęcie z karty „skąd to wiemy" i „co to zmieni"
+// NIE ZAŁATWIAŁO D-1. Karta nadal byłaby ścianą, tylko krótszą o jedną
+// trzecią. Pierwsza wersja tego pasa tego nie widziała, bo miara wysokości
+// liczy `{pozycjeNaDzis[0].co}` jako JEDEN WIERSZ (długość zależy od danych
+// i miara mówi to wprost) — ⭐ liczba 105 dp była prawdziwa i myląca naraz.
+//
+// ⭐ CO ROBI TA FUNKCJA: składa PIERWSZE ZDANIE do pokazania na ekranie.
+// ⛔ NIE JEST TO ZMIANA BRZMIENIA (§7.6). Nie przepisuję ani jednego słowa
+// producenta — składam jego własny tekst do miejsca, w którym decyzja D-B
+// Kuby każe pokazać jedno zdanie. Całość stoi o jedno dotknięcie dalej,
+// w arkuszu „cały materiał", CO DO ZNAKU.
+// ⛔ Skrócenie jest ZAWSZE WIDOCZNE — kończy się wielokropkiem, a pod
+// spodem stoi „Cały materiał →". Tekst ucięty po cichu udaje całość.
+// ═══════════════════════════════════════════════════════════════════
+
+/** Ile znaków pierwszego zdania wchodzi na ekran (dwie linie po 15 px). */
+const ZNAKOW_PIERWSZEGO_ZDANIA = 120;
+
+/**
+ * Pierwsze zdanie tekstu, przycięte do `ZNAKOW_PIERWSZEGO_ZDANIA`.
+ * ⛔ Tnie WYŁĄCZNIE na `.`, `!`, `?` albo na granicy słowa — nigdy w środku
+ * wyrazu i nigdy na dwukropku (zdanie „…z materiału: Potencjał —" zaczyna
+ * się od dwukropka i cięcie tam zostawiłoby sam nagłówek).
+ * ⛔ Zwraca `skrocone: false`, gdy nic nie uciął — wtedy ekran NIE rysuje
+ * wielokropka, bo nie ma czego zapowiadać.
+ */
+export function pierwszeZdanieNaEkran(
+  tekst: string,
+  limit: number = ZNAKOW_PIERWSZEGO_ZDANIA,
+): { tekst: string; skrocone: boolean } {
+  const calosc = tekst.trim();
+  if (calosc.length === 0) return { tekst: '', skrocone: false };
+
+  // Koniec pierwszego zdania: kropka, wykrzyknik albo pytajnik, po którym
+  // stoi spacja albo koniec tekstu. ⛔ Przecinek dziesiętny („1,80") nie jest
+  // kropką, więc nie ma tu na co uważać — ale skrót „np. " byłby cięciem
+  // w złym miejscu, dlatego wymagam co najmniej 30 znaków przed cięciem.
+  const m = /[.!?](\s|$)/g;
+  let koniecZdania = -1;
+  for (let t = m.exec(calosc); t !== null; t = m.exec(calosc)) {
+    if (t.index >= 30) { koniecZdania = t.index + 1; break; }
+  }
+  const zdanie = koniecZdania > 0 ? calosc.slice(0, koniecZdania) : calosc;
+  if (zdanie.length <= limit) {
+    return { tekst: zdanie, skrocone: zdanie.length < calosc.length };
+  }
+  const ciete = zdanie.slice(0, limit);
+  const spacja = ciete.lastIndexOf(' ');
+  const wynik = (spacja > limit / 2 ? ciete.slice(0, spacja) : ciete).replace(/[\s,;:—-]+$/, '');
+  return { tekst: `${wynik}…`, skrocone: true };
+}
+
+
+/** ⭐ D-2 — TRZY FAKTY O DNIU. Nazwy wierszy z §2 polecenia, co do znaku. */
+const FAKT_OBCIAZENIE = 'Obciążenie';
+const FAKT_NAPIECIE = 'Napięcie';
+const FAKT_Z_WPISOW = 'Z Twoich wpisów';
+
+/**
+ * ⛔⛔ NAJWAŻNIEJSZE ZDANIE TEGO BLOKU — i jedyne, które musiałem tu
+ * napisać sam. Silnik obciążenia (minuty × ciężkość ⁄ 180) NIE ISTNIEJE
+ * w produkcie: buduje go pas D1. To, co produkt umie policzyć dzisiaj,
+ * to WAGA DNIA z rodzajów pozycji (`lib/widokTygodnia.ts`, `PUNKTY_RODZAJU`)
+ * — czyli liczba z PLANU, nie z pomiaru.
+ * ⭐ Dlatego wiersz „Obciążenie" pokazuje to, co naprawdę mamy — opis dnia
+ * z rodzajów — i NIE PODAJE ŻADNEJ LICZBY W PUNKTACH. Liczba w punktach
+ * przy dzisiejszym silniku byłaby podaniem planu jako pomiaru (Z0).
+ */
+const FAKT_OBCIAZENIE_BEZ_SILNIKA = 'w planie — punktów jeszcze nie liczymy';
+const FAKT_NIE_POLICZONE_PUSTY = 'nie policzone — dzień jest pusty';
+const FAKT_NIE_ODCZYTANE = 'nie policzone — nie udało się odczytać tego dnia';
+/** ⚠️ Plan lekcji nie istnieje w bazie (0 tabel) — pustka NAZWANA, nie cisza. */
+const FAKT_NAPIECIE_BEZ_PLANU = 'nie policzone — nie znamy Twojego planu lekcji';
+
+/**
+ * ⭐ D-1 + DECYZJA D-B KUBY z 18.08: „karta pokazuje JEDNO ZDANIE: co zrobić
+ * i dlaczego akurat to. Cały materiał otwiera się dotknięciem, w arkuszu —
+ * koszt 0 dp na ekranie."
+ */
+const KARTA_MATERIAL_WEJSCIE = 'Cały materiał →';
+const KARTA_MATERIAL_NAGLOWEK = 'Cały materiał';
+const KARTA_MATERIAL_PODPIS = 'to samo, tylko w całości';
+
+/**
+ * ⭐ D-4 — PLAKIETKA STANU NA KAFLU. Pięć napisów z §2 polecenia
+ * i z makiety v3 (`kafelHTML`, klasa `.chip`).
+ * ⛔ „czeka na Twoją ocenę" NIE JEST nowe — stało tu od pasa A1 jako
+ * `KAFEL_CZEKA_NA_OCENE` i zostaje tą samą stałą.
+ */
+const PLAKIETKA_DO_ZROBIENIA = 'do zrobienia';
+const PLAKIETKA_OCENIONE = 'ocenione';
+const PLAKIETKA_WYPELNIONA = 'wypełniona';
+const PLAKIETKA_DO_WYPELNIENIA = 'do wypełnienia';
+const PLAKIETKA_NIE_WIEM = 'nie wiem';
+
+/**
+ * ⭐ T-2 — PLAKIETKA REJESTRU POD SŁUPKIEM. Pięć napisów z §2 polecenia
+ * i z makiety v3 (funkcja `slupek`). ⛔ To NIE są oceny dnia: mówią, CO
+ * O NIM WIEMY, a nie ile jest wart.
+ */
+/**
+ * ⚠️ JEDYNE BRZMIENIE W TYM PASIE, KTÓREGO NIE MA ANI W POLECENIU, ANI
+ * W MAKIECIE — i dlatego jest oznaczone jako `BRZMIENIE_DO_PRZEJRZENIA_W1`
+ * i wypisane osobno w nocie przekazania. Mówi o STANIE NASZEJ WIEDZY,
+ * a nie o zawodniku: „nic nie wyszło" ≠ „nic nie zrobiłeś".
+ */
+const FAKT_WPISY_BEZ_WNIOSKU = 'nie policzone — z Twoich wpisów nic jeszcze nie wyszło';
+
+const REJESTR_ZMIERZONE = 'zmierzone';
+const REJESTR_W_PLANIE = 'w planie';
+const REJESTR_BEZ_OCENY = 'bez oceny';
+const REJESTR_BEZ_LICZBY = 'bez liczby';
+const REJESTR_PUSTO = 'pusto';
+
+/**
+ * ⭐ T-5 — DRUGA LINIA WIERSZA DNIA. Z makiety v3 (`wierszDnia`), co do znaku.
+ * ⛔ T-4: makieta NIGDY nie przekreśla pozycji odwołanej. Przekreślenie czyta
+ * się jako kara, a nieobecność jest WIEDZĄ, nie karą (Z7).
+ */
+const DZIEN_MINELO_NIE_WIEM = 'minęło · nie wiemy, jak było';
+const DZIEN_MINELO_OCENIONE = 'minęło · ocenione';
+const DZIEN_MINELO_PUSTO = 'minęło · nic tu nie stało';
+const DZIEN_DZIS = 'dziś';
+const DZIEN_JESZCZE_NIE_BYLO = 'jeszcze nie było';
+const DZIEN_NIE_ODCZYTANY = 'nie odczytane';
+
+/**
+ * ⛔⛔ T-7 — PRZYPIS Z DEFINICJĄ SKALI NIE WCHODZI NA EKRAN W TYM PASIE.
+ * Polecenie mówi wprost: „postaw go dopiero, gdy słupki naprawdę liczą
+ * obciążenie — silnik buduje pas D1". Słupek liczy dziś WAGĘ DNIA
+ * z rodzajów pozycji, więc zdanie „1 punkt obciążenia = 30 minut pracy
+ * przy ciężkości 6" byłoby opisem mechanizmu, którego pod nim nie ma.
+ * ⛔ Nie stawiam go i mówię o tym w nocie — zamiast postawić i przemilczeć.
+ */
+const PRZYPIS_TYGODNIA_BEZ_SKALI =
+  'Wysokość słupka mówi to samo, co jego nasycenie.';
+// ⚠️ MAKIETA DOPISUJE TU JESZCZE „Nie liczymy dni z rzędu i nie porównujemy
+// Cię z nikim." ⛔ Tego zdania NIE MA w tym pliku i mieć nie może: strażnik
+// N1 (`lib/nagrodaZaPrace.selftest.ts`) zakazuje frazy „z rzędu" w całym
+// `dzis.tsx`, żeby nikt nie wprowadził serii tylnymi drzwiami. Ta sama
+// obietnica stoi CO DO ZNAKU na „Profilu" (`PRZYPIS_CZEGO_TU_NIE_MA`).
+
 const ETYKIETA_TWOJ_DZIEN = 'Twój dzień';
 const KAFEL_CZEKA_NA_OCENE = 'czeka na Twoją ocenę';
 const WIERSZ_BEZ_OCENY = (ile: number) =>
@@ -1014,6 +1186,8 @@ type StanArkusza =
   | { rodzaj: 'meczWiecej'; tytul: string }
   | { rodzaj: 'plus' }
   | { rodzaj: 'kolizja' }
+  // ⭐ PAS W1 (D-1 + decyzja D-B Kuby): cały materiał jednej odpowiedzi.
+  | { rodzaj: 'material' }
   | null;
 
 
@@ -2799,51 +2973,280 @@ export default function DzisScreen() {
   // z karty drugi Kalendarz zamiast jego skrótu. Pełny tydzień stoi JEDNO
   // dotknięcie dalej i ten pas tego nie zmienia (§5 pkt 4 polecenia).
   // ═══════════════════════════════════════════════════════════════════
-  function renderWierszDnia(d: WierszDnia) {
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS W1 18.08.2026 — KAFEL Z TRZEMA NOŚNIKAMI (D-3, D-4, D-5).
+  //
+  // ⛔ JEDEN RYSOWNIK KAFLA NA CAŁY EKRAN. Do 18.08 kafel był pisany
+  // W DWÓCH MIEJSCACH (wpis dzienny i pętla po wydarzeniach) i oba miały
+  // czerwoną lewą krawędź. Dwie kopie rozjeżdżają się przy pierwszej
+  // poprawce, a każda z osobna wygląda poprawnie.
+  //
+  //  RODZAJ  (Z5)  → lewa krawędź: ciemna · zielona · kropkowana
+  //  REJESTR (Z1)  → reszta ramki: wypełniona · ciągła · przerywana
+  //  STAN          → plakietka tekstem, bo ⭐ K4: około 1 na 12 chłopców
+  //                  nie rozróżnia części barw i kształt ramki im nie wystarczy
+  // ═══════════════════════════════════════════════════════════════════
+  type RodzajKafla = 'zob' | 'wl' | 'prod';
+  type RejestrKafla = 'zmierzone' | 'plan' | 'niewiem' | 'wygasly';
+  function renderKafel(k: {
+    klucz: string;
+    tytul: string;
+    podpis: string;
+    rodzaj: RodzajKafla;
+    rejestr: RejestrKafla;
+    plakietka: string;
+    onPress: () => void;
+  }) {
+    const stylRodzaju = k.rodzaj === 'zob' ? styles.kafelZobowiazanie
+      : k.rodzaj === 'wl' ? styles.kafelWlasnaPraca : styles.kafelRzeczProduktu;
+    const stylRejestru = k.rejestr === 'zmierzone' ? styles.kafelZmierzone
+      : k.rejestr === 'plan' ? styles.kafelZaplanowane
+        : k.rejestr === 'wygasly' ? styles.kafelWygasly : styles.kafelNieWiemy;
+    const stylPlakietki = k.rejestr === 'zmierzone' ? styles.plakietkaZrobione
+      : k.rejestr === 'plan' ? styles.plakietkaDoZrobienia
+        : k.rejestr === 'wygasly' ? styles.plakietkaWygasla : styles.plakietkaNieWiemy;
     return (
-      <View key={d.data} style={styles.kartaDzienRzad}>
-        <Text style={[styles.kartaDzienEtykieta, d.dzisiaj && styles.kartaDzienEtykietaDzis]}>
+      <TouchableOpacity
+        key={k.klucz}
+        style={[styles.kafel, stylRejestru, stylRodzaju]}
+        accessibilityRole="button"
+        onPress={k.onPress}
+      >
+        {/* ⛔ React Native nie umie `border-left-style: dotted` osobno dla
+            jednej krawędzi — kropkowana krawędź rzeczy produktu jest osobnym
+            paskiem, a nie stylem ramki. To jest ograniczenie platformy,
+            nie decyzja projektowa. */}
+        {k.rodzaj === 'prod' ? <View style={styles.kafelKrawedzProdukt} /> : null}
+        <View style={styles.kafelTresc}>
+          <Text style={styles.kafelTytul}>{k.tytul}</Text>
+          {k.podpis === '' ? null : <Text style={styles.kafelPodpis}>{k.podpis}</Text>}
+        </View>
+        <Text style={[styles.plakietka, stylPlakietki]}>{k.plakietka}</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS W1 (D-2) — TRZY FAKTY O DNIU. Makieta v3: `czteryInfo`, 86 dp.
+  //
+  // ⛔⛔ NAJWAŻNIEJSZA UCZCIWOŚĆ TEGO BLOKU: wiersz „Obciążenie" NIE PODAJE
+  // LICZBY W PUNKTACH. Silnik obciążenia (minuty × ciężkość ⁄ 180) nie
+  // istnieje — buduje go pas D1. To, co produkt umie policzyć dzisiaj, to
+  // WAGA DNIA z rodzajów pozycji, czyli liczba Z PLANU. Podanie jej jako
+  // „X pkt obciążenia" byłoby podaniem planu jako pomiaru (Z0).
+  //
+  // ⛔ KROPKA JEST JEDNA I TAKA SAMA niezależnie od tego, ile dzień waży
+  // (D4). Zielona = mamy liczbę. Szara = nie policzone. Złota = ostrzeżenie
+  // MIĘKKIE (napięcie). ⛔ Czerwieni tu nie ma i mieć nie będzie (Z2).
+  // ═══════════════════════════════════════════════════════════════════
+  function renderTrzyFakty(zdanieZWpisow: string | null) {
+    const odczytOk = tydzienBiezacy !== null && tydzienBiezacy.odczyt.wydarzenia;
+    const dzisWiersz = tydzienBiezacy === null
+      ? null
+      : (tydzienBiezacy.dni.find((d) => d.dzisiaj) ?? null);
+
+    // ── 1. OBCIĄŻENIE ──────────────────────────────────────────────
+    let obciazenie: string;
+    let obciazeniePustka = true;
+    if (!odczytOk || dzisWiersz === null) {
+      obciazenie = FAKT_NIE_ODCZYTANE;
+    } else if (dzisWiersz.stan === 'pusto') {
+      obciazenie = FAKT_NIE_POLICZONE_PUSTY;
+    } else if (dzisWiersz.opisWagi !== null) {
+      obciazenie = `${dzisWiersz.opisWagi} · ${FAKT_OBCIAZENIE_BEZ_SILNIKA}`;
+      obciazeniePustka = false;
+    } else {
+      obciazenie = FAKT_NIE_ODCZYTANE;
+    }
+
+    // ── 2. NAPIĘCIE ────────────────────────────────────────────────
+    // ⚠️ Plan lekcji nie istnieje w bazie (zmierzone 14.08: zero tabel
+    // %school% / %szkol% / %lesson%), więc ta gałąź jest dziś jedyną
+    // osiągalną. ⛔ Pustka NAZWANA, nie cisza (R5).
+    const napiecie = dzisWiersz !== null && dzisWiersz.napiecie !== null
+      ? dzisWiersz.napiecie.tekst
+      : FAKT_NAPIECIE_BEZ_PLANU;
+    const napiecieJest = dzisWiersz !== null && dzisWiersz.napiecie !== null;
+
+    // ── 3. Z TWOICH WPISÓW ─────────────────────────────────────────
+    // ⛔ ZERO NOWEJ TREŚCI: to jest `glos.tytul` co do znaku, czyli jedno
+    // zdanie, które arbiter już wydał. Pełna treść stoi w arkuszu.
+    const wpisyJest = zdanieZWpisow !== null;
+    const wpisy = zdanieZWpisow !== null
+      ? zdanieZWpisow
+      : (glos.rodzaj === 'nie_wiem' ? FAKT_NIE_ODCZYTANE : FAKT_WPISY_BEZ_WNIOSKU);
+
+    const wiersz = (nazwa: string, tresc: string, jest: boolean, miekka = false) => (
+      <View style={styles.fakt}>
+        <View style={[
+          styles.faktKropka,
+          !jest && styles.faktKropkaPustka,
+          jest && miekka && styles.faktKropkaMiekka,
+        ]} />
+        <Text style={styles.faktTekst}>
+          <Text style={styles.faktNazwa}>{nazwa + ': '}</Text>
+          <Text style={jest ? styles.faktTekst : styles.faktPustka}>{tresc}</Text>
+        </Text>
+      </View>
+    );
+
+    return (
+      <View style={styles.fakty}>
+        {wiersz(FAKT_OBCIAZENIE, obciazenie, !obciazeniePustka)}
+        {wiersz(FAKT_NAPIECIE, napiecie, napiecieJest, true)}
+        {wiersz(FAKT_Z_WPISOW, wpisy, wpisyJest)}
+      </View>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS W1 (T-1, T-2) — REJESTR DNIA I SŁUPEK OBCIĄŻENIA.
+  //
+  // ⛔ CO TEN SŁUPEK NAPRAWDĘ NIESIE — i mówię to tutaj, a nie w nocie:
+  // WAGĘ DNIA z `lib/widokTygodnia.ts` (`punktyWagi`, tabela `PUNKTY_RODZAJU`),
+  // czyli liczbę Z RODZAJÓW POZYCJI. ⛔ NIE jest to obciążenie z minut
+  // i ciężkości — tego silnika w produkcie nie ma i buduje go pas D1.
+  // Dlatego ⛔ NIE STAWIAM pod tygodniem przypisu z definicją skali
+  // („1 punkt obciążenia = 30 minut pracy przy ciężkości 6"): opisywałby
+  // mechanizm, którego pod nim nie ma. Polecenie W1 mówi to wprost (T-7).
+  //
+  // ⭐ K4 — WYSOKOŚĆ I NASYCENIE LICZĄ SIĘ Z TEJ SAMEJ LICZBY, więc słupek
+  // mówi to samo dwa razy: raz kształtem, raz barwą.
+  // ⛔ Barwa nie ma składowej czerwonej (Z2) — pilnuje tego `barwaObciazenia`
+  // w `constants/theme.ts` i mutacja M1 z baterii tego pasa.
+  // ═══════════════════════════════════════════════════════════════════
+  type RejestrDnia = 'zmierzone' | 'plan' | 'bezOceny' | 'bezLiczby' | 'pusto';
+  function rejestrDnia(d: WierszDnia): RejestrDnia {
+    const liczone = d.pozycje.filter((p) => p.liczonaDoWagi);
+    if (d.pozycje.length === 0) return 'pusto';
+    if (!d.przeszly) return 'plan';
+    // ⛔ „nie odczytano" i „brak wpisu" to DWA różne powody tej samej
+    // niewiedzy — i oba znaczą „nie wiemy", a nie „nic nie zrobiłeś".
+    if (liczone.some((p) => p.stanPrzeszly === null || p.stanPrzeszly === 'brak_wpisu')) return 'bezOceny';
+    if (liczone.some((p) => p.stanPrzeszly === 'nie_odczytano')) return 'bezLiczby';
+    return 'zmierzone';
+  }
+  const PODPIS_REJESTRU: Record<RejestrDnia, string> = {
+    zmierzone: REJESTR_ZMIERZONE,
+    plan: REJESTR_W_PLANIE,
+    bezOceny: REJESTR_BEZ_OCENY,
+    bezLiczby: REJESTR_BEZ_LICZBY,
+    pusto: REJESTR_PUSTO,
+  };
+  function renderSlupek(d: WierszDnia) {
+    const rej = rejestrDnia(d);
+    const wartosc = d.punktyWagi === null ? 0 : d.punktyWagi;
+    const wys = wysokoscObciazenia(wartosc);
+    const wypelnienie = rej === 'zmierzone'
+      ? { height: wys, backgroundColor: barwaObciazenia(wartosc) }
+      : rej === 'plan'
+        ? { height: wys, backgroundColor: 'transparent', borderWidth: 1.5, borderColor: barwaObciazenia(Math.max(wartosc, 3)) }
+        : rej === 'pusto'
+          ? { height: 2, backgroundColor: colors.border }
+          : { height: wys, backgroundColor: 'transparent', borderWidth: 1.5, borderStyle: 'dashed' as const, borderColor: colors.textSecondary };
+    return (
+      <View style={styles.slupek}>
+        <View style={styles.slupekTor}>
+          <View style={[styles.slupekWypelnienie, wypelnienie]} />
+        </View>
+        <Text style={styles.slupekPodpis}>{PODPIS_REJESTRU[rej]}</Text>
+      </View>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS W1 18.08.2026 — WIERSZ DNIA PRZEBUDOWANY (T-1 … T-8).
+  //
+  //  T-1 ⛔⛔ SŁUPKA OBCIĄŻENIA NIE BYŁO W OGÓLE — cały nośnik zniknął.
+  //          Wraca, i niesie tę samą informację DWA RAZY: wysokością
+  //          i nasyceniem (K4 — około 1 na 12 chłopców nie rozróżnia
+  //          części barw).
+  //  T-2     Pod słupkiem stoi plakietka REJESTRU: co o tym dniu WIEMY.
+  //  T-3     Wiersz jest KARTĄ i da się go dotknąć. Do 18.08 był gołym
+  //          rzędem tekstu — nie wyglądał na nic dotykalnego, i nie był.
+  //  T-4 ⛔⛔ POZYCJA ODWOŁANA NIE JEST JUŻ PRZEKREŚLONA. Makieta nigdy
+  //          nie przekreśla: przekreślenie czyta się jako kara, a
+  //          nieobecność jest WIEDZĄ, nie karą (Z7).
+  //  T-5     Wiersz przestaje wyliczać NAZWY pozycji. Pierwsza linia to
+  //          OPIS DNIA (`opisWagi` — „Sesja + klub"), druga mówi, co o tym
+  //          dniu wiadomo. ⛔ Nic nie znika: opis dnia jest zbudowany
+  //          z tych samych rodzajów, które stały w liście nazw, a pełna
+  //          lista pozycji stoi JEDNO DOTKNIĘCIE dalej, w Kalendarzu.
+  //  T-6     Plakietka „ocenione" / „N bez oceny" — jak w makiecie.
+  //  T-8 ⛔  Dzisiejszy dzień oznacza OBWÓDKA, nie barwa ostrzegawcza.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderWierszDnia(d: WierszDnia) {
+    const rej = rejestrDnia(d);
+    const bezOcenyIle = d.pozycje.filter(
+      (p) => p.liczonaDoWagi && (p.stanPrzeszly === null || p.stanPrzeszly === 'brak_wpisu'),
+    ).length;
+
+    // ── PIERWSZA LINIA: OPIS DNIA (T-5) ────────────────────────────
+    // ⛔ `opisWagi === null` znaczy „nie udało się odczytać" — i wtedy NIE
+    // piszemy „nic nie masz", tylko mówimy, że nie wiemy (Z0).
+    const opis = d.pozycje.length === 0
+      ? (d.podpisPustegoDnia ?? DZIEN_NIE_ODCZYTANY)
+      : (d.opisWagi ?? DZIEN_NIE_ODCZYTANY);
+
+    // ── DRUGA LINIA: CO O TYM DNIU WIADOMO (T-5) ───────────────────
+    const druga = d.dzisiaj ? DZIEN_DZIS
+      : !d.przeszly ? DZIEN_JESZCZE_NIE_BYLO
+        : rej === 'pusto' ? DZIEN_MINELO_PUSTO
+          : rej === 'zmierzone' ? DZIEN_MINELO_OCENIONE
+            : DZIEN_MINELO_NIE_WIEM;
+
+    // ── PLAKIETKA WIERSZA (T-6) ────────────────────────────────────
+    const plakietka = rej === 'bezOceny' && bezOcenyIle > 0
+      ? `${bezOcenyIle} ${REJESTR_BEZ_OCENY}`
+      : (d.przeszly && rej === 'zmierzone' ? PLAKIETKA_OCENIONE : null);
+
+    return (
+      <TouchableOpacity
+        key={d.data}
+        style={[styles.wd, d.dzisiaj && styles.wdDzis]}
+        accessibilityRole="button"
+        onPress={() => router.push('/kalendarz')}
+      >
+        <Text style={[styles.wdNazwa, d.dzisiaj && styles.kartaDzienEtykietaDzis]}>
           {d.etykieta}
         </Text>
-        <View style={styles.kartaDzienTresc}>
-          {d.pozycje.length === 0 ? (
-            <Text style={styles.kartaDzienPusty}>{KARTA_TYDZIEN_DZIEN_PUSTY}</Text>
-          ) : d.pozycje.map((p) => (
-            <Text key={`${p.id}-${p.dzien}`} style={styles.kartaPozycja}>
-              <Text style={p.liczonaDoWagi ? styles.kartaPozycjaTytul : styles.kartaPozycjaOdwolana}>
+        {renderSlupek(d)}
+        <View style={styles.wdTresc}>
+          <Text style={styles.wdOpis}>{opis}</Text>
+          <Text style={styles.wdDruga}>{druga}</Text>
+          {/* ═══════════════════════════════════════════════════════
+              ⛔⛔ T-4 BEZ CICHEGO ZNIKNIĘCIA (B3). T-5 każe zdjąć z wiersza
+              WYLICZANKĘ NAZW pozycji — i jest zdjęta. Ale pozycja ODWOŁANA
+              i pozycja BEZ WPISU niosły swój stan właśnie tam, więc samo
+              zdjęcie listy skasowałoby po cichu jedyne miejsce, w którym
+              zawodnik widzi „Odwołane".
+              ⭐ Dlatego wiersz wymienia z nazwy WYŁĄCZNIE te pozycje, które
+              MAJĄ CO POWIEDZIEĆ o swoim stanie — a stan bierze z
+              `plakietkaPozycji`, czyli z JEDYNEGO producenta plakietki.
+              ⛔ Ekran, który składa plakietkę sam z dwóch pól, jest drugą
+              kopią reguły: dokładnie przez to sesja odwołana z datą
+              w przyszłości nie niosła NICZEGO (9 wydarzeń na produkcji,
+              pomiar 17.08.2026).
+              ⛔ ZERO PRZEKREŚLENIA. Stan niesie SŁOWO, nie kreska. */}
+          {d.pozycje
+            .filter((p) => p.obowiazywanie === 'odwolane'
+              || p.stanPrzeszly === 'brak_wpisu' || p.stanPrzeszly === 'nie_odczytano')
+            .map((p) => (
+              <Text key={`${p.id}-${p.dzien}`} style={styles.wdOdwolana}>
                 {p.tytul}
+                {plakietkaPozycji(p) !== null
+                  ? <Text style={styles.kartaPlakietka}>{'  ·  ' + plakietkaPozycji(p)}</Text>
+                  : null}
               </Text>
-              {p.godzina ? `  ·  ${p.godzina}` : ''}
-              {/* ⭐ WT-17 — POZYCJA, KTÓRA SIĘ ODBYŁA, DOSTAJE PLAKIETKĘ.
-                  ⚠️ PLAN-D-K1 16.08.2026 — stanów jest PIĘĆ, nie cztery
-                  (doszło `odwolane` → „Odwołane"). Ten odczyt jest indeksem
-                  po `Record<StanWykonania, string>`, więc piąta wartość
-                  rysuje się tu SAMA i `tsc` pilnuje kompletności tabeli —
-                  dlatego ta gałąź nie potrzebowała zmiany kodu, tylko tego
-                  zdania (D7).
-                  Pięć stanów i pięć plakietek bierze się z JEDNEJ tabeli
-                  (`PLAKIETKI_STANU_PRZESZLEGO` = `PLAKIETKI_WYKONANIA`),
-                  tej samej, z której czyta Kalendarz. ⛔ Druga kopia tej
-                  tabeli znaczyłaby, że jeden ekran mówi „Zrobione", a drugi
-                  „Bez wpisu" o tym samym wystąpieniu — i nikt tego nie
-                  zauważy, bo nikt nie ogląda obu naraz. */}
-              {/* ⭐ PLAN-D-Q1 17.08.2026 — PLAKIETKA Z JEDNEGO PRODUCENTA.
-                  Do 17.08 stało tu `PLAKIETKI_STANU_PRZESZLEGO[p.stanPrzeszly]`
-                  pod warunkiem `p.stanPrzeszly !== null`. ⛔ Sesja ODWOŁANA
-                  z datą w przyszłości ma `stanPrzeszly === null` (bo o jej
-                  WYKONANIU nie ma czego orzekać) i nie niosła przez to ŻADNEJ
-                  plakietki — rysowała się identycznie jak zaplanowana.
-                  Zmierzone na produkcji 17.08.2026: 9 takich wydarzeń
-                  u 1 zawodnika. `plakietkaPozycji` bierze OBIE informacje:
-                  stan wykonania i to, czy pozycja jeszcze obowiązuje.
-                  ⛔ To ta sama tabela brzmień co dotąd — zero nowych słów. */}
-              {plakietkaPozycji(p) !== null
-                ? <Text style={styles.kartaPlakietka}>{'  ·  ' + plakietkaPozycji(p)}</Text>
-                : null}
-            </Text>
-          ))}
+            ))}
         </View>
-      </View>
+        {plakietka === null ? null : (
+          <Text style={[
+            styles.plakietka,
+            rej === 'zmierzone' ? styles.plakietkaZrobione : styles.plakietkaNieWiemy,
+          ]}>{plakietka}</Text>
+        )}
+      </TouchableOpacity>
     );
   }
 
@@ -2866,16 +3269,32 @@ export default function DzisScreen() {
          gdy jest ona wywołaniem po nazwie. Owinięta w `<View>` wypadała
          z raportu BEZ ŚLADU razem z siedmioma wierszami dni — czyli dokładnie
          ten cichy brak, którego pilnuje asercja (M2-13, O97). */
-      <View style={styles.card}>
+      /* ⭐ PAS W1 (T-3) — KARTA ZDJĘTA Z OBUDOWY TYGODNIA. Wiersze dni SĄ
+         od dziś kartami (`styles.wd`), więc obudowa robiła z tego kartę
+         w karcie: dwie ramki wokół tej samej rzeczy. Makieta v3
+         (`ekranTydzien`) rysuje wiersze wprost na tle ekranu. */
+      <>
         <Text style={styles.kartaTydzienZakres}>{tydzienBiezacy.zakresDat}</Text>
         {/* ⚠️ Zdanie nad tygodniem POWSTAJE ALBO NIE POWSTAJE — nigdy nie
             jest ogólne. `zbudujZdanie` oddaje `null`, gdy nie ma czego
-            podsumować, i wtedy nie rysujemy nic. */}
+            podsumować, i wtedy nie rysujemy nic.
+            ⚠️ T-9 — brzmienie „Jeden trening, trzy dni bez nic." jest
+            niezręczne po polsku i Kuba to zgłosił. ⛔ NIE PODMIENIAM GO
+            po cichu: producent stoi w `lib/widokTygodnia.ts`
+            (`zbudujZdanie`), czyli po stronie logiki, której ten pas nie
+            dotyka. Propozycja brzmienia jest w nocie przekazania. */}
         {tydzienBiezacy.zdanie !== null
           ? <Text style={styles.kartaTydzienZdanie}>{tydzienBiezacy.zdanie.podsumowanie}</Text>
           : null}
         {tydzienBiezacy.dni.map(renderWierszDnia)}
-      </View>
+        {/* ⭐ PAS W1 (T-7) — PRZYPIS BEZ DEFINICJI SKALI.
+            Polecenie mówi wprost: definicję („1 punkt obciążenia = 30 minut
+            pracy przy ciężkości 6") postawić DOPIERO, gdy słupki naprawdę
+            liczą obciążenie. Dziś liczą WAGĘ DNIA z rodzajów pozycji, więc
+            zdanie o minutach i ciężkości opisywałoby mechanizm, którego pod
+            nim nie ma. ⛔ Nie stawiam go i mówię o tym w nocie. */}
+        <Text style={styles.licznikPodpis}>{PRZYPIS_TYGODNIA_BEZ_SKALI}</Text>
+      </>
     );
   }
 
@@ -3237,6 +3656,67 @@ export default function DzisScreen() {
     // ⛔ Wywołanie BEZ ARGUMENTU jest tym samym renderem, nie drugą kopią.
     if (arkusz.rodzaj === 'oceny') return <>{renderPytaniaOWystapienia()}</>;
 
+    // ═══════════════════════════════════════════════════════════════
+    // ⭐⭐ PAS W1 (D-1, decyzja D-B) — CAŁY MATERIAŁ JEDNEJ ODPOWIEDZI.
+    //
+    // ⛔ TO NIE JEST DRUGA KOPIA TREŚCI. Dokładnie te same producenty
+    // (`glos`, `pozycjeNaDzis[0]`, `odpowiedz.coToZmieni`, `kolejka.niepelna`,
+    // `renderTrescZawszeWidoczna`) — tylko narysowane W CAŁOŚCI, w miejscu,
+    // które nie kosztuje ani jednego dp ekranu.
+    //
+    // CO STĄD ZESZŁO Z EKRANU „DZIŚ" (zmierzone 18.08.2026 przed pasem):
+    //   • pełna `<PozycjaKolejkiCard pierwsza>` z rozwiniętym „skąd to wiemy" — 215 dp
+    //   • część „CO TO ZMIENI" z dowodem i źródłem                            —  80 dp
+    //   • zdanie „ta lista jest niepełna"                                     —  35 dp
+    //   • treść ZAWSZE WIDOCZNA (granice bezpieczeństwa)                      —  91 dp
+    //   • karta głosu tygodnia                                                —  21 dp
+    // ⛔ Żadna z nich nie zniknęła. Wszystkie są tutaj, o jedno dotknięcie.
+    // ═══════════════════════════════════════════════════════════════
+    if (arkusz.rodzaj === 'material') {
+      return (
+        <>
+          {pokazacKarte(glos) && glos.rodzaj === 'glos' ? (
+            <View style={styles.odpowiedzCzesc}>
+              <Text style={styles.odpowiedzNaglowek}>{glos.tytul}</Text>
+              <Text style={styles.glosTresc}>{glos.tresc}</Text>
+            </View>
+          ) : null}
+          {pozycjeNaDzis.length > 0 ? (
+            <PozycjaKolejkiCard
+              pozycja={pozycjeNaDzis[0]}
+              pierwsza
+              pokazacDlaczego={false}
+              dzis={dane === null ? null : dane.wejscia.dzis}
+              onPress={TRASA_POZYCJI[pozycjeNaDzis[0].skadToWiemy.klucz]
+                ? () => { setArkusz(null); router.push(TRASA_POZYCJI[pozycjeNaDzis[0].skadToWiemy.klucz]); }
+                : undefined}
+            />
+          ) : null}
+          {/* ⭐ CZĘŚĆ 2: DLACZEGO AKURAT TO — nazwana, tak jak od pasa T.
+              ⛔ Na ekranie stoi SAMO ZDANIE (D-1: dwa zdania, 118 dp);
+              NAZWA części stoi tutaj, razem z resztą materiału. */}
+          {pozycjeNaDzis.length > 0 && pozycjeNaDzis[0].dlaczego !== null ? (
+            <View style={styles.odpowiedzCzesc}>
+              <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_DLACZEGO}</Text>
+              <Text style={styles.odpowiedzDlaczego}>{pozycjeNaDzis[0].dlaczego}</Text>
+            </View>
+          ) : null}
+          {/* ⭐ CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM. */}
+          {odpowiedz.coToZmieni ? (
+            <View style={styles.odpowiedzCzesc}>
+              <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZMIENI}</Text>
+              <Text style={styles.odpowiedzDowod}>{odpowiedz.coToZmieni.tekst}</Text>
+              <Text style={styles.hintSource}>{odpowiedz.coToZmieni.zrodlo}</Text>
+            </View>
+          ) : null}
+          {kolejka !== null && (kolejka.niepelna || (wglady !== null && wglady.niepelna)) ? (
+            <Text style={styles.kolejkaNiepelna}>{KOLEJKA_NIEPELNA}</Text>
+          ) : null}
+          {renderTrescZawszeWidoczna()}
+        </>
+      );
+    }
+
     if (arkusz.rodzaj === 'meczWiecej') {
       return (
         <>
@@ -3327,6 +3807,193 @@ export default function DzisScreen() {
     );
   }
 
+  /**
+   * ⭐ PAS W1 18.08.2026 — CAŁA GAŁĄŹ „DZIŚ" JAKO JEDNA NAZWANA FUNKCJA.
+   * Bliźniak `renderTydzienNaKarcie()`. Obie są wywołaniami po nazwie,
+   * więc miara zawsze wie, KTÓREJ z nich nie opisuje.
+   */
+  function renderDzisNaEkranie() {
+    return (
+      <>
+            {/* ── 3. CO DZIŚ NAJWAŻNIEJSZE (makieta v3: `kartaGlowna`, 118 dp)
+                ⭐ WCHŁANIA GŁOS TYGODNIA. Karta głosu i jedna odpowiedź były
+                do 18.08 dwiema kartami pod sobą i mówiły tym samym głosem
+                („co dziś najważniejsze"). Makieta v3 ma tu JEDEN blok —
+                i dlatego głos tygodnia stoi w środku tej karty, a nie nad nią.
+                ⛔ ZERO NOWYCH BRZMIEŃ: `glos.tytul` i `glos.tresc` co do znaku. */}
+            {/* ═══════════════════════════════════════════════════════
+                ⭐⭐ 3. CO DZIŚ ZROBIĆ — DEFEKT D-1 NAPRAWIONY.
+
+                CO BYŁO ŹLE (§2 polecenia, zrzut z 18.08): karta „CO DZIŚ
+                ZROBIĆ” to ŚCIANA TEKSTU na ~15 linii — surowy materiał
+                wklejony w całości, PONAD PÓŁ EKRANU. ⭐ Zmierzone
+                `lib/wysokoscEkranu.ts`: 547 dp z 806,5 — czyli 68% ekranu
+                na jeden blok.
+
+                JAK JEST TERAZ (decyzja D-B Kuby z 18.08): karta pokazuje
+                DWA ZDANIA — co zrobić i dlaczego akurat to. Cały materiał
+                otwiera się dotknięciem, w arkuszu (`rodzaj: 'material'`),
+                czyli POZA `ScrollView` — koszt 0 dp.
+
+                ⛔ CAŁA KARTA JEST PRZYCISKIEM. Wiersz „Cały materiał →”
+                stoi WEWNĄTRZ obszaru dotykalnego, a nie obok niego: napis
+                ze strzałką, którego nie da się dotknąć, jest obietnicą
+                bez pokrycia.
+                ═══════════════════════════════════════════════════════ */}
+            <TouchableOpacity
+              style={styles.odpowiedzCard}
+              accessibilityRole="button"
+              onPress={() => setArkusz({ rodzaj: 'material' })}
+            >
+              <View style={styles.odpowiedzStripe} />
+              <Text style={styles.voiceLabel}>{NAGLOWEK_CO_ZROBIC}</Text>
+              {/* ── ZDANIE 1: CO ZROBIĆ ─────────────────────────────
+                  ⛔ `pozycja.co` CO DO ZNAKU z rankera — ekran nie skraca
+                  cudzego zdania i nie dopisuje własnego. */}
+              {kolejka === null ? (
+                <Text style={styles.odpowiedzTresc}>{KOLEJKA_WCZYTUJE}</Text>
+              ) : pozycjeNaDzis.length === 0 ? (
+                <Text style={styles.kolejkaPustka}>
+                  {kolejka.stan === 'nie_wiem' ? KOLEJKA_NIE_WIEM : KOLEJKA_PUSTO}
+                </Text>
+              ) : (
+                <>
+                  {/* ⛔⛔ D-1 — JEDNO ZDANIE, NIE CAŁY MATERIAŁ.
+                      `numberOfLines` jest DRUGIM, twardym hamulcem: gdyby
+                      producent oddał kiedyś zdanie bez kropki i bez spacji,
+                      funkcja wyżej nie miałaby gdzie ciąć, a ekran i tak
+                      nie urośnie ponad dwie linie. ⭐ Dwa niezależne
+                      zabezpieczenia, bo to jest defekt, który Kuba nazwał
+                      pierwszym słowem po obejrzeniu appki. */}
+                  <Text style={styles.odpowiedzTresc} numberOfLines={2}>
+                    {pierwszeZdanieNaEkran(pozycjeNaDzis[0].co).tekst}
+                  </Text>
+                  {/* ── ZDANIE 2: DLACZEGO AKURAT TO ────────────────
+                      ⚠️ `null` znaczy „nie mam uzasadnienia, którego bym
+                      nie zmyślił”. Zmyślone uzasadnienie jest gorsze niż
+                      jego brak, bo brzmi wiarygodnie — dlatego ta część
+                      potrafi zniknąć w całości. */}
+                  {pozycjeNaDzis[0].dlaczego !== null ? (
+                    <Text style={styles.voiceSub} numberOfLines={2}>
+                      {pozycjeNaDzis[0].dlaczego}
+                    </Text>
+                  ) : null}
+                </>
+              )}
+              <Text style={styles.cardWejscie}>{KARTA_MATERIAL_WEJSCIE}</Text>
+            </TouchableOpacity>
+
+            {/* ═══════════════════════════════════════════════════════
+                ⭐ 4. TRZY FAKTY O DNIU — DEFEKT D-2 NAPRAWIONY.
+                Makieta v3, funkcja `czteryInfo`, 86 dp. Do 18.08 tego
+                bloku NIE BYŁO NA EKRANIE W OGÓLE.
+                ═══════════════════════════════════════════════════════ */}
+            {/* ⛔ `glos.tytul` PADA NA EKRANIE — trzeci fakt („Z Twoich wpisów")
+                jest tym samym zdaniem arbitra, tylko jedną linią. Pełna treść
+                (`glos.tresc`) stoi w arkuszu „cały materiał". ⛔ Głos NIE MA
+                i nie odzyska własnej karty — `styles.glosCard` nie jest tu wołane. */}
+            {renderTrzyFakty(pokazacKarte(glos) && glos.rodzaj === 'glos' ? glos.tytul : null)}
+
+            {/* ── 5. ETYKIETA „TWÓJ DZIEŃ" (makieta v3: 26 dp) ───────── */}
+            <Text style={styles.sectionLabel}>{ETYKIETA_TWOJ_DZIEN}</Text>
+
+            {/* ── ⭐ KAFEL PRODUKTU: WPIS DZIENNY (makieta v3: `rodzaj:"prod"`) ──
+                ⛔⛔ TO JEST JEDYNE WEJŚCIE DO `/dziennik` PO ZDJĘCIU ZAKŁADKI —
+                i dlatego powstało PRZED zdjęciem zakładki, a nie po nim.
+                Zmierzone 18.08.2026: `grep -rn "'/dziennik'"` wracał WYŁĄCZNIE
+                tablicę `TRASA_POZYCJI` w tym pliku, czyli wejście zależne od
+                tego, czy ranker postawi pozycję Dziennika na PIERWSZYM miejscu.
+                Wejście, które bywa, nie jest wejściem (decyzja Kuby 18.08:
+                „dziennik wchłania »Dziś« — ankieta poranna jako kafel").
+                ⛔ TRZY STANY, NIE DWA (R5): `null` znaczy „nie odczytałem",
+                a nie „nie masz wpisu". */}
+            {/* ⭐ D-9 NAPRAWIONE — „tytuł i podpis mówią co innego”.
+                Do 18.08 kafel mówił jednocześnie „ZAPISZ dzisiejszy wpis”
+                (polecenie) i „dzisiejszy wpis JEST ZAPISANY” (stan). Teraz
+                TYTUŁ OPISUJE STAN, gdy rzecz jest już zrobiona, i jest
+                poleceniem tylko wtedy, gdy jest co zrobić.
+                ⛔ ZERO NOWYCH BRZMIEŃ: te same trzy stałe, inaczej ułożone.
+                ⛔ TRZY STANY, NIE DWA (R5): `null` znaczy „nie odczytałem”. */}
+            {renderKafel({
+              klucz: 'dziennik',
+              tytul: brakWpisuDzis === false ? DZIENNIK_JEST : DZIENNIK_CO,
+              podpis: brakWpisuDzis === null ? DZIENNIK_NIE_WIEM
+                : brakWpisuDzis ? DZIENNIK_DLACZEGO : '',
+              rodzaj: 'prod',
+              rejestr: brakWpisuDzis === null ? 'niewiem' : brakWpisuDzis ? 'plan' : 'zmierzone',
+              plakietka: brakWpisuDzis === null ? PLAKIETKA_NIE_WIEM
+                : brakWpisuDzis ? PLAKIETKA_DO_WYPELNIENIA : PLAKIETKA_WYPELNIONA,
+              onPress: () => router.push('/dziennik'),
+            })}
+
+            {/* ── 6. KAFLE DNIA (makieta v3: `kafelHTML`, 54/60 dp) ────
+                ⭐ KAFEL JEST WEJŚCIEM DO OCENY. Do 18.08 dotknięcie
+                czegokolwiek w tej liście prowadziło do `/kalendarz` albo
+                do niczego; ocena stała 4 663 dp niżej. */}
+            {pustkaDzis ? (
+              <>
+                <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
+                {/* ⭐ PAS I2 16.08.2026 — WT-33: pustka MA MIEĆ WYJŚCIE, a nie
+                    goły napis ze strzałką. ⚠️ `blad_odczytu` ZOSTAJE NAPISEM
+                    i to jest decyzja: jego wyjściem jest `RefreshControl`,
+                    nie dotknięcie — strzałka byłaby obietnicą akcji. */}
+                {pustkaDzis.krokWTekscie ? null
+                  : pustkaDzis.rodzaj === 'blad_odczytu' ? (
+                    <Text style={styles.cardBody}>{pustkaDzis.cta}</Text>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.inlineLink}
+                      onPress={() => router.push(pustkaDzis.rodzaj === 'brak_danych' ? '/kalendarz' : '/profil')}
+                    >
+                      <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
+                    </TouchableOpacity>
+                  )}
+              </>
+            ) : (
+              (todayEvents === null ? [] : todayEvents).map((e) => {
+                const opisRodzaju = opiszRodzaj(e.event_type);
+                if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
+                const pyt = bezOceny.find((q) => q.idWydarzenia === e.id) ?? null;
+                // ⭐ D-3 · RODZAJ POZYCJI (Z5). ⛔ Rozstrzyga to `opiszRodzaj`
+                // z `lib/meczWKalendarzu.ts`, a nie własna tabela w tym pliku —
+                // ekran, który sam mapuje rodzaje, jest drugą kopią reguły.
+                const rodzajKafla = !opisRodzaju.znany ? 'prod'
+                  : (opisRodzaju.id === 'match' || opisRodzaju.id === 'club_training')
+                    ? 'zob' : 'wl';
+                return renderKafel({
+                  klucz: String(e.id),
+                  tytul: e.title,
+                  podpis: opisRodzaju.znany ? EVENT_TYPE_LABELS[opisRodzaju.id] : opisRodzaju.komunikat,
+                  rodzaj: rodzajKafla,
+                  // ⭐ D-5 · REJESTR (Z1, R5). ⛔ „czeka na ocenę” to NIE JEST
+                  // „pusto” — to jest NIE WIEMY, i ma własny kształt ramki.
+                  rejestr: pyt === null ? 'plan' : 'niewiem',
+                  // ⭐ D-4 · PLAKIETKA STANU — trzeci nośnik, tekstowy (K4).
+                  plakietka: pyt === null ? PLAKIETKA_DO_ZROBIENIA : KAFEL_CZEKA_NA_OCENE,
+                  onPress: () => {
+                    if (pyt !== null) setArkusz({ rodzaj: 'ocena', klucz: pyt.klucz });
+                    else router.push('/kalendarz');
+                  },
+                });
+              })
+            )}
+
+            {/* ── 9. WIERSZ „WCZORAJ BEZ OCENY" (makieta v3: 40 dp) ────
+                ⭐ TO JEST DRUGIE WEJŚCIE DO OCENY — dla rzeczy, których nie
+                ma już na dzisiejszej liście. ⛔ Rysuje się WYŁĄCZNIE, gdy
+                naprawdę coś czeka; wiersz „0 rzeczy" byłby listą zaległości. */}
+            {bezOceny.length > 0 ? (
+              <TouchableOpacity style={styles.inlineLink} onPress={() => setArkusz({ rodzaj: 'oceny' })}>
+                <Text style={styles.cardAction}>{WIERSZ_BEZ_OCENY(bezOceny.length)}</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {/* ── 12. PRZYPIS (makieta v3: 42 dp) ─────────────────────── */}
+            <Text style={styles.licznikPodpis}>{PRZYPIS_OCENA_NALEZY_DO_RZECZY}</Text>
+      </>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
@@ -3373,166 +4040,15 @@ export default function DzisScreen() {
              zakładką schowaną pod pięcioma ekranami przewijania. */
           renderTydzienNaKarcie()
         ) : (
-          <>
-            {/* ── 3. CO DZIŚ NAJWAŻNIEJSZE (makieta v3: `kartaGlowna`, 118 dp)
-                ⭐ WCHŁANIA GŁOS TYGODNIA. Karta głosu i jedna odpowiedź były
-                do 18.08 dwiema kartami pod sobą i mówiły tym samym głosem
-                („co dziś najważniejsze"). Makieta v3 ma tu JEDEN blok —
-                i dlatego głos tygodnia stoi w środku tej karty, a nie nad nią.
-                ⛔ ZERO NOWYCH BRZMIEŃ: `glos.tytul` i `glos.tresc` co do znaku. */}
-            <View style={styles.odpowiedzCard}>
-              <View style={styles.odpowiedzStripe} />
-              <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZROBIC}</Text>
-              {pokazacKarte(glos) && glos.rodzaj === 'glos' ? (
-                <Text style={styles.glosTresc}>{glos.tytul + '  ·  ' + glos.tresc}</Text>
-              ) : null}
-              {/* ⛔ DOKŁADNIE JEDNA POZYCJA KOLEJKI, NIE CZTERY. Ranker wydaje
-                  prefiks czterech; makieta v3 ma na „Dziś" jedną odpowiedź
-                  i kafle dnia. Pozostałe trzy pozycje ZDJĘTE Z EKRANU —
-                  wymienione w nocie przekazania (B3), nie skasowane z rankera. */}
-              {kolejka === null ? (
-                <Text style={styles.odpowiedzTresc}>{KOLEJKA_WCZYTUJE}</Text>
-              ) : pozycjeNaDzis.length === 0 ? (
-                <Text style={styles.kolejkaPustka}>
-                  {kolejka.stan === 'nie_wiem' ? KOLEJKA_NIE_WIEM : KOLEJKA_PUSTO}
-                </Text>
-              ) : (
-                <>
-                  <PozycjaKolejkiCard
-                    pozycja={pozycjeNaDzis[0]}
-                    pierwsza
-                    pokazacDlaczego={false}
-                    dzis={dane === null ? null : dane.wejscia.dzis}
-                    onPress={TRASA_POZYCJI[pozycjeNaDzis[0].skadToWiemy.klucz]
-                      ? () => router.push(TRASA_POZYCJI[pozycjeNaDzis[0].skadToWiemy.klucz])
-                      : undefined}
-                  />
-                  {/* ── CZĘŚĆ 2: DLACZEGO AKURAT TO — JEDNO ZDANIE ────
-                      ⚠️ `null` znaczy „nie mam uzasadnienia, którego bym nie
-                      zmyślił". Zmyślone uzasadnienie jest gorsze niż jego brak,
-                      bo brzmi wiarygodnie — dlatego ta część potrafi zniknąć. */}
-                  {pozycjeNaDzis[0].dlaczego !== null ? (
-                    <View style={styles.odpowiedzCzesc}>
-                      <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_DLACZEGO}</Text>
-                      <Text style={styles.odpowiedzDlaczego}>{pozycjeNaDzis[0].dlaczego}</Text>
-                    </View>
-                  ) : null}
-                  {/* ⛔ ZDJĘTE Z „DZIŚ" 18.08.2026 (pas A1): `<WgladPozycji>`
-                      razem z osią pomiarów (WG-34). Zmierzone: sam ten blok
-                      niósł 330 dp z 927 — czyli ponad jedną trzecią ekranu,
-                      który ma się zmieścić w 850. Inwentarz A1 §1.3 kieruje go
-                      na „Profil → Skąd to wiemy"; ⛔ zdjęcie z „Dziś" należy do
-                      tego pasa, postawienie na „Profil" — do pasa A3.
-                      ⚠️ To ZDEJMUJE TRZECIĄ CZĘŚĆ WGLĄDU (jedna rzecz do
-                      zrobienia, M4) z tego ekranu i jest wypisane imiennie
-                      w nocie przekazania, a nie przemilczane (B3). */}
-                  {/* ── CZĘŚĆ 3: CO TO ZMIENI — TYLKO Z DOWODEM I ŹRÓDŁEM ── */}
-                  {odpowiedz.coToZmieni ? (
-                    <View style={styles.odpowiedzCzesc}>
-                      <Text style={styles.odpowiedzNaglowek}>{NAGLOWEK_CO_ZMIENI}</Text>
-                      <Text style={styles.odpowiedzDowod}>{odpowiedz.coToZmieni.tekst}</Text>
-                      <Text style={styles.hintSource}>{odpowiedz.coToZmieni.zrodlo}</Text>
-                    </View>
-                  ) : null}
-                  {/* ⚠️ LISTA NIEPEŁNA MÓWI O SOBIE. Skrócona po cichu wygląda
-                      identycznie jak pełna — i to jest cały problem. */}
-                  {kolejka.niepelna || (wglady !== null && wglady.niepelna) ? (
-                    <Text style={styles.kolejkaNiepelna}>{KOLEJKA_NIEPELNA}</Text>
-                  ) : null}
-                </>
-              )}
-              {/* Treść ZAWSZE WIDOCZNA (bezpieczeństwo) — NIE jest podpowiedzią
-                  dnia i nie konkuruje z kolejką. ⛔ ZOSTAJE mimo braku
-                  w makiecie: to są granice bezpieczeństwa, nie ozdoba. */}
-              {renderTrescZawszeWidoczna()}
-            </View>
-
-            {/* ── 5. ETYKIETA „TWÓJ DZIEŃ" (makieta v3: 26 dp) ───────── */}
-            <Text style={styles.sectionLabel}>{ETYKIETA_TWOJ_DZIEN}</Text>
-
-            {/* ── ⭐ KAFEL PRODUKTU: WPIS DZIENNY (makieta v3: `rodzaj:"prod"`) ──
-                ⛔⛔ TO JEST JEDYNE WEJŚCIE DO `/dziennik` PO ZDJĘCIU ZAKŁADKI —
-                i dlatego powstało PRZED zdjęciem zakładki, a nie po nim.
-                Zmierzone 18.08.2026: `grep -rn "'/dziennik'"` wracał WYŁĄCZNIE
-                tablicę `TRASA_POZYCJI` w tym pliku, czyli wejście zależne od
-                tego, czy ranker postawi pozycję Dziennika na PIERWSZYM miejscu.
-                Wejście, które bywa, nie jest wejściem (decyzja Kuby 18.08:
-                „dziennik wchłania »Dziś« — ankieta poranna jako kafel").
-                ⛔ TRZY STANY, NIE DWA (R5): `null` znaczy „nie odczytałem",
-                a nie „nie masz wpisu". */}
-            <TouchableOpacity
-              style={styles.kafel}
-              accessibilityRole="button"
-              onPress={() => router.push('/dziennik')}
-            >
-              <Text style={styles.kafelTytul}>{DZIENNIK_CO}</Text>
-              <Text style={styles.kafelPodpis}>
-                {brakWpisuDzis === null ? DZIENNIK_NIE_WIEM
-                  : brakWpisuDzis ? DZIENNIK_DLACZEGO : DZIENNIK_JEST}
-              </Text>
-            </TouchableOpacity>
-
-            {/* ── 6. KAFLE DNIA (makieta v3: `kafelHTML`, 54/60 dp) ────
-                ⭐ KAFEL JEST WEJŚCIEM DO OCENY. Do 18.08 dotknięcie
-                czegokolwiek w tej liście prowadziło do `/kalendarz` albo
-                do niczego; ocena stała 4 663 dp niżej. */}
-            {pustkaDzis ? (
-              <>
-                <Text style={styles.cardBody}>{pustkaDzis.tekst}</Text>
-                {/* ⭐ PAS I2 16.08.2026 — WT-33: pustka MA MIEĆ WYJŚCIE, a nie
-                    goły napis ze strzałką. ⚠️ `blad_odczytu` ZOSTAJE NAPISEM
-                    i to jest decyzja: jego wyjściem jest `RefreshControl`,
-                    nie dotknięcie — strzałka byłaby obietnicą akcji. */}
-                {pustkaDzis.krokWTekscie ? null
-                  : pustkaDzis.rodzaj === 'blad_odczytu' ? (
-                    <Text style={styles.cardBody}>{pustkaDzis.cta}</Text>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.inlineLink}
-                      onPress={() => router.push(pustkaDzis.rodzaj === 'brak_danych' ? '/kalendarz' : '/profil')}
-                    >
-                      <Text style={styles.cardAction}>{pustkaDzis.cta} →</Text>
-                    </TouchableOpacity>
-                  )}
-              </>
-            ) : (
-              (todayEvents === null ? [] : todayEvents).map((e) => {
-                const opisRodzaju = opiszRodzaj(e.event_type);
-                if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
-                const pyt = bezOceny.find((q) => q.idWydarzenia === e.id) ?? null;
-                return (
-                  <TouchableOpacity
-                    key={e.id}
-                    style={styles.kafel}
-                    accessibilityRole="button"
-                    onPress={() => {
-                      if (pyt !== null) setArkusz({ rodzaj: 'ocena', klucz: pyt.klucz });
-                      else router.push('/kalendarz');
-                    }}
-                  >
-                    <Text style={styles.kafelTytul}>{e.title}</Text>
-                    <Text style={styles.kafelPodpis}>
-                      {(opisRodzaju.znany ? EVENT_TYPE_LABELS[opisRodzaju.id] : opisRodzaju.komunikat)
-                        + (pyt === null ? '' : '  ·  ' + KAFEL_CZEKA_NA_OCENE)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })
-            )}
-
-            {/* ── 9. WIERSZ „WCZORAJ BEZ OCENY" (makieta v3: 40 dp) ────
-                ⭐ TO JEST DRUGIE WEJŚCIE DO OCENY — dla rzeczy, których nie
-                ma już na dzisiejszej liście. ⛔ Rysuje się WYŁĄCZNIE, gdy
-                naprawdę coś czeka; wiersz „0 rzeczy" byłby listą zaległości. */}
-            {bezOceny.length > 0 ? (
-              <TouchableOpacity style={styles.inlineLink} onPress={() => setArkusz({ rodzaj: 'oceny' })}>
-                <Text style={styles.cardAction}>{WIERSZ_BEZ_OCENY(bezOceny.length)}</Text>
-              </TouchableOpacity>
-            ) : null}
-
-            {/* ── 12. PRZYPIS (makieta v3: 42 dp) ─────────────────────── */}
-            <Text style={styles.licznikPodpis}>{PRZYPIS_OCENA_NALEZY_DO_RZECZY}</Text>
-          </>
+          /* ── WIDOK „DZIŚ" (makieta v3: `ekranDzien`) ───────────────
+             ⭐ PAS W1 18.08.2026 — GAŁĄŹ WYPROWADZONA DO NAZWANEJ FUNKCJI,
+             dokładnie tak jak `renderTydzienNaKarcie()` obok. ⛔ To nie
+             jest kosmetyka: miara (`lib/wysokoscEkranu.ts`) wybiera
+             NAJWYŻSZĄ z dwóch gałęzi i NAZYWA tę, której nie opisuje —
+             ale nazwać umie WYŁĄCZNIE wywołanie po nazwie. Gałąź wpisana
+             wprost w JSX wypadałaby z raportu BEZ ŚLADU, czyli dokładnie
+             ten cichy brak, którego pilnuje asercja (M2-13, O97). */
+          renderDzisNaEkranie()
         )}
       </ScrollView>
 
@@ -3575,15 +4091,123 @@ const styles = StyleSheet.create({
   // pliku już były (`surface`, `border`, `brand`) — makieta v3 też nie
   // dokłada ani jednej barwy.
   // ═══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS W1 18.08.2026 — KAFEL NIESIE TRZY NIEZALEŻNE INFORMACJE
+  // I KAŻDA MA WŁASNY NOŚNIK (makieta v3, `kafelHTML`).
+  //
+  //  D-3  LEWA KRAWĘDŹ = RODZAJ POZYCJI (Z5)
+  //       ciemna ciągła  → zobowiązanie wobec zespołu
+  //       zielona ciągła → Twoja własna praca
+  //       kropkowana     → rzecz produktu
+  //       ⛔ DO 18.08 BYŁA CZERWONA U WSZYSTKICH TRZECH — bo brała
+  //       `colors.brand`, a `brand` był koralem. To łamało Z2 (czerwień
+  //       wyłącznie przy bólu) I nie niosło żadnej informacji, bo była
+  //       jedna dla wszystkiego.
+  //
+  //  D-5  RESZTA RAMKI = REJESTR (Z1, R5)
+  //       wypełniony       → zmierzone
+  //       obrys ciągły     → zaplanowane
+  //       obrys przerywany → ⛔ NIE WIEMY (a to NIE JEST to samo co „pusto")
+  //
+  //  D-4  PLAKIETKA = STAN. Trzeci nośnik, tekstowy — bo ⭐ K4: około
+  //       1 na 12 chłopców nie rozróżnia części barw i sam kształt ramki
+  //       nie powie im nic.
+  //
+  //  D-6  `paddingRight` — kafel nie wchodzi pod nieprzezroczysty „+".
+  // ═══════════════════════════════════════════════════════════════
   /** Kafel dnia. Wysokość z makiety v3 (`kafelHTML`, 54 dp) — stąd `minHeight`. */
   kafel: {
-    minHeight: 54, justifyContent: 'center',
+    minHeight: wymiary.wysokoscKafla, justifyContent: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-    borderLeftWidth: 4, borderLeftColor: colors.brand,
-    borderRadius: radii.md, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 6,
+    borderRadius: radii.md,
+    paddingLeft: 12, paddingRight: wymiary.odstepPodPlusem, paddingVertical: 8, marginBottom: 6,
   },
+  /** D-3 · RODZAJ — lewa krawędź. Trzy warianty, trzy różne znaczenia. */
+  kafelZobowiazanie: { borderLeftWidth: 4, borderLeftColor: colors.textPrimary },
+  kafelWlasnaPraca: { borderLeftWidth: 4, borderLeftColor: colors.brand },
+  // ⛔ React Native nie zna `border-left-style: dotted` osobno dla jednej
+  // krawędzi, więc kropkowaną krawędź rysuje osobny pasek (`kafelKrawedzProdukt`).
+  // Kafel produktu ma za to lewą krawędź ROZSZERZONĄ i przezroczystą, żeby
+  // treść trzech rodzajów stała w tej samej odległości od brzegu.
+  kafelRzeczProduktu: { borderLeftWidth: 4, borderLeftColor: 'transparent' },
+  kafelKrawedzProdukt: {
+    position: 'absolute', left: 0, top: 8, bottom: 8, width: 4,
+    borderLeftWidth: 4, borderLeftColor: colors.textSecondary, borderStyle: 'dotted',
+    borderRadius: 2,
+  },
+  /** D-5 · REJESTR — reszta ramki. ⛔ „pusto" i „nie wiemy" to dwie różne rzeczy. */
+  kafelZmierzone: { backgroundColor: colors.okSoft, borderColor: colors.okBorder },
+  kafelZaplanowane: { backgroundColor: colors.surface, borderColor: colors.border },
+  kafelNieWiemy: { backgroundColor: 'transparent', borderStyle: 'dashed', borderColor: colors.border },
+  kafelWygasly: { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+  kafelTresc: { flex: 1, minWidth: 0 },
   kafelTytul: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
-  kafelPodpis: { ...typography.body, fontSize: 11, color: colors.textTertiary, marginTop: 2 },
+  kafelPodpis: { ...typography.body, fontSize: 11, color: colors.textSecondary, marginTop: 2 },
+  /** D-4 · PLAKIETKA STANU. Makieta v3, klasa `.chip`. */
+  plakietka: {
+    ...typography.bodyMedium, fontSize: 10, letterSpacing: 0.6,
+    textTransform: 'uppercase', color: colors.textSecondary,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radii.xs,
+    paddingHorizontal: 7, paddingVertical: 3, overflow: 'hidden',
+  },
+  plakietkaZrobione: { backgroundColor: colors.okSoft, borderColor: colors.okBorder, color: colors.brand },
+  plakietkaDoZrobienia: { backgroundColor: colors.surfaceElevated, color: colors.textPrimary },
+  plakietkaNieWiemy: { backgroundColor: 'transparent', borderStyle: 'dashed' },
+  plakietkaWygasla: { backgroundColor: colors.surfaceSunken, borderColor: colors.surfaceSunken },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐ PAS W1 (D-2) — TRZY FAKTY O DNIU (makieta v3: `czteryInfo`, 86 dp).
+  // ⛔⛔ KROPKA JEST JEDNA I TAKA SAMA NIEZALEŻNIE OD TEGO, ILE DZIEŃ WAŻY.
+  // V2 makiety zmieniała jej kolor na progu 4,5 — czyli OCENIAŁA LICZBĘ
+  // KOLOREM. D4 tego zabrania: obciążenie jest faktem o zawodniku, nie
+  // werdyktem. ⛔ Nie wracaj do kolorowania kropki wg progu.
+  // ═══════════════════════════════════════════════════════════════
+  fakty: { marginTop: 6, marginBottom: 10 },
+  fakt: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 3 },
+  faktKropka: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.brand, marginTop: 6 },
+  /** ⛔ Szara kropka = „nie policzone". To jest brak wiedzy, nie ostrzeżenie. */
+  faktKropkaPustka: { backgroundColor: colors.border },
+  /** Złota kropka = ostrzeżenie MIĘKKIE (napięcie). ⛔ Nigdy czerwień. */
+  faktKropkaMiekka: { backgroundColor: colors.caution },
+  faktTekst: { flex: 1, ...typography.body, fontSize: 12.5, lineHeight: 17, color: colors.textPrimary },
+  faktNazwa: { ...typography.bodySemiBold, fontSize: 12.5, color: colors.textPrimary },
+  faktPustka: { ...typography.body, fontSize: 12.5, color: colors.textSecondary },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS W1 (T-1, T-2, T-3) — WIERSZ DNIA W TYGODNIU (makieta `.wd`).
+  //
+  //  T-1  SŁUPEK WRACA. ⭐ K4 — WYSOKOŚĆ NIESIE TĘ SAMĄ INFORMACJĘ CO
+  //       NASYCENIE. Obie liczy `constants/theme.ts` z tej samej wartości.
+  //       ⛔ Barwa słupka NIE MA składowej czerwonej i mieć nie będzie (Z2).
+  //  T-2  PLAKIETKA POD SŁUPKIEM niesie REJESTR, a nie wagę.
+  //  T-3  WIERSZ JEST KARTĄ — do 18.08 był gołym rzędem tekstu i nie
+  //       wyglądał na coś, czego można dotknąć.
+  //  T-8  ⛔ DZISIEJSZY DZIEŃ OZNACZA OBWÓDKA, NIE BARWA OSTRZEGAWCZA.
+  // ═══════════════════════════════════════════════════════════════
+  wd: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    minHeight: wymiary.wysokoscWierszaDnia,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.md, paddingHorizontal: 11, paddingVertical: 7, marginBottom: 6,
+  },
+  wdDzis: { borderColor: colors.textPrimary, borderWidth: 2 },
+  wdNazwa: { ...typography.display, fontSize: 15, letterSpacing: 0.4, color: colors.textPrimary, width: 62 },
+  wdTresc: { flex: 1, minWidth: 0 },
+  wdOpis: { ...typography.body, fontSize: 12.5, lineHeight: 17, color: colors.textPrimary },
+  wdDruga: { ...typography.body, fontSize: 10.5, lineHeight: 15, color: colors.textSecondary, marginTop: 2 },
+  /** ⛔ T-4 — TEN STYL NIE MA I NIE MOŻE MIEĆ `textDecorationLine`. */
+  wdOdwolana: { ...typography.body, fontSize: 12.5, color: colors.textSecondary },
+  slupek: { width: 46, alignItems: 'center' },
+  slupekTor: {
+    width: 32, height: TOR_SLUPKA_DP, justifyContent: 'flex-end',
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  slupekWypelnienie: { width: 32, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
+  slupekPodpis: {
+    ...typography.body, fontSize: 8, letterSpacing: 0.4, textTransform: 'uppercase',
+    color: colors.textSecondary, marginTop: 3, textAlign: 'center',
+  },
   /** Wiersz listy w arkuszu — bez ramki, bo to nie jest przycisk. */
   arkuszWiersz: { ...typography.body, fontSize: 13, color: colors.textSecondary, paddingVertical: 5 },
   /** Wybór w arkuszu („+" i kolizja) — to JEST przycisk, więc ma dotyk 48 dp. */
@@ -3604,7 +4228,15 @@ const styles = StyleSheet.create({
   // rysuje tytuł ekranu w 26 px i mieści datę OBOK niego, w tym samym wierszu.
   // ⛔ To nie jest zmiana hierarchii: tytuł nadal jest największym tekstem
   // ekranu. To jest 13 dp oddane blokowi, który niesie treść, a nie nazwę.
-  title: { ...typography.display, fontSize: 26, marginBottom: spacing.md, color: colors.textPrimary },
+  // ⭐ PAS W1 (D-7) — „nagłówek «Dziś» jest PRZYCIĘTY OD GÓRY (ucięty ogonek «ś»)".
+  // Powód: styl nie miał `lineHeight`, więc React Native brał wysokość linii
+  // z metryki kroju — a Archivo-Bold w 26 px ma akcenty wyżej niż ta metryka.
+  // ⛔ Nie zmieniam rozmiaru pisma (to jest hierarchia), tylko wysokość linii
+  // i oddech u góry. Koszt: 6 dp, i to jest cena za czytelny tytuł.
+  title: {
+    ...typography.display, fontSize: 26, lineHeight: 32, paddingTop: 4,
+    marginBottom: spacing.md, color: colors.textPrimary,
+  },
   // ⭐ PLAN-D-A1 18.08.2026 — odstęp pod etykietą 10 → 4 dp. Makieta v3 daje
   // etykiecie „Twój dzień" 26 dp W CAŁOŚCI; te 6 dp to była różnica między
   // ekranem mieszczącym się nad zgięciem (808 dp) a ekranem, którego przypis
@@ -3674,11 +4306,38 @@ const styles = StyleSheet.create({
   // NA TRZY CZĘŚCI — gdyby każda część miała własną, na ekranie stałyby trzy
   // kafelki zamiast trzech akapitów jednej odpowiedzi, czyli dokładnie to,
   // co ta runda likwiduje.
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS W1 — POPRAWKA PO ZRZUTACH: KARTA „CO DZIŚ ZROBIĆ" JEST
+  // PANELEM CIEMNYM, tak jak `.voice` w makiecie v3.
+  //
+  // ⛔ Do tej poprawki była zwykłą kartą (`surface` + obrys). Na ciemnym
+  // motywie wyglądała jak każda inna karta; po przestrojeniu palety na
+  // jasną wyglądałaby jak KAŻDA INNA KARTA JESZCZE BARDZIEJ — biała na
+  // prawie białym tle, odróżnialna wyłącznie kreską 1 dp.
+  // ⭐ Makieta rysuje tu ODWRÓCENIE: tło `--ink`, tekst `#f5f2ec`. To jest
+  // jedyny blok na tym ekranie, który odpowiada na pytanie, z którym
+  // zawodnik wchodzi — i ma to być widać bez czytania.
+  // ⚠️ Wartości 1:1 z `.voice`: promień 13, oddech 11/12.
+  // ═══════════════════════════════════════════════════════════════
   odpowiedzCard: {
-    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
-    borderRadius: radii.md, padding: 12, overflow: 'hidden',
+    backgroundColor: colors.textPrimary,
+    borderRadius: 13, paddingVertical: 11, paddingHorizontal: 12, overflow: 'hidden',
   },
-  odpowiedzStripe: { ...skew.stripe, height: 6, backgroundColor: colors.brand, marginBottom: 12 },
+  /** `.voice .vl` — nadtytuł na panelu ciemnym. */
+  voiceLabel: {
+    ...typography.bodyMedium, fontSize: 9.5, letterSpacing: 1.3,
+    textTransform: 'uppercase', color: colors.onInkMuted, marginBottom: 6,
+  },
+  /** `.voice .vs` — drugie zdanie, oddzielone kreską wewnątrz panelu. */
+  voiceSub: {
+    ...typography.body, fontSize: 11.5, lineHeight: 16.3, color: colors.onInkMuted,
+    marginTop: 7, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.onInkLine,
+  },
+  /** Wejście w arkusz „cały materiał" — ⛔ WEWNĄTRZ obszaru dotykalnego karty. */
+  cardWejscie: {
+    ...typography.bodyMedium, fontSize: 11.5, color: colors.onInkAccent, marginTop: 8,
+  },
+  odpowiedzStripe: { ...skew.stripe, height: 6, backgroundColor: colors.onInkAccent, marginBottom: 12 },
   // Nadtytuły trzech części. Te same wartości co `sectionLabel`, bo to JEST
   // etykieta sekcji — tyle że wewnątrz karty, nie nad nią.
   odpowiedzNaglowek: {
@@ -3687,7 +4346,9 @@ const styles = StyleSheet.create({
   },
   // Jedna rzecz do zrobienia. Największy tekst w karcie — bo to jest
   // odpowiedź na pytanie, z którym zawodnik na ten ekran wchodzi.
-  odpowiedzTresc: { ...typography.bodySemiBold, fontSize: 16, lineHeight: 23, color: colors.textPrimary },
+  // ⭐ `.voice .vt` — 15 px, interlinia 1,36. ⛔ Kolor `onInk`, bo ten tekst
+  // stoi WYŁĄCZNIE na panelu ciemnym (dwa użycia, oba w karcie „co dziś zrobić").
+  odpowiedzTresc: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 20.4, color: colors.onInk },
   // ⭐ PLAN-D-A1 18.08.2026 — ODSTĘP CZĘŚCI JEDNEJ ODPOWIEDZI: 16+14 → 10+8.
   // ⚠️ To NIE JEST kosmetyka. Te 30 dp chromu na część powstały wtedy, gdy pod
   // nimi stały CZTERY pozycje kolejki i trzeba je było od siebie odciąć. Od
@@ -3700,7 +4361,10 @@ const styles = StyleSheet.create({
   // PLAN-D-B2 — dwa stany pustej kolejki i zdanie o niepełnej liście.
   // ⚠️ STYL JEST JEDEN, ZDANIA SĄ DWA. Rozróżnienie „pusto" / „nie wiem" nosi
   // TEKST, nie kolor — kolor zawodnik zapamiętuje, a znaczenia się nie domyśli.
-  kolejkaPustka: { ...typography.body, fontSize: 15, lineHeight: 22, color: colors.textSecondary },
+  // ⛔ Stoi na tym samym panelu ciemnym co `odpowiedzTresc` — stąd `onInk`.
+  // ⚠️ STYL JEST JEDEN, ZDANIA SĄ DWA. Rozróżnienie „pusto" / „nie wiem" nosi
+  // TEKST, nie kolor — kolor zawodnik zapamiętuje, a znaczenia się nie domyśli.
+  kolejkaPustka: { ...typography.body, fontSize: 15, lineHeight: 22, color: colors.onInk },
   kolejkaNiepelna: {
     ...typography.body, fontSize: 12, lineHeight: 18, color: colors.textTertiary,
     marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border,
@@ -3737,7 +4401,10 @@ const styles = StyleSheet.create({
   hintText: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textPrimary },
   // Stan „nie mam skąd wziąć" (reguła R5) — spokojny, szary, JAWNY. Nigdy pustka.
   hintQuiet: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary },
-  inlineLink: { minHeight: minTouchHeight, justifyContent: 'center' },
+  // ⭐ PAS W1 (D-6) — `paddingRight` = szerokość przycisku „+" plus oddech.
+  // ⛔ Przycisk „+" jest nieprzezroczysty i stoi w pasie 730–794 dp; tekst,
+  // który tam wjeżdża, jest tekstem, którego zawodnik NIE PRZECZYTA.
+  inlineLink: { minHeight: minTouchHeight, justifyContent: 'center', paddingRight: wymiary.odstepPodPlusem },
   eventLine: { ...typography.body, fontSize: 14, color: colors.textPrimary, marginBottom: 6, lineHeight: 20 },
   eventTitle: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
   // ═══════════════════════════════════════════════════════════════════
@@ -3754,22 +4421,36 @@ const styles = StyleSheet.create({
   segTxtOn: { ...typography.bodySemiBold, color: colors.textPrimary },
   kartaTydzienZakres: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6 },
   kartaTydzienZdanie: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginBottom: 12 },
-  kartaDzienRzad: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
-  kartaDzienEtykieta: { ...typography.bodyMedium, fontSize: 12, color: colors.textTertiary, width: 62 },
-  kartaDzienEtykietaDzis: { color: colors.brand },
-  kartaDzienTresc: { flex: 1 },
-  kartaDzienPusty: { ...typography.body, fontSize: 13, color: colors.textTertiary, lineHeight: 19 },
-  kartaPozycja: { ...typography.body, fontSize: 13, color: colors.textSecondary, lineHeight: 19, marginBottom: 2 },
-  kartaPozycjaTytul: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary },
-  kartaPozycjaOdwolana: { ...typography.body, fontSize: 13, color: colors.textTertiary, textDecorationLine: 'line-through' },
+  // ⛔ PAS W1 (T-8) — dzisiejszy dzień oznacza OBWÓDKA wiersza (`wdDzis`),
+  // a nie barwa etykiety. Ten styl zostaje jako WZMOCNIENIE (pogrubienie),
+  // żeby stan miał dwa nośniki, nie jeden.
+  kartaDzienEtykietaDzis: { ...typography.bodySemiBold, color: colors.textPrimary },
   kartaPlakietka: { ...typography.bodyMedium, fontSize: 12, color: colors.textTertiary },
+  // ═══════════════════════════════════════════════════════════════
+  // ⛔ PAS W1 18.08.2026 — SIEDEM MARTWYCH STYLÓW SKREŚLONYCH, IMIENNIE:
+  // `kartaDzienRzad`, `kartaDzienEtykieta`, `kartaDzienTresc`,
+  // `kartaDzienPusty`, `kartaPozycja`, `kartaPozycjaTytul`,
+  // `kartaPozycjaOdwolana`.
+  // ⛔ NIC Z NICH NIE ZNIKŁO Z PRODUKTU — wszystkie siedem rysowało STARY
+  // wiersz dnia (goły rząd tekstu z wyliczanką nazw pozycji), który defekty
+  // T-1…T-5 kazały zastąpić kartą ze słupkiem (`styles.wd` i sąsiednie).
+  // Ostatni z nich, `kartaPozycjaOdwolana`, niósł PRZEKREŚLENIE — czyli
+  // dokładnie to, czego zabrania T-4. Zostawienie go tu jako „nieużywanego"
+  // znaczyłoby, że kreska czeka na powrót.
+  // ⚠️ Martwy styl wygląda tak samo jak żywy i rozjeżdża się przy pierwszej
+  // poprawce motywu — ta sama choroba, którą pas S2 leczył na brzmieniach.
+  // ═══════════════════════════════════════════════════════════════
   licznikCzesc: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border },
   licznikLiczba: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary },
   // ⛔ CELOWO TEN SAM ROZMIAR, CO `licznikLiczba`, A NIE MNIEJSZY. Zdanie
   // „nie wiem, które się odbyły" jest pełnoprawną odpowiedzią, a nie
   // przypisem do liczby, której nie ma.
   licznikBrakPodstawy: { ...typography.bodySemiBold, fontSize: 15, lineHeight: 21, color: colors.textPrimary },
-  licznikPodpis: { ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 4 },
+  licznikPodpis: {
+    ...typography.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 4,
+    // ⭐ PAS W1 (D-6, D-8) — przypis ekranu „Dziś" stoi w pasie przycisku „+".
+    paddingRight: wymiary.odstepPodPlusem,
+  },
   // ⭐ PLAN-D-D2 — PYTANIE „ZROBIŁEŚ?". Cztery style, wszystkie w istniejącej
   // skali karty; zdanie pytające używa `licznikLiczba`, czyli tego samego
   // rozmiaru co liczby obok — pytanie nie jest przypisem do licznika.

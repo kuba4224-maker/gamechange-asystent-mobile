@@ -327,6 +327,31 @@ console.log('\nG0. KONTRAKT PLIKU');
     PROGI.every((p) => typeof p.zaJakaPrace === 'string' && p.zaJakaPrace.trim().length > 15),
     JSON.stringify(PROGI.map((p) => [p.id, p.zaJakaPrace?.length])));
 
+  // ═══ ⛔ F2 18.08.2026 — SŁOWO, KTÓRE WRÓCIŁO BOKIEM ═══════════════
+  // ZMIERZONE: cztery progi miały w NAZWIE „punktów pracy" i stały tak na
+  // ekranie 2, pod nagłówkiem „Rozwój" — czyli słowo uśmiercone decyzją
+  // D4/O92 wróciło DO ZAWODNIKA, mimo że licznik obok mówił „rozwój".
+  // ⛔ Poprzedni strażnik pilnował `NAZWA_MIARY` w PODPISIE, a nie w TYTULE.
+  // ⭐ Ta asercja pyta o KAŻDE pole progu, które trafia na ekran.
+  // ⛔⛔ KLASA ZNAKÓW JEST POLSKA I TO NIE JEST OZDOBA: `\w` w JavaScripcie to
+  // [A-Za-z0-9_], więc NIE ŁAPIE „punktÓW". Pierwsza wersja tej asercji świeciła
+  // na zielono i nie pilnowała NICZEGO — dokładnie ta choroba, którą pas F2 opisał
+  // przy trzech innych strażnikach tego samego dnia.
+  // ⚠️ RDZEŃ TO `jednost`, NIE `jednostk` — polski dopełniacz mnogi brzmi
+  // „jednostEK", więc wzorzec na `jednostk` przepuszczał go bez słowa.
+  // Złapane własną mutacją, nie lekturą.
+  check('⛔⭐ (F2) ŻADNE pole progu widoczne dla zawodnika nie mówi „pracy" jako WALUTY — waluta nazywa się ROZWÓJ (D4/O92)',
+    PROGI.every((p) => ![p.nazwa, p.zaJakaPrace]
+      .some((t) => typeof t === 'string' && /(punkt|jednost)[a-ząćęłńóśźż]*\s+pracy/i.test(t))),
+    JSON.stringify(PROGI.filter((p) => [p.nazwa, p.zaJakaPrace]
+      .some((t) => typeof t === 'string' && /(punkt|jednost)[a-ząćęłńóśźż]*\s+pracy/i.test(t)))
+      .map((p) => [p.id, p.nazwa, p.zaJakaPrace])));
+
+  check('⛔ (F2) …a NAZWA progu w mierze `punkty` nazywa walutę wprost, żeby tytuł nie kłamał obok podpisu',
+    PROGI.filter((p) => p.miara === 'punkty' && /\d/.test(p.nazwa))
+      .every((p) => /punkt[a-ząćęłńóśźż]*\s+rozwoju/i.test(p.nazwa)),
+    JSON.stringify(PROGI.filter((p) => p.miara === 'punkty' && /\d/.test(p.nazwa)).map((p) => p.nazwa)));
+
   check('⭐ każdy próg ma uzasadnienie wartości — liczba bez uzasadnienia wraca jako „tak było"',
     PROGI.every((p) => typeof p.uzasadnienieProgu === 'string' && p.uzasadnienieProgu.trim().length > 15),
     JSON.stringify(PROGI.map((p) => [p.id, p.uzasadnienieProgu?.length])));

@@ -68,6 +68,7 @@
 
 import { readdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { dirname, join, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -174,15 +175,49 @@ for (const file of selftests) {
   // ⭐ I1 16.08.2026: było `stdio:'inherit'`, czyli runner NIE WIDZIAŁ wyjścia
   // i nie mógł policzyć pominięć. Teraz przechwytuje je i wypisuje w całości —
   // zawodnik… to znaczy Kuba widzi dokładnie to samo, co widział, plus liczby.
-  const run = spawnSync('npx', ['tsx', join('lib', file)], {
+  // ⭐⭐ 18.08.2026 — URUCHAMIAMY NODE-EM, NIE `tsx`. POWÓD JEST ZMIERZONY.
+  //
+  // ⛔ `tsx` transpiluje `.ts` do CommonJS (bo `package.json` nie ma
+  // `"type":"module"`), a w CJS `await` na najwyższym poziomie NIE ISTNIEJE.
+  // Skutek u Kuby 18.08: `lib/ekranProfilu.selftest.ts` kończył się kodem 1
+  // i NIE WYPISYWAŁ PODSUMOWANIA — wyglądał jak strażnik, który nic nie
+  // sprawdził, choć w ESM przechodzi 59 asercji na 59.
+  // ⛔ To był defekt NARZĘDZIA, który PODAWAŁ SIĘ ZA defekt kodu.
+  //
+  // ⭐ Node uruchamia `.ts` natywnie i jako ESM, więc problem znika u źródła.
+  // ⭐ Drugi zysk: `npm install` bywa zablokowany w kontenerach sesji (403 na
+  // cały rejestr), a Node jest zawsze. Strażnicy przestają zależeć od sieci.
+  // ⚠️ `tsx` ZOSTAJE jako droga odwrotu — gdyby Node okazał się za stary.
+  // ⛔ `--import` z gołą ścieżką względną Node traktuje jak NAZWĘ PACZKI
+  // („Cannot find package 'tests'"). Adres pliku jest jedyną formą, która
+  // działa tak samo na Windowsie i na Linuksie — zmierzone 18.08.
+  const hook = pathToFileURL(join(root, 'tests', 'rejestracja-hooka.mjs')).href;
+  const argsNode = ['--experimental-strip-types', '--import', hook, join('lib', file)];
+  let run = spawnSync(process.execPath, argsNode, {
     cwd: root,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
-    shell: process.platform === 'win32',
   });
+  // ⛔ ROZPOZNAJEMY WYŁĄCZNIE NIEZNAJOMOŚĆ PRZEŁĄCZNIKA, nie „cokolwiek poszło źle".
+  // Odwrót przy każdym błędzie zamieniłby czerwień strażnika w cichy powrót
+  // do narzędzia, przez które ta czerwień powstała.
+  const zaStaryNode = /bad option|not allowed in NODE_OPTIONS|Unknown or unexpected option/i
+    .test(`${run.stderr ?? ''}`);
+  if (run.error || zaStaryNode) {
+    run = spawnSync('npx', ['tsx', join('lib', file)], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      shell: process.platform === 'win32',
+    });
+    if (!run.error) {
+      console.error(`⚠️  ${shown}: Node nie zna --experimental-strip-types, uruchomiono przez tsx.`);
+      console.error('   ⛔ W tym trybie strażnik z `await` na najwyższym poziomie NIE URUCHOMI SIĘ.');
+    }
+  }
   if (run.error) {
     console.error(`\nNie udało się uruchomić ${shown}: ${run.error.message}`);
-    console.error('Jeśli brakuje `tsx`: npm install --no-save tsx');
+    console.error('Potrzebny Node 22.6+ (`node --version`) albo `tsx`: npm install --no-save tsx');
     results.push({ file: shown, ok: false, powod: `nie udało się uruchomić: ${run.error.message}`, pominiecia: [], podsumowanie: null });
     continue;
   }

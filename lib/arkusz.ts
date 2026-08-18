@@ -38,10 +38,18 @@ export type RodzajArkusza =
   | 'oceny'        // wszystkie rzeczy bez oceny naraz („wczoraj bez oceny")
   | 'meczWiecej'   // ⭐ decyzja Kuby 18.08: reszta pytań o mecz (M1 §3)
   | 'plus'         // ścieżka „+" — co dodajesz (A5)
-  | 'kolizja';     // „+" z datą, która minęła → najpierw nieocenione (A5)
+  | 'kolizja'      // „+" z datą, która minęła → najpierw nieocenione (A5)
+  // ⭐⭐ PAS W1 18.08.2026 — SZÓSTY RODZAJ, z DECYZJI KUBY D-B:
+  // „karta «co dziś zrobić» pokazuje JEDNO ZDANIE: co zrobić i dlaczego
+  //  akurat to. Cały materiał otwiera się dotknięciem, w arkuszu —
+  //  koszt 0 dp na ekranie." To zamyka otwarte pytanie C4.
+  // ⛔ Arkusz stoi POZA `ScrollView`, więc materiał, który do 18.08 niósł
+  // 547 dp na ekranie, kosztuje teraz ZERO — i nadal jest o jedno
+  // dotknięcie, a nie o zakładkę dalej.
+  | 'material';    // cały materiał tej jednej odpowiedzi (D-1, D-B)
 
 export const RODZAJE_ARKUSZA: readonly RodzajArkusza[] =
-  ['ocena', 'oceny', 'meczWiecej', 'plus', 'kolizja'] as const;
+  ['ocena', 'oceny', 'meczWiecej', 'plus', 'kolizja', 'material'] as const;
 
 export type NaglowekArkusza = {
   /** Lewy górny napis — dokąd wraca zamknięcie. */
@@ -95,6 +103,16 @@ export function naglowekArkusza(rodzaj: RodzajArkusza, tytulRzeczy = ''): Naglow
         kicker: 'Dziś',
         tytul: 'Zanim dodamy',
         podpis: 'Ten dzień już minął — sprawdzamy, czy to nie stało już w planie.',
+      };
+    // ⭐ PAS W1 (D-B) — ⛔ ZERO NOWEJ TREŚCI, tylko drugie miejsce dla tej
+    // samej. Podpis mówi wprost, że to jest ROZWINIĘCIE, a nie nowa rzecz
+    // do zrobienia — inaczej zawodnik czyta na ekranie jedno zadanie,
+    // a w arkuszu drugie.
+    case 'material':
+      return {
+        kicker: 'Dziś',
+        tytul: 'Cały materiał',
+        podpis: 'To samo, co na ekranie — tylko w całości.',
       };
   }
 }

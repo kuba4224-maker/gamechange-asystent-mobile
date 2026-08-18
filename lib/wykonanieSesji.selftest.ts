@@ -33,6 +33,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { readFileSync, readdirSync } from 'node:fs';
+// ⛔⛔ UKOŚNIKI — ZMIERZONE U KUBY 18.08.2026, NIE PRZYPUSZCZONE.
+// `join()` na Windowsie oddaje `app\(tabs)\dzis.tsx`, a asercje niżej
+// porównują ścieżki z napisami pisanymi po linuksowemu (`app/(tabs)/dzis.tsx`).
+// Skutek: te same pliki dawały ZIELONO na Linuksie i CZERWONO u Kuby.
+// ⛔ Strażnik, który zależy od systemu operacyjnego, nie pilnuje reguły —
+// pilnuje tego, kto go uruchomił. Ścieżka staje się napisem TYLKO tutaj.
+const naUkosniki = (p: string): string => p.replace(/\\/g, '/');
+
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -916,7 +924,7 @@ console.log('\n11. ⭐ PLAN-D-K1 — JEDEN FAKT MA W PRODUKCIE JEDNĄ NAZWĘ');
     return new RegExp(`['"\`]${SLOWO_PORZUCONE}['"\`]`).test(t)
       || new RegExp(`>\\s*${SLOWO_PORZUCONE}\\s*<`).test(t)
       || new RegExp(`\\}\\s*${SLOWO_PORZUCONE}`).test(t);
-  }).map((p) => p.slice(root.length + 1));
+  }).map((p) => naUkosniki(p.slice(root.length + 1)));
   check(`⛔ ZAPADKA NA JEDNO SŁOWO — w CAŁYM repozytorium ZERO wystąpień napisu „${SLOWO_PORZUCONE}"`,
     zNapisem.length === 0,
     `znaleziono w: ${zNapisem.join(', ')} — ten sam fakt znów ma dwie nazwy`);
@@ -933,7 +941,7 @@ console.log('\n11. ⭐ PLAN-D-K1 — JEDEN FAKT MA W PRODUKCIE JEDNĄ NAZWĘ');
     /nie_odbylo_sie|odbylo_sie|brak_wpisu|nie_odczytano|PLAKIETKI_WYKONANIA|PLAKIETKI_STANU_PRZESZLEGO|rozstrzygnijWykonanie|StanWykonania|StanPozycjiPrzeszlej/;
   const konsumenci = wszystkie
     .filter((p) => WZORZEC_KONSUMENTA.test(readFileSync(p, 'utf8')))
-    .map((p) => p.slice(root.length + 1))
+    .map((p) => naUkosniki(p.slice(root.length + 1)))
     .sort();
   // ⭐ AKTUALIZACJA 17.08.2026, PAS L1: 11 → 12. Doszedł
   // `lib/obciazenieOstatnichDni.ts` i ⚠️ NIE JEST TO konsument `StanWykonania`.

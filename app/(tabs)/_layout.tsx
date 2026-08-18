@@ -111,10 +111,24 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        // W1: kolory paska z tokenów (lib/theme.ts)
-        tabBarActiveTintColor: colors.brand,
-        tabBarInactiveTintColor: colors.textTertiary,
-        tabBarStyle: { backgroundColor: colors.background, borderTopColor: colors.border },
+        // ═══════════════════════════════════════════════════════════
+        // ⭐ PAS W1 18.08.2026 — DEFEKT P-2: „aktywna zakładka i ikony
+        // paska są CZERWONE". Makieta (`.tabs div.on`) rysuje aktywną
+        // zakładkę jako CIEMNY TEKST NA `--tint`, a nie jako barwę.
+        //
+        // ⛔ To nie była wina samego paska: brał `colors.brand`, a `brand`
+        // był do 18.08 koralem #EE5342. Token jest już zielenią marki
+        // (patrz `constants/theme.ts`), więc czerwień zniknęłaby i tak —
+        // ale makieta NIE MALUJE aktywnej zakładki kolorem marki. Aktywna
+        // rzecz ma tu DWA nośniki: wypełniona ikona (była) i podkład
+        // `--tint` pod pozycją (dochodzi teraz). ⭐ Barwa jest trzecim
+        // nośnikiem, nie jedynym — i dlatego wolno jej być zwykłym `--ink`.
+        // ═══════════════════════════════════════════════════════════
+        tabBarActiveTintColor: colors.textPrimary,
+        tabBarInactiveTintColor: colors.textSecondary,
+        tabBarActiveBackgroundColor: colors.surfaceElevated,
+        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+        tabBarItemStyle: { borderRadius: 8, marginHorizontal: 8, marginVertical: 6 },
       }}
     >
       {/* ── ⭐ DWIE ZAKŁADKI WIDOCZNE (A4, 18.08.2026) ────────────── */}

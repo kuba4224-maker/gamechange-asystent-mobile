@@ -397,6 +397,16 @@ export type Prog = {
  * ⛔ NIE MA TU ANI JEDNEGO PROGU WYRAŻONEGO W DNIACH, TYGODNIACH ANI
  * W CZYMKOLWIEK, CO MIJA SAMO. Każdy próg da się pokonać wyłącznie pracą.
  */
+/**
+ * ⛔ NAZWA PROGU JEST BRZMIENIEM WIDOCZNYM DLA ZAWODNIKA — rysuje ją
+ * `components/ArkuszeProfilu.tsx` jako tytuł w arkuszu „Odznaki i progi".
+ *
+ * ⭐ POPRAWIONE 18.08.2026 (pas F2 znalazł, sesja nawigująca naprawiła):
+ * cztery progi mówiły „punktów PRACY" — słowo uśmiercone decyzją D4/O92 —
+ * i stały tak na ekranie 2, pod nagłówkiem „Rozwój". Strażnik tego nie złapał,
+ * bo pilnował `NAZWA_MIARY` w PODPISIE („Brakuje Ci N punktów rozwoju"),
+ * a nie tytułu obok. ⛔ Strażnik pilnował zdania obok tego, które kłamało.
+ */
 export const PROGI: readonly Prog[] = [
   {
     id: 'pierwsza',
@@ -408,7 +418,7 @@ export const PROGI: readonly Prog[] = [
   },
   {
     id: 'dziesiec',
-    nazwa: '10 punktów pracy',
+    nazwa: '10 punktów rozwoju',
     zaJakaPrace: 'Za dziesięć punktów wykonanej i zapisanej pracy.',
     miara: 'punkty',
     prog: 10,
@@ -416,7 +426,7 @@ export const PROGI: readonly Prog[] = [
   },
   {
     id: 'czterdziesci',
-    nazwa: '40 punktów pracy',
+    nazwa: '40 punktów rozwoju',
     zaJakaPrace: 'Za czterdzieści punktów wykonanej i zapisanej pracy.',
     miara: 'punkty',
     prog: 40,
@@ -424,7 +434,7 @@ export const PROGI: readonly Prog[] = [
   },
   {
     id: 'sto_piecdziesiat',
-    nazwa: '150 punktów pracy',
+    nazwa: '150 punktów rozwoju',
     zaJakaPrace: 'Za sto pięćdziesiąt punktów wykonanej i zapisanej pracy.',
     miara: 'punkty',
     prog: 150,
@@ -432,7 +442,7 @@ export const PROGI: readonly Prog[] = [
   },
   {
     id: 'czterysta',
-    nazwa: '400 punktów pracy',
+    nazwa: '400 punktów rozwoju',
     zaJakaPrace: 'Za czterysta punktów wykonanej i zapisanej pracy.',
     miara: 'punkty',
     prog: 400,
@@ -441,7 +451,8 @@ export const PROGI: readonly Prog[] = [
   {
     id: 'praca_w_celu',
     nazwa: 'Praca nad swoim celem',
-    zaJakaPrace: 'Za dziesięć punktów pracy w tym, co sam nazwałeś swoim celem.',
+    // ⚠️ DO PRZEJRZENIA przez Kubę — brzmienie. Podmiana mechaniczna martwego słowa (D4/O92).
+    zaJakaPrace: 'Za dziesięć punktów rozwoju w tym, co sam nazwałeś swoim celem.',
     miara: 'punkty_w_celu',
     prog: 10,
     uzasadnienieProgu: 'Tyle samo, co drugi próg objętości — żeby „praca nad celem" była porównywalnie trudna, a nie tańsza.',

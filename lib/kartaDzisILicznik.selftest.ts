@@ -1332,8 +1332,20 @@ console.log('\n⭐ F1-6. TEST MUTACYJNY — osiem kształtów SPRZED pasa F1');
   // („ocena z kafla NIE stoi w ciele `ScrollView`").
   const iScroll = dzis.indexOf('<ScrollView');
   const iKoniecScroll = dzis.indexOf('</ScrollView>');
+  // ⭐ PAS W1 18.08.2026 — „CIAŁO EKRANU” TO OD DZIŚ DWIE RZECZY.
+  // JEDNYM ZDANIEM: obie gałęzie przełącznika („Dziś” i „Tydzień”) są od
+  // pasa W1 WYWOŁANIAMI PO NAZWIE — bez tego miara wysokości nie umie
+  // NAZWAĆ gałęzi, której nie opisuje, i gałąź „Dziś” wypadałaby z raportu
+  // bez śladu (O97). Ciało `ScrollView` samo w sobie zawiera więc już tylko
+  // nagłówek, przełącznik i dwa wywołania — a treść ekranu siedzi w ciele
+  // `renderDzisNaEkranie()`. ⛔ To NIE JEST osłabienie asercji: arkusz
+  // (`trescArkusza`) nadal NIE należy do żadnej z tych funkcji, więc każda
+  // reguła „to ma / nie ma stać na ekranie” działa tak samo jak dotąd.
   const cialoScrollView = iScroll >= 0 && iKoniecScroll > iScroll
-    ? dzis.slice(iScroll, iKoniecScroll) : null;
+    ? dzis.slice(iScroll, iKoniecScroll)
+      + (cialoFunkcji(dzis, 'renderDzisNaEkranie') ?? '')
+      + (cialoFunkcji(dzis, 'renderTydzienNaKarcie') ?? '')
+    : null;
   check('⭐ (D2-3) PYTANIE STOI POZA PRZEŁĄCZNIKIEM `Dziś / Tydzień` — żadna gałąź go nie chowa',
     cialoScrollView !== null
     && !cialoScrollView.includes('{renderPytaniaOWystapienia()}')

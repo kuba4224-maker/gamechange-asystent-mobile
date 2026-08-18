@@ -405,8 +405,21 @@ export const REJESTR_ELEMENTOW_DZIS: ElementDzis[] = [
   { znacznik: 'styles.odpowiedzCard', coTo: 'JEDNA ODPOWIEDŹ: co dziś zrobić · dlaczego akurat to · co to zmieni. ⭐ Od 18.08.2026 wchłania też głos tygodnia — ten sam gatunek zdania, jeden blok zamiast dwóch.', wJednejOdpowiedzi: true },
   { znacznik: 'RecommendationCard', coTo: 'Treść i przyciski rekomendacji — WEWNĄTRZ jednej odpowiedzi, gdy to ona jest źródłem.', wJednejOdpowiedzi: true },
   { znacznik: 'styles.hintBox', coTo: 'Treść ZAWSZE WIDOCZNA (bezpieczeństwo, telefon zaufania). ⚠️ NIE jest podpowiedzią dnia — ta weszła do jednej odpowiedzi. Zostaje osobno, bo jest funkcją bezpieczeństwa, nie treścią o pracy.', wJednejOdpowiedzi: false },
+  // ⭐ PAS W1 18.08.2026 (D-2) — TRZY FAKTY O DNIU. Blok, którego na tym
+  // ekranie NIE BYŁO w ogóle: makieta v3 rysuje go od początku (`czteryInfo`,
+  // 86 dp), a produkt nie miał ani jednego wiersza o dniu.
+  { znacznik: 'renderTrzyFakty', coTo: 'Trzy fakty o dniu: Obciążenie · Napięcie · Z Twoich wpisów. ⛔ Kropka jest jedna i taka sama niezależnie od tego, ile dzień waży (D4) — barwienie kropki wg progu byłoby oceną liczby kolorem.', wJednejOdpowiedzi: false },
   { znacznik: 'styles.sectionLabel', coTo: 'Etykieta sekcji „Twój dzień" — nad kaflami dnia.', wJednejOdpowiedzi: false },
+  // ⭐ PAS W1 18.08.2026 (D-3, D-4, D-5) — JEDEN RYSOWNIK KAFLA.
+  { znacznik: 'renderKafel', coTo: 'Kafle dnia rysowane jednym producentem: lewa krawędź niesie RODZAJ pozycji (Z5), reszta ramki REJESTR (Z1), a plakietka STAN — trzy niezależne informacje, trzy niezależne nośniki (K4).', wJednejOdpowiedzi: false },
   { znacznik: 'styles.kafel', coTo: 'Kafle dnia: wpis do Dziennika (JEDYNE wejście do Dziennika po zdjęciu jego zakładki) i wydarzenia z kalendarza, każde z informacją, czy czeka na ocenę.', wJednejOdpowiedzi: false },
   { znacznik: 'styles.inlineLink', coTo: 'Wiersz „Bez oceny: N rzeczy →" oraz wyjścia z pustki dnia — jedno dotknięcie do arkusza oceny albo do Kalendarza.', wJednejOdpowiedzi: false },
+  // ⭐ PAS W1 18.08.2026 — CZTERY ELEMENTY GAŁĘZI „TYDZIEŃ". Do 18.08 nie było
+  // ich w rejestrze, bo wycinanie bloków nie wchodziło do wnętrza tej gałęzi:
+  // widok tygodnia mógł rosnąć po cichu, a rejestr o nim milczał.
+  { znacznik: 'styles.card', coTo: 'Obudowa stanu „nie udało się odczytać tygodnia" — ⛔ nieudany odczyt NIE JEST pustym tygodniem i ma własne zdanie (R5).', wJednejOdpowiedzi: false },
+  { znacznik: 'styles.kartaTydzienZakres', coTo: 'Zakres dat tygodnia („14–20 SIERPNIA") nad wierszami dni.', wJednejOdpowiedzi: false },
+  { znacznik: 'tydzienBiezacy.zdanie', coTo: 'Jedno zdanie o tygodniu. ⛔ Powstaje albo nie powstaje — nigdy nie jest ogólne.', wJednejOdpowiedzi: false },
+  { znacznik: 'renderWierszDnia', coTo: 'Siedem wierszy dni. Każdy niesie słupek obciążenia (wysokość i nasycenie mówią to samo — K4), plakietkę rejestru pod słupkiem i opis dnia. ⛔ Zero przekreśleń: nieobecność jest wiedzą, nie karą (Z7).', wJednejOdpowiedzi: false },
   { znacznik: 'styles.licznikPodpis', coTo: 'Przypis: „Ocena należy do rzeczy: dotykasz kafla i mówisz, jak poszło."', wJednejOdpowiedzi: false },
 ];

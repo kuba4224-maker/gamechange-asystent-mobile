@@ -169,8 +169,14 @@ const NARZEDZIE = join('tests', 'measure-heights.ts');
     !['heroGoal', 'odpowiedzCard', 'glosCard', 'sectionLabel'].some((n) => miara.includes(n)),
     `miara zawiera nazwę z ekranu: ${['heroGoal', 'odpowiedzCard', 'glosCard', 'sectionLabel'].filter((n) => miara.includes(n)).join(', ')}`);
 
+  // ⭐ PRZECELOWANA 18.08.2026 (PAS W1). JEDNYM ZDANIEM: od dziś obie gałęzie
+  // ekranu („Dziś” i „Tydzień”) są WYWOŁANIAMI PO NAZWIE, miara wybiera
+  // WYŻSZĄ z nich — a wyższa jest gałąź „Tydzień” (790,5 dp wobec 437,1 dp),
+  // więc `odpowiedzCard` nie ma prawa stać w domyślnym pomiarze.
+  // ⛔ Asercja pilnuje tego samego co dotąd: że nazwy bloków POCHODZĄ
+  // Z EKRANU, a nie z licznika „element 1, element 2”.
   check('(M1-2) pomiar nazywa bloki słowami Z EKRANU (a nie „element 1, element 2")',
-    /heroGoal|odpowiedzCard|glosCard/.test(nazwy),
+    /heroGoal|odpowiedzCard|glosCard|kartaTydzienZakres/.test(nazwy),
     `nazwy: ${nazwy.slice(0, 200)}`);
 
   // ⛔ DOWÓD, ŻE MIARA CZYTA PLIK: dokładamy kartę do TEKSTU ekranu i liczba
@@ -197,7 +203,12 @@ const NARZEDZIE = join('tests', 'measure-heights.ts');
   // przechodziłaby przy mierze, która nie umie liczyć w dół.
   // ⛔ ELEMENT BADANY MUSI BYĆ NA EKRANIE — pilnuje tego asercja niżej, żeby
   // ta sama dziura nie wróciła po cichu przy następnej przebudowie.
-  const ELEMENT_BADANY = '<Text style={styles.licznikPodpis}>{PRZYPIS_OCENA_NALEZY_DO_RZECZY}</Text>';
+  // ⭐ PRZECELOWANY 18.08.2026 (PAS W1) — z przypisu ekranu „Dziś” na przypis
+  // tygodnia. Powód jest ten sam, dla którego asercję przecelowano 18.08 rano:
+  // ELEMENT BADANY MUSI STAĆ W GAŁĘZI, KTÓRĄ MIARA NAPRAWDĘ OPISUJE, inaczej
+  // `replace` zdejmuje NIC i asercja przepuszcza miarę, która nie liczy w dół.
+  // Od pasa W1 miara opisuje gałąź „Tydzień” (jest wyższa).
+  const ELEMENT_BADANY = '<Text style={styles.licznikPodpis}>{PRZYPIS_TYGODNIA_BEZ_SKALI}</Text>';
   check('⭐ (M1-2, O70) element badany PRZEZ tę asercję naprawdę stoi na ekranie',
     tekst.includes(ELEMENT_BADANY),
     `nie znajduję na „Dziś" elementu ${ELEMENT_BADANY} — dopóki go tam nie ma, `
@@ -237,10 +248,16 @@ const NARZEDZIE = join('tests', 'measure-heights.ts');
 // dopisujesz datę i JEDNO ZDANIE, co dołożyłeś i dlaczego nie dało się nic
 // zdjąć. Zapadka bez powodu to zapadka, której nie ma.
 const ZAPADKA_DZIS = {
+  // ⭐⭐ PRZESTAWIONA 18.08.2026 (PAS W1) — 9 → 7 rzeczy, 807 → 791 dp.
+  // JEDNYM ZDANIEM: obie gałęzie ekranu są od dziś wywołaniami po nazwie
+  // i miara opisuje WYŻSZĄ z nich, czyli „Tydzień” (791 dp); gałąź „Dziś”,
+  // po zdjęciu ściany tekstu z karty „co dziś zrobić” (547 → 105 dp) i po
+  // dołożeniu trzech faktów o dniu, ma 437 dp i stoi w `pominieteGalezie`.
+  // ⛔ Zapadka nadal jest NA RÓWNOŚĆ i nadal pilnuje NAJWYŻSZEJ gałęzi.
   /** Ile rzeczy stoi na ekranie „Dziś" po kolei od góry. */
-  pozycji: 9,
+  pozycji: 7,
   /** Ile z nich zawodnik widzi W CAŁOŚCI, zanim czegokolwiek dotknie. */
-  widocznychBezPrzewijania: 9,
+  widocznychBezPrzewijania: 7,
   /** Ile rzeczy przecina zgięcie — zaczyna się nad nim, kończy pod. */
   przecietychZgieciem: 0,
   /**
@@ -261,11 +278,13 @@ const ZAPADKA_DZIS = {
    * ⭐ 807 < 808: ekran mieści się nad zgięciem W CAŁOŚCI, a `przecietych`
    * spadło z 1 na 0. Cel z makiety v3 wynosił 850 dp; jest 807.
    */
-  wysokoscDp: 807,
+  wysokoscDp: 791,
   ustawiona: '18.08.2026',
-  powod: 'pas A1 — przebudowa „Dziś / Tydzień" wg makiety v3: ocena z kafla do arkusza, '
-    + 'jedna pozycja kolejki zamiast czterech, licznik i dorobek zdjęte z ekranu. '
-    + 'Ekran ZMALAŁ o 5 862 dp i po raz pierwszy mieści się nad zgięciem w całości',
+  powod: 'pas W1 — wygląd wg makiety v3: karta „co dziś zrobić" zeszła z 547 na 105 dp '
+    + '(decyzja D-B Kuby: dwa zdania na ekranie, cały materiał w arkuszu za 0 dp), '
+    + 'doszły trzy fakty o dniu (D-2), a wiersz tygodnia dostał słupek obciążenia (T-1). '
+    + 'Miara opisuje od dziś gałąź „Tydzień" (791 dp), bo jest wyższa niż gałąź „Dziś" (437 dp); '
+    + 'obie są wywołaniami po nazwie, więc pominięta stoi w raporcie z nazwy, a nie znika',
 };
 
 /**
@@ -286,11 +305,15 @@ const ZAPADKI_POZOSTALE = [
   // w ekran „Profil" — szesnaście pozycji i 1 325 dp zeszło do sześciu pozycji
   // i 602 dp, a liczba rzeczy PRZECIĘTYCH zgięciem spadła z 1 na 0.
   // ⛔ To jest przestawienie zapadki, nie jej zdjęcie: nadal RÓWNOŚĆ.
-  { ekran: 'ja', pozycji: 6, widocznych: 6, przecietych: 0, wysokoscDp: 602,
+  // ⭐ PRZESTAWIONA 18.08.2026 (PAS W1): 602 → 598 dp, liczba rzeczy BEZ ZMIANY.
+  // JEDNYM ZDANIEM: panel dwóch miar dostał liczby w rozmiarze z makiety
+  // (40 → 44 px, `.two .v`) i ciaśniejszy oddech (14 → 13 dp), a tytuł ekranu
+  // dostał wysokość linii, żeby przestał gubić ogonki — razem −4 dp.
+  { ekran: 'ja', pozycji: 6, widocznych: 6, przecietych: 0, wysokoscDp: 598,
     ustawiona: '18.08.2026',
-    powod: 'pas A3 — ekran „Ja" przebudowany w „Profil": dwie miary, zdanie o pracy dodatkowej '
-      + 'i pięć pozycji za dotknięciem; 16 pozycji / 1 325 dp → 6 pozycji / 602 dp, '
-      + 'zero rzeczy pod zgięciem i zero przeciętych' },
+    powod: 'pas W1 — panel dwóch miar wg makiety v3 („.two .v" = 44 px, obie liczby równe), '
+      + 'tekst na ciemnym panelu z własnych tokenów onInk/onInkMuted, tytuł z wysokością '
+      + 'linii; 602 → 598 dp, zero rzeczy pod zgięciem i zero przeciętych' },
   { ekran: 'dziennik', pozycji: 21, widocznych: 14, przecietych: 1, wysokoscDp: 3712,
     ustawiona: '17.08.2026',
     powod: 'pas M2 — historia wpisów rysuje do 20 wierszy (`.limit(20)` w tym ekranie), '
@@ -761,7 +784,16 @@ const styles = StyleSheet.create({
   // decyzja z makiety v3 („na Dziś jedna odpowiedź i kafle dnia").
   // ⛔ Dołożenie ekranowi drugiej listy zapala tę asercję I KAŻE PODAĆ JEJ
   // ŹRÓDŁO — dokładnie tak, jak dotąd.
-  const LIST_NA_DZIS_18_08_2026 = 1;
+  // ⭐ PRZESTAWIONA 18.08.2026 (PAS W1): 1 → 2. JEDNYM ZDANIEM: miara opisuje
+  // od dziś gałąź „Tydzień” (jest wyższa) i widzi tam DWIE listy — siedem
+  // wierszy dni (`tydzienBiezacy.dni`, długość WYPROWADZONA ze stałej
+  // `ZALOZENIE_DNI_W_TYGODNIU = 7`) oraz listę pozycji, które w wierszu dnia
+  // mają CO POWIEDZIEĆ o swoim stanie (odwołane / bez wpisu / nieodczytane).
+  // ⛔ Ta druga jest DŁUGOŚCI ZALEŻNEJ OD DANYCH i miara mówi to wprost —
+  // stoi na liście „nie da się wyprowadzić”, a nie znika po cichu.
+  // ⛔ Powstała po to, żeby przy zdejmowaniu wyliczanki nazw pozycji (T-5)
+  // NIE ZNIKŁO jedyne miejsce, w którym zawodnik widzi słowo „Odwołane” (B3).
+  const LIST_NA_DZIS_18_08_2026 = 2;
   const dzis = zmierzEkran(EKRAN_DZIS);
   const listyDzis = [...dzis.pozycje, ...dzis.pozycje.flatMap((p) => p.czesci)].filter((p) => p.lista);
   check(`⭐ (M2-11, D3, O73) ZAPADKA: list na ekranie „Dziś" jest DOKŁADNIE ${LIST_NA_DZIS_18_08_2026}`,

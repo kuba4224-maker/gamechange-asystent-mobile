@@ -583,29 +583,50 @@ export default function JaScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   naglowek: { marginBottom: spacing.md },
-  tytul: { ...typography.display, fontSize: 28, color: colors.textPrimary },
+  // ⭐ PAS W1 (D-7, ten sam defekt co na „Dziś") — bez `lineHeight` Archivo
+  // gubi ogonki i akcenty u góry. 28 px pisma, 34 px linii.
+  tytul: { ...typography.display, fontSize: 28, lineHeight: 34, paddingTop: 3, color: colors.textPrimary },
   podtytul: { ...typography.body, fontSize: 12, color: colors.textSecondary, marginTop: 2 },
 
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐ PAS W1 18.08.2026 (P-3) — PANEL DWÓCH MIAR.
+  //
+  // ⛔ PANEL JEST ODWRÓCONY: ciemne tło `--ink`, jasny tekst — tak jak
+  // `.cnt` w makiecie v3. Do 18.08 dawało to ten sam efekt PRZYPADKIEM
+  // (motyw był ciemny, więc `textPrimary` było prawie białe). Po zmianie
+  // palety na jasną odwrócenie jest ŚWIADOME i ma własne tokeny:
+  // `onInk` i `onInkMuted`. ⛔ Tekst na ciemnym panelu NIE bierze już
+  // `colors.surface` — to znaczyło „karta", a chodziło o „tekst na ciemnym".
+  //
+  // ⭐ P-3 — OBIE LICZBY TEJ SAMEJ WIELKOŚCI, 44 px (makieta `.two .v`).
+  // Były już tym samym stylem; zmienia się rozmiar (40 → 44) i to, że
+  // obie kolumny mają RÓWNĄ szerokość i wyrównany dół podpisu.
+  // ⛔ Kolor liczby jest STAŁĄ, nie funkcją wartości: barwienie liczby
+  // obciążenia byłoby jej oceną, a tego zabrania D4.
+  // ═══════════════════════════════════════════════════════════════
   panelMiar: {
     backgroundColor: colors.textPrimary, borderRadius: radii.lg,
-    paddingVertical: 14, paddingHorizontal: 14, marginBottom: 10,
+    paddingVertical: 13, paddingHorizontal: 14, marginBottom: 10,
   },
-  dwieMiary: { flexDirection: 'row' },
-  miara: { flex: 1, paddingRight: 8 },
+  dwieMiary: { flexDirection: 'row', gap: 12 },
+  miara: { flex: 1, minWidth: 0 },
   miaraNazwa: {
-    ...typography.bodyMedium, fontSize: 10, letterSpacing: 1,
-    textTransform: 'uppercase', color: colors.surface,
+    ...typography.bodyMedium, fontSize: 9.5, letterSpacing: 1.3,
+    textTransform: 'uppercase', color: colors.onInkMuted,
   },
-  // ⭐⛔ JEDEN STYL NA OBIE LICZBY. Kolor jest STAŁĄ, nie funkcją wartości:
-  // barwienie liczby obciążenia byłoby jej oceną, a tego zabrania D4.
-  miaraLiczba: { ...typography.display, fontSize: 40, color: colors.surface, marginTop: 2 },
-  miaraPodpis: { ...typography.body, fontSize: 10, color: colors.surface, marginTop: 2, lineHeight: 14 },
+  miaraLiczba: { ...typography.display, fontSize: 44, lineHeight: 46, color: colors.onInk, marginTop: 2 },
+  miaraPodpis: { ...typography.body, fontSize: 10.5, color: colors.onInkMuted, marginTop: 3, lineHeight: 14 },
 
   pracaDodatkowa: {
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
     borderRadius: radii.md, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 10,
   },
   pracaZdanie: { ...typography.bodySemiBold, fontSize: 13, color: colors.textPrimary, lineHeight: 18 },
+  // ⭐ PAS W1 (P-1) — „«Zrób diagnozę →» jest CZERWONE".
+  // ⛔ Ten styl SIĘ NIE ZMIENIŁ: bierze `colors.brand` tak jak brał.
+  // Zmieniła się WARTOŚĆ tokenu — `brand` jest od 18.08 zielenią marki
+  // #2E6B5E, a nie koralem #EE5342. ⭐ To jest cały zysk z trzymania
+  // koloru w jednym miejscu: jedna poprawka gasi czerwień wszędzie.
   pracaWejscie: { ...typography.bodyMedium, fontSize: 11, color: colors.brand, marginTop: 4 },
 
   wiersz: {
