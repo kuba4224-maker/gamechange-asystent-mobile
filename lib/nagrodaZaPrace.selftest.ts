@@ -46,6 +46,7 @@
 // więc `tsc` pada wtedy z TS2769. Ścieżka idzie przez `fileURLToPath`.
 // ═════════════════════════════════════════════════════════════════════
 
+import type { ZwrotObszarow } from './zwrotObszaru';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -67,6 +68,8 @@ import {
   wagaMeczu,
   PROG_DLUGOSCI_SESJI_MIN,
   MECZ_BEZ_MINUT_NA_BOISKU,
+  punktyRozwojuNaEkranie,
+  JEDNOSTKA_ODNIESIENIA_ROZWOJU,
   MAKS_PUNKTOW_ZA_MECZ,
   ZASADY_NAGRODY_PRAWDZIWE,
   type JednostkaPracy,
@@ -221,6 +224,33 @@ function wpisyZPomiarem(ile: number, od = '2026-01-01') {
 function ma(n: NagrodaZaPrace, id: OdznakaId): boolean {
   return n.rodzaj === 'policzona' && n.odznaki.some((o) => o.id === id);
 }
+// ═══════════════════════════════════════════════════════════════════
+// ⛔ BRAMKA KOMPLETNOŚCI MODUŁU — SPŁATA DŁUGU ZGŁOSZONEGO PRZY PASIE O1
+// ═══════════════════════════════════════════════════════════════════
+//
+// ⛔ POWÓD JEST ZMIERZONY, NIE TEORETYCZNY. Puszczony na STARYM kodzie
+// (kontrola historyczna, O70) ten strażnik wywalał się na `TypeError:
+// punktyRozwojuNaEkranie is not a function` — i cały plik oddawał
+// „czerwony BEZ NAZW". Czerwień bez nazwy nie mówi, CO się zepsuło,
+// więc kontrola historyczna traciła całą wartość.
+//
+// Od teraz brak eksportu jest ASERCJĄ Z NAZWĄ, a reszta pliku liczy dalej.
+const KOMPLET_REGUL: readonly (readonly [string, boolean])[] = [
+  ['wagaSesji', typeof wagaSesji === 'function'],
+  ['wagaMeczu', typeof wagaMeczu === 'function'],
+  ['punktyRozwojuNaEkranie', typeof punktyRozwojuNaEkranie === 'function'],
+  ['JEDNOSTKA_ODNIESIENIA_ROZWOJU', typeof JEDNOSTKA_ODNIESIENIA_ROZWOJU === 'number'],
+  ['WAGA_ZOBOWIAZANIA', typeof WAGA_ZOBOWIAZANIA === 'number'],
+  ['PROG_DLUGOSCI_SESJI_MIN', typeof PROG_DLUGOSCI_SESJI_MIN === 'number'],
+];
+check('⛔ (W4) moduł nagrody eksportuje KOMPLET reguł rozwoju — bez tego reszta strażnika nie ma czego pilnować',
+  KOMPLET_REGUL.every(([, jest]) => jest),
+  `brakuje: ${KOMPLET_REGUL.filter(([, jest]) => !jest).map(([n]) => n).join(', ')}`);
+
+/** Bezpieczna konwencja wyświetlania — na starym kodzie oddaje `NaN`, nie wywala pliku. */
+const naEkranie = (x: number): number =>
+  (typeof punktyRozwojuNaEkranie === 'function' ? punktyRozwojuNaEkranie(x) : Number.NaN);
+
 function punkty(n: NagrodaZaPrace): number {
   return n.rodzaj === 'policzona' ? n.punkty : -1;
 }
@@ -1409,17 +1439,20 @@ console.log('\nW1. ⭐ PUNKT ZA PRACĘ, KTÓRA MA DOWÓD');
     const tabela: readonly (readonly [number | null, number])[] = [
       [90, 4], [68, 3], [45, 2], [30, 1], [10, 1], [5, 1], [0, 0], [null, 1],
     ];
-    const zle = tabela.filter(([min, ocz]) => wagaMeczu(min, 90).punkty !== ocz);
+    // ⭐ PLAN-D-W4: waga jest SUROWA, więc porównujemy przez konwencję wyświetlania.
+    const zle = tabela.filter(([min, ocz]) => naEkranie(wagaMeczu(min, 90).punkty) !== ocz);
     check('⭐⭐ (W1, D2) mecz 90-minutowy: 90→4 · 68→3 · 45→2 · 30→1 · 10→1 · 5→1 · 0→0 · nieznane→1',
       zle.length === 0,
-      zle.map(([min, ocz]) => `${min}: jest ${wagaMeczu(min, 90).punkty}, ma być ${ocz}`).join(' · '));
+      zle.map(([min, ocz]) => `${min}: jest ${naEkranie(wagaMeczu(min, 90).punkty)}, ma być ${ocz}`).join(' · '));
 
     check('⭐ (W1, D2) mecz KRÓTSZY: 60 minut z 60 → 4. Trzynastolatek nie jest karany za to, że jego mecz jest krótszy',
-      wagaMeczu(60, 60).punkty === 4 && wagaMeczu(30, 60).punkty === 2,
+      naEkranie(wagaMeczu(60, 60).punkty) === 4
+      && naEkranie(wagaMeczu(30, 60).punkty) === 2,
       `${wagaMeczu(60, 60).punkty} / ${wagaMeczu(30, 60).punkty}`);
 
     check('⛔ (W1, D2) waga meczu NIGDY nie przekracza 4, także przy dogrywce',
-      wagaMeczu(120, 90).punkty === MAKS_PUNKTOW_ZA_MECZ,
+      wagaMeczu(120, 90).punkty === MAKS_PUNKTOW_ZA_MECZ
+      && wagaMeczu(120, 90, 10).punkty === MAKS_PUNKTOW_ZA_MECZ,
       `${wagaMeczu(120, 90).punkty}`);
 
     check('⭐ (W1, D2) brak zaplanowanej długości → 90 minut, jako DECYZJA PRODUKTOWA, nie pomiar',
@@ -1495,6 +1528,89 @@ console.log('\nW1. ⭐ PUNKT ZA PRACĘ, KTÓRA MA DOWÓD');
       rozne === null, rozne ?? `stale ${wzorzec}`);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// W4-W. ⭐ PODŁĄCZENIE — silnik zwrotu MA KONSUMENTA I NIM JEST EKRAN
+// ═══════════════════════════════════════════════════════════════════
+//
+// ⛔ TA GRUPA ISTNIEJE, BO SAM MODUŁ MOŻE BYĆ IDEALNY I NIEUŻYWANY.
+// Pas W3 skończył się dokładnie tak: silnik obciążenia napisany, poprawny
+// i wyrzucony, bo nikt go nie wołał. Asercje niżej pilnują DROGI, a nie funkcji.
+console.log('\nW4-W. ⭐ PODŁĄCZENIE ZWROTU DO EKRANU');
+{
+  const ekran = readFileSync(join(root, 'app', '(tabs)', 'dzis.tsx'), 'utf8');
+  const silnik = readFileSync(join(root, 'lib', 'nagrodaZaPrace.ts'), 'utf8');
+
+  check('⭐⭐ (W4-W) ekran „Dziś" WOŁA `policzZwrotObszarow` — bez tego cały moduł jest martwy',
+    /policzZwrotObszarow\s*\(/.test(ekran),
+    'ekran nie liczy zwrotu obszarów');
+
+  check('⭐⭐ (W4-W) …i PRZEKAZUJE wynik do źródła sesji — sama wołanka nie wystarcza',
+    /zrodloSesji\(\{[\s\S]{0,400}?\bzwrot\b/.test(ekran),
+    'zwrot policzony i wyrzucony — dokładnie „dane znikające po cichu"');
+
+  check('⛔ (W4-W) ekran CZYTA `scores` i `position` z diagnozy, a nie tylko liczy wiersze',
+    /from\('diagnostics'\)\s*\.select\('[^']*scores[^']*position/.test(ekran),
+    'zapytanie o diagnozę nadal pyta wyłącznie „czy jest"');
+
+  check('⭐ (W4-W) `zrodloSesji` DOKŁADA trafność do każdej sesji, którą oddaje',
+    /trafnosc:\s*trafnoscDla\(/.test(silnik),
+    'trafność nie dociera z reguły do jednostki pracy');
+
+  check('⭐ (W4-W) `wagaSesji` NAPRAWDĘ czyta trafność z faktów, a nie tylko ją przyjmuje',
+    /const trafnosc\s*=[\s\S]{0,200}f\.trafnosc/.test(silnik) && /\*\s*trafnosc/.test(silnik),
+    'trafność wchodzi do funkcji i nie wychodzi z liczby');
+
+  check('⭐ (W4-W) pomiar `minuty × RPE` ma drogę do wagi — `rpeZmierzone` dociera z ekranu do reguły',
+    /rpeZWpisow/.test(ekran) && /rpeZmierzone/.test(silnik) && /JEDNOSTKA_ODNIESIENIA_ROZWOJU/.test(silnik),
+    'RPE zebrane i niepoliczone');
+
+  // ⭐⭐ ASERCJA URUCHOMIENIOWA — DZIURA ZNALEZIONA WŁASNĄ MUTACJĄ.
+  // ⛔ Wszystkie asercje wyżej czytają TEKST. Mutacja „trafność zaczyna dotyczyć
+  // treningu klubowego" przechodziła przez nie WSZYSTKIE, bo tekst się nie zmieniał —
+  // zmieniał się wynik. Ta asercja przepuszcza dane przez PRAWDZIWE `zrodloSesji`.
+  {
+    const zwrotTestowy: ZwrotObszarow = {
+      rodzaj: 'jest',
+      obszary: [{ obszar: 'moc', wynik: 30, tier: 'key', zwrot: 70, trafny: 'zwrot_i_podloga' }],
+      trafne: new Set(['moc']),
+    };
+    const wydarzenie = (typ: string, source: string) => ({
+      id: 4242, scheduled_date: '2026-08-17', status: 'completed',
+      recurrence_rule: null, focus_block_id: 'blok-moc',
+      event_type: typ, source, coach_session_id: null, planned_minutes: null,
+    });
+    const policz = (typ: string, source: string) => {
+      const z = zrodloSesji({
+        wydarzenia: [wydarzenie(typ, source)],
+        werdykty: { rodzaj: 'jest', werdykty: [] },
+        wpisyDziennika: new Set<number>(),
+        segmentBloku: new Map([['blok-moc', 'moc']]),
+        zwrot: zwrotTestowy,
+      });
+      return z.rodzaj === 'jest' ? (z.jednostki[0]?.punkty ?? -1) : -1;
+    };
+
+    check('⭐⭐ (W4-W) URUCHOMIENIOWO: trening KLUBOWY w obszarze trafnym waży DOKŁADNIE 3 — ⛔ premia go NIE dotyczy',
+      policz('club_training', 'coach') === WAGA_ZOBOWIAZANIA,
+      `klubowy w trafnym obszarze: ${policz('club_training', 'coach')}, ma być ${WAGA_ZOBOWIAZANIA}`);
+
+    check('⭐⭐ (W4-W) URUCHOMIENIOWO: praca WŁASNA w tym samym obszarze dostaje premię — 1 × 1,5',
+      Math.abs(policz('own_training', 'player') - 1.5) < 1e-9,
+      `własna w trafnym obszarze: ${policz('own_training', 'player')}, ma być 1,5`);
+
+    check('⛔ (W4-W) URUCHOMIENIOWO: różnica między nimi ISTNIEJE i ma właściwy znak',
+      policz('club_training', 'coach') > policz('own_training', 'player'),
+      'klubowy i własny zrównały się — premia wyciekła na pracę, na którą zawodnik nie ma wpływu');
+  }
+
+  // ⛔ ZAPADKA NA RÓWNOŚĆ — zaokrąglenie ma być DOKŁADNIE w jednym miejscu.
+  const zaokraglenia = (silnik.match(/Math\.round\(/g) ?? []).length;
+  check('⛔ (W4-W) `Math.round` pada w module DOKŁADNIE trzy razy: suma, suma w celu i konwencja wyświetlania',
+    zaokraglenia === 3,
+    `wystąpień: ${zaokraglenia} — każde dodatkowe zaokrąglenie zjada premię za trafność`);
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // W1-M. ⭐ BATERIA MUTACJI — OSIEM, Z ASERCJĄ ODWROTNĄ

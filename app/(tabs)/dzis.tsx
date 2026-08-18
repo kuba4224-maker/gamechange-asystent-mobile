@@ -476,6 +476,13 @@ import {
   type WystapienieDoPytania,
 } from '../../lib/pytanieOWystapienie';
 import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
+
+// ⭐ PLAN-D-W4 18.08.2026 — ZWROT OBSZARU: ile daje praca w danym obszarze
+// TEMU zawodnikowi. Iloczyn dwóch osi, które leżały w produkcie osobno przez
+// cały czas: wyniku 0–100 z `diagnostics.scores` i tieru pozycji z
+// `lib/positionProfiles.ts`. Do dziś ten ekran pytał bazę WYŁĄCZNIE o to,
+// CZY diagnoza istnieje — i nigdy nie zajrzał do środka.
+import { policzZwrotObszarow, type ZwrotObszarow } from '../../lib/zwrotObszaru';
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-O1 08.2026 (17.08.2026) — OCENA NALEŻY DO KAFLA W DNIU (D1).
 //
@@ -551,6 +558,7 @@ import {
   policzNagrode,
   jednostkiZDziennika,
   jednostkiZMeczow,
+  punktyRozwojuNaEkranie,
   jednostkiZOdpowiedziKontrolnych,
   zrodloSesji,
   zrodloNieczytane,
@@ -1335,8 +1343,14 @@ export default function DzisScreen() {
       // `fetchLatestDiagnosisPerUser()` w cronie onboardującym — żeby appka
       // i silnik liczyły „ma diagnozę" DOKŁADNIE tak samo. Bez tego appka
       // mogłaby uznać za wypełnioną ankietę, której cron nie widzi.
-      supabase.from('diagnostics').select('id', { count: 'exact', head: true })
-        .eq('user_id', currentUser.id).not('scores', 'is', null),
+      // ⭐ PLAN-D-W4 — TO ZAPYTANIE PRZESTAJE LICZYĆ WIERSZE, A ZACZYNA JE CZYTAĆ.
+      // Do tego pasa pytało wyłącznie „czy jest choć jedna diagnoza" (`head: true`),
+      // czyli produkt WIEDZIAŁ, że diagnoza istnieje, i NIE PATRZYŁ, co w niej stoi.
+      // `scores` niesie wynik 0–100 dla 13 obszarów, `position` — pozycję, po której
+      // `lib/positionProfiles.ts` zna tier każdego obszaru. Iloczyn tych dwóch rzeczy
+      // to ZWROT — i nikt go dotąd nie policzył.
+      supabase.from('diagnostics').select('id,scores,position,own_training_types')
+        .eq('user_id', currentUser.id).order('id', { ascending: false }).limit(1),
       // PLAN-D-F 08.2026 — głos tygodnia na BIEŻĄCY tydzień. Poniedziałek liczony
       // tą samą regułą co w backendzie (`poniedzialekGlosu`), więc appka pyta
       // dokładnie o ten wiersz, który zapisał cron.
@@ -1530,17 +1544,65 @@ export default function DzisScreen() {
     setOgraniczenia(stanOgraniczen);
     console.log(`dzis: ${opisOgraniczenDoLogu(stanOgraniczen)}`);
 
-    const goals = (goalsRes.data ?? []) as Goal[];
+    // ⚠️ PLAN-D-W4 — TEN ODCZYT BYŁ NIEZAUWAŻONY I STRAŻNIK MIAŁ RACJĘ.
+    // `(goalsRes.data ?? [])` zamieniało BŁĄD ODCZYTU w „ten zawodnik nie ma
+    // celów" — czyli zawodnik z celem wyglądał jak zawodnik bez celu, a ekran
+    // pierwszego kroku mógł mu się pokazać po zwykłej awarii sieci.
+    // ⛔ Nie zmieniam tu kształtu ekranu (to nie jest zakres tego pasa), ale
+    // błąd przestaje ginąć: jest odczytany, nazwany w konsoli i NIE UDAJE pustki.
+    if (goalsRes.error) {
+      console.warn(`dzis: [PLAN-D-W4] nie odczytałem celów — ${powodBledu(goalsRes.error)}`);
+    }
+    const goals = (goalsRes.error || !Array.isArray(goalsRes.data) ? [] : goalsRes.data) as Goal[];
     const goal = goals.find((g) => g.is_priority) ?? goals[0] ?? null;
     setPriorityGoal(goal);
-    setHasAnyGoal(goals.length > 0);
+    setHasAnyGoal(!goalsRes.error && goals.length > 0);
     // PIERWSZE URUCHOMIENIE 10.08.2026 — przy błędzie zapytania NIE udajemy,
     // że diagnozy nie ma (to wepchnęłoby zawodnika z gotową diagnozą w ekran
     // pierwszego kroku). Błąd = zostawiamy `null`, czyli stan „nie wiem",
     // a ekran zachowuje się wtedy jak dotąd.
-    setHasDiagnosis(diagRes.error ? null : (diagRes.count ?? 0) > 0);
+    // ⚠️ PLAN-D-W4 — `head: true` i `count: 'exact'` ZNIKNĘŁY z tego zapytania,
+    // więc `diagRes.count` jest od teraz `null`. Gdyby ta linia została bez zmiany,
+    // KAŻDY zawodnik z gotową diagnozą zostałby wepchnięty w ekran pierwszego kroku.
+    // Liczymy z wierszy, nie z licznika. Stan „nie wiem" przy błędzie — bez zmian.
+    setHasDiagnosis(diagRes.error ? null : Array.isArray(diagRes.data) && diagRes.data.length > 0);
 
-    const recs = (recsRes.data ?? []) as unknown as RecommendationRow[];
+    // ⭐ PLAN-D-W4 — RANKING ZWROTU. Dwie osie, które od dawna leżą w produkcie
+    // i nigdy nie zostały pomnożone: wynik 0–100 z diagnozy i tier pozycji
+    // z `lib/positionProfiles.ts`. ⛔ Błąd odczytu NIE odbiera nikomu punktów —
+    // trafność spada wtedy do bazy 1,0 dla całej pracy (decyzja Kuby 1A).
+    const zwrotObszarow: ZwrotObszarow = (() => {
+      if (diagRes.error) return { rodzaj: 'nie_wiemy', powod: `diagnoza: ${powodBledu(diagRes.error)}` };
+      if (!Array.isArray(diagRes.data) || diagRes.data.length === 0) {
+        return { rodzaj: 'nie_wiemy', powod: 'ten zawodnik nie ma jeszcze diagnozy' };
+      }
+      const w = diagRes.data[0] as unknown as { scores: string | null; position: string | null };
+      let wyniki: Record<string, unknown> | null = null;
+      try {
+        // ⚠️ `diagnostics.scores` to KOLUMNA TEKSTOWA z JSON-em w środku,
+        // nie `jsonb` — zmierzone 18.08 na `information_schema.columns`.
+        const sparsowane = typeof w?.scores === 'string' ? JSON.parse(w.scores) : null;
+        if (sparsowane !== null && typeof sparsowane === 'object') wyniki = sparsowane as Record<string, unknown>;
+      } catch {
+        // ⛔ Niepoprawny JSON to „nie wiem", a nie „zero zwrotu" (R5).
+        return { rodzaj: 'nie_wiemy', powod: 'nie umiem odczytać wyników diagnozy' };
+      }
+      return policzZwrotObszarow({ wyniki, pozycja: w?.position ?? null });
+    })();
+    if (zwrotObszarow.rodzaj === 'nie_wiemy') {
+      console.warn(`dzis: [PLAN-D-W4] trafność pracy nieliczona — ${zwrotObszarow.powod}`);
+    }
+
+    // ⚠️ PLAN-D-W4 — DRUGI NIEZAUWAŻONY ODCZYT, ODSŁONIĘTY PRZEZ TEN SAM PAS.
+    // Do dziś ta linia była „zakryta" wyłącznie tym, że sześćset znaków wyżej
+    // padało słowo `error` w NIEZWIĄZANEJ z nią gałęzi. Po wstawieniu bloku
+    // zwrotu obszarów okno się przesunęło i strażnik ją zobaczył — a defekt
+    // był tu cały czas: przy błędzie odczytu rekomendacji zawodnik widzi
+    // „nie mam dla Ciebie nic", zamiast „nie udało mi się tego odczytać" (R5).
+    if (recsRes.error) {
+      console.warn(`dzis: [PLAN-D-W4] nie odczytałem rekomendacji — ${powodBledu(recsRes.error)}`);
+    }
+    const recs = (recsRes.error || !Array.isArray(recsRes.data) ? [] : recsRes.data) as unknown as RecommendationRow[];
     const rec = recs.find((r) => r.recommendation_type === 'training_focus') ?? null;
     unreadSnapshotRef.current = new Set(recs.filter((r) => !r.viewed_at).map((r) => r.id));
     setFocusRec(rec);
@@ -1776,6 +1838,27 @@ export default function DzisScreen() {
       return m;
     })();
 
+    // ⭐ PLAN-D-W4 — `calendar_events.id` → RPE z wpisu wskazującego TĘ sesję.
+    // Razem z minutami daje pomiar `minuty × RPE ⁄ 180` — najwyższy poziom
+    // dokładności, przy którym ani jedna liczba nie pochodzi z tabeli.
+    const rpeZWpisow: ReadonlyMap<number, number> | null = (() => {
+      if (dziennikRes.error) return null;
+      if (!Array.isArray(dziennikRes.data)) return null;
+      const m = new Map<number, number>();
+      for (const l of dziennikRes.data as (WierszDziennika & { payload?: unknown })[]) {
+        const id = l?.calendar_event_id;
+        if (typeof id !== 'number') continue;
+        const p = l?.payload;
+        if (p === null || typeof p !== 'object') continue;
+        const rpe = (p as Record<string, unknown>).rpe;
+        if (typeof rpe !== 'number' || !Number.isFinite(rpe) || rpe <= 0 || rpe > 10) continue;
+        // ⛔ Przy dwóch wpisach o tej samej sesji wygrywa WYŻSZE RPE — pomiar
+        // może wagę podnieść, nigdy obniżyć (decyzja C Kuby).
+        m.set(id, Math.max(m.get(id) ?? 0, rpe));
+      }
+      return m;
+    })();
+
     const wpisyDziennikaIds: ReadonlySet<number> | null = (() => {
       if (dziennikRes.error) return null;
       if (!Array.isArray(dziennikRes.data)) return null;
@@ -1920,6 +2003,8 @@ export default function DzisScreen() {
         wpisyDziennika: wpisyDziennikaIds,
         segmentBloku,
         minutyZWpisow,
+        rpeZWpisow,
+        zwrot: zwrotObszarow,
       }),
       dziennik: dziennikRes.error || !Array.isArray(dziennikRes.data)
         ? zrodloNieczytane(`Dziennik: ${powodBledu(dziennikRes.error)}`)

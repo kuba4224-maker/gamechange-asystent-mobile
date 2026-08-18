@@ -69,6 +69,7 @@
 
 import type { WejscieWerdyktow } from './wykonanieSesji';
 import { rozpoznajRodzajPozycji } from './ocenaZKafla';
+import { TRAFNOSC_BAZOWA, trafnoscSesji, type ZwrotObszarow } from './zwrotObszaru';
 
 export const BRZMIENIE_DO_PRZEJRZENIA_C4 = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-C4, 15.08.2026)';
 
@@ -139,6 +140,21 @@ export const WAGI_PRACY: Readonly<Record<RodzajPracy, number>> = {
 /** ⛔ DECYZJA KUBY 17.08.2026, nie wynik badania. Granica między 1 a 2 punktem. */
 export const PROG_DLUGOSCI_SESJI_MIN = 45;
 
+/**
+ * ⭐ JEDNOSTKA ODNIESIENIA ROZWOJU: 30 minut × RPE 6 = 180.
+ * ⛔ DECYZJA PRODUKTOWA, nie wynik badania.
+ *
+ * ⭐ ZNALEZISKO PASA W4, ZMIERZONE: formuła `minuty × RPE ⁄ 180` odtwarza
+ * 12 z 13 wag ustawionych przez Kubę ręcznie — mecz cały 4, połowa 2,
+ * wejście 1, klubowy 90 min 3, własny 60 min 2, mikrosesja 1. Tabela wag
+ * NIE JEST osobną decyzją: jest tą samą miarą policzoną z typowych wartości.
+ *
+ * ⭐ I DRUGIE: próg 45 minut nie jest arbitralny. 45 × 6 = 270, a 270 ⁄ 180
+ * = 1,50 — dokładnie punkt zwrotny zaokrąglenia przy RPE 6, czyli przy
+ * typowej intensywności treningu.
+ */
+export const JEDNOSTKA_ODNIESIENIA_ROZWOJU = 180;
+
 /** ⛔ DECYZJA PRODUKTOWA, nie pomiar. Używana, gdy mecz nie ma zaplanowanej długości. */
 export const DOMYSLNA_DLUGOSC_MECZU_MIN = 90;
 
@@ -169,7 +185,13 @@ export type PochodzenieWagi =
   /** ⛔ mecz bez minut — tak samo nieudowodniony jak trening bez liczby */
   | 'minuty_nieznane'
   /** ⛔ `event_type` spoza CHECK-a bazy — TRZECIA WARTOŚĆ, nie „najniższa waga" (R5) */
-  | 'nieznany_rodzaj';
+  | 'nieznany_rodzaj'
+  /**
+   * ⭐ PLAN-D-W4 — waga policzona z PRAWDZIWYCH minut i PRAWDZIWEGO RPE
+   * (`minuty × RPE × trafność ⁄ 180`). To jest najwyższy poziom pomiaru:
+   * ani jedna liczba nie pochodzi z tabeli.
+   */
+  | 'zmierzony_srpe';
 
 export type WagaJednostki = { punkty: number; pochodzenie: PochodzenieWagi };
 
@@ -182,6 +204,17 @@ export type FaktySesji = {
   minutyZmierzone: number | null;
   /** `calendar_events.planned_minutes`. */
   minutyZPlanu: number | null;
+  /**
+   * ⭐ PLAN-D-W4 — ciężkość podana przez zawodnika (0–10), z wpisu wskazującego
+   * TĘ sesję. `null` = nie wiemy. ⛔ Nie zgadujemy jej tutaj: szacowanie RPE
+   * należy do miary OBCIĄŻENIA, a rozwój liczymy wyłącznie z tego, co zmierzone.
+   */
+  rpeZmierzone?: number | null;
+  /**
+   * ⭐ PLAN-D-W4 — 1,0 albo 1,5 (`lib/zwrotObszaru.ts`). ⛔ NIGDY poniżej 1,0.
+   * Nieznana trafność to 1,0, a nie kara.
+   */
+  trafnosc?: number;
 };
 
 function dodatniaLiczba(x: unknown): number | null {
@@ -209,21 +242,36 @@ export function wagaSesji(f: FaktySesji): WagaJednostki {
   });
 
   const zmierzone = dodatniaLiczba(f.minutyZmierzone);
+  const rpe = typeof f.rpeZmierzone === 'number' && Number.isFinite(f.rpeZmierzone)
+    && f.rpeZmierzone > 0 && f.rpeZmierzone <= 10 ? f.rpeZmierzone : null;
+  // ⛔ Trafność NIGDY poniżej 1,0 (decyzja Kuby 1A). Brak trafności to baza, nie kara.
+  const trafnosc = typeof f.trafnosc === 'number' && Number.isFinite(f.trafnosc) && f.trafnosc >= TRAFNOSC_BAZOWA
+    ? f.trafnosc : TRAFNOSC_BAZOWA;
+
+  /**
+   * ⭐ WARTOŚĆ Z POMIARU: `minuty × RPE × trafność ⁄ 180`. Zwraca `null`, gdy
+   * brakuje którejkolwiek z dwóch liczb — ⛔ RPE nie jest tu zgadywane.
+   */
+  const zPomiaru = (zTrafnoscia: number): number | null =>
+    zmierzone !== null && rpe !== null
+      ? (zmierzone * rpe * zTrafnoscia) / JEDNOSTKA_ODNIESIENIA_ROZWOJU
+      : null;
 
   if (!r.znany) {
     // ⛔ Nieznany rodzaj to TRZECIA WARTOŚĆ, a nie cicha najniższa waga (R5).
-    return { punkty: 1, pochodzenie: 'nieznany_rodzaj' };
+    return { punkty: 1 * trafnosc, pochodzenie: 'nieznany_rodzaj' };
   }
 
   if (r.rodzaj === 'zobowiazanie') {
-    // ⭐ Dowód jest ZEWNĘTRZNY — założył to trener. Brak wpisu go nie kasuje,
-    // a krótki czas go nie obniża: kara jest za BRAK DOWODU, nie za NISKĄ LICZBĘ.
-    //
-    // ⛔ ZNALEZISKO PASA W1, ZAPISANE ZAMIAST PRZEMILCZANE: gałąź „podnieś wagę
-    // zobowiązania zmierzonym albo zaplanowanym czasem" JEST NIEOSIĄGALNA, bo
-    // waga z minut wynosi najwyżej 2, a zobowiązanie waży 3. Napisanie jej
-    // dałoby kod, który wygląda jak funkcja i nigdy się nie wykonuje (pas Y4).
-    // Dlatego jej tu NIE MA, a pochodzenie `zaplanowany` nie istnieje w typie.
+    // ⭐ Dowód jest ZEWNĘTRZNY — założył to trener. Brak wpisu go nie kasuje.
+    // ⛔ TRAFNOŚĆ ZAWSZE 1,0: zawodnik nie ma wpływu na treść treningu klubowego
+    // ani meczu (decyzja Kuby 18.08.2026), więc premia go nie dotyczy.
+    const srpe = zPomiaru(TRAFNOSC_BAZOWA);
+    // ⛔ Pomiar może wagę PODNIEŚĆ, nigdy obniżyć (decyzja C): ciężki trening
+    // klubowy 90 min × RPE 8 daje 4, a lekki 90 min × RPE 3 nadal daje 3.
+    if (srpe !== null && srpe > WAGA_ZOBOWIAZANIA) {
+      return { punkty: srpe, pochodzenie: 'zmierzony_srpe' };
+    }
     return { punkty: WAGA_ZOBOWIAZANIA, pochodzenie: 'z_rodzaju' };
   }
 
@@ -233,14 +281,17 @@ export function wagaSesji(f: FaktySesji): WagaJednostki {
   }
 
   // ── własna praca ──
-  if (f.eventType === 'task') return { punkty: 1, pochodzenie: 'z_rodzaju' };
+  if (f.eventType === 'task') return { punkty: 1 * trafnosc, pochodzenie: 'z_rodzaju' };
 
-  if (zmierzone === null) {
-    // ⛔ O100: zadeklarowana sesja bez ANI JEDNEJ liczby waży 1, choćby zawodnik
-    // wpisał sobie 120 minut. Deklaracja nie jest pracą.
-    return { punkty: 1, pochodzenie: 'bez_dowodu' };
-  }
-  return { punkty: wagaZMinut(zmierzone), pochodzenie: 'zmierzony' };
+  // ⛔ WARTOŚĆ AWARYJNA: tyle, ile da się powiedzieć bez pomiaru.
+  const bazowa = zmierzone === null
+    ? { punkty: 1 * trafnosc, pochodzenie: 'bez_dowodu' as PochodzenieWagi }
+    : { punkty: wagaZMinut(zmierzone) * trafnosc, pochodzenie: 'zmierzony' as PochodzenieWagi };
+
+  const srpe = zPomiaru(trafnosc);
+  // ⛔ Decyzja C raz jeszcze: pomiar podnosi albo nic nie zmienia.
+  if (srpe !== null && srpe > bazowa.punkty) return { punkty: srpe, pochodzenie: 'zmierzony_srpe' };
+  return bazowa;
 }
 
 /**
@@ -255,15 +306,53 @@ export function wagaSesji(f: FaktySesji): WagaJednostki {
  * ⛔ 0 minut na boisku = 0 punktów. Licznik nagradza wykonaną pracę (N1),
  * nie obecność. Mecz mimo to NIE ZNIKA z listy — patrz `MECZ_BEZ_MINUT_NA_BOISKU`.
  */
-export function wagaMeczu(minutyNaBoisku: number | null, dlugoscMeczu: number | null): WagaJednostki {
+export function wagaMeczu(
+  minutyNaBoisku: number | null,
+  dlugoscMeczu: number | null,
+  rpeMeczu?: number | null,
+): WagaJednostki {
   const dlugosc = dodatniaLiczba(dlugoscMeczu) ?? DOMYSLNA_DLUGOSC_MECZU_MIN;
   if (typeof minutyNaBoisku !== 'number' || !Number.isFinite(minutyNaBoisku)) {
     // ⛔ Mecz bez minut jest deklaracją, tak samo jak trening bez liczby.
     return { punkty: 1, pochodzenie: 'minuty_nieznane' };
   }
   if (minutyNaBoisku <= 0) return { punkty: 0, pochodzenie: 'z_minut_meczu' };
-  const surowe = Math.round((MAKS_PUNKTOW_ZA_MECZ * minutyNaBoisku) / dlugosc);
+
+  const rpe = typeof rpeMeczu === 'number' && Number.isFinite(rpeMeczu) && rpeMeczu > 0 && rpeMeczu <= 10
+    ? rpeMeczu : null;
+  if (rpe !== null) {
+    // ⭐ Mecz z podanym RPE liczy się DOKŁADNIE TĄ SAMĄ formułą, co każda inna
+    // sesja: `minuty × RPE ⁄ 180`. Żadnej osobnej reguły dla meczu nie ma.
+    return {
+      punkty: Math.min(MAKS_PUNKTOW_ZA_MECZ, (minutyNaBoisku * rpe) / JEDNOSTKA_ODNIESIENIA_ROZWOJU),
+      pochodzenie: 'zmierzony_srpe',
+    };
+  }
+
+  // ⭐ ZNALEZISKO PASA W4: `4 × minuty ⁄ długość` to NIE JEST osobna formuła.
+  // Przy meczu 90-minutowym `4 × min ⁄ 90 = min ⁄ 22,5`, a `min × 8 ⁄ 180`
+  // to również `min ⁄ 22,5`. ⛔ To jest sRPE z PRZYJĘTYM RPE 8 dla meczu —
+  // czyli decyzja produktowa udająca dotąd osobną regułę. Zostaje jako
+  // wartość awaryjna i od dziś jest tak nazwana.
+  const surowe = (MAKS_PUNKTOW_ZA_MECZ * minutyNaBoisku) / dlugosc;
   return { punkty: Math.min(MAKS_PUNKTOW_ZA_MECZ, Math.max(1, surowe)), pochodzenie: 'z_minut_meczu' };
+}
+
+/**
+ * ⭐ PLAN-D-W4 — ILE PUNKTÓW POKAZAĆ PRZY POJEDYNCZEJ SESJI.
+ *
+ * ⛔ TO JEST KONWENCJA WYŚWIETLANIA, NIE JEDNOSTKA SUMOWANIA. Licznik sumuje
+ * wartości SUROWE i zaokrągla RAZ, na końcu.
+ *
+ * ⛔ POWÓD JEST ZMIERZONY, NIE TEORETYCZNY: przy zaokrąglaniu każdej sesji
+ * osobno sesja 30 min × RPE 5 daje 0,83 bez trafności i 1,25 z trafnością —
+ * a po zaokrągleniu OBIE dają 1. Premia za trafienie w wąskie gardło znikała
+ * w całości, i to akurat przy sesjach Bloku Skupienia, czyli przy jedynej
+ * pracy, która JEST celowana. To są „dane znikające po cichu".
+ */
+export function punktyRozwojuNaEkranie(surowe: number): number {
+  if (typeof surowe !== 'number' || !Number.isFinite(surowe) || surowe <= 0) return 0;
+  return Math.max(1, Math.round(surowe));
 }
 
 /**
@@ -525,6 +614,10 @@ export type WierszSesji = {
   maSesjeTrenera?: boolean;
   minutyZmierzone?: number | null;
   minutyZPlanu?: number | null;
+  /** ⭐ PLAN-D-W4 — ciężkość z wpisu wskazującego TĘ sesję. `null` = nie wiemy. */
+  rpeZmierzone?: number | null;
+  /** ⭐ PLAN-D-W4 — 1,0 albo 1,5. ⛔ Nigdy poniżej 1,0. */
+  trafnosc?: number;
 };
 
 export function jednostkiZSesji(wiersze: readonly WierszSesji[]): JednostkaPracy[] {
@@ -539,6 +632,8 @@ export function jednostkiZSesji(wiersze: readonly WierszSesji[]): JednostkaPracy
       maSesjeTrenera: w.maSesjeTrenera === true,
       minutyZmierzone: w.minutyZmierzone ?? null,
       minutyZPlanu: w.minutyZPlanu ?? null,
+      rpeZmierzone: w.rpeZmierzone ?? null,
+      trafnosc: w.trafnosc,
     });
     out.push({
       klucz: `sesja:${w.idWydarzenia}@${w.dzien.slice(0, 10)}`,
@@ -677,6 +772,11 @@ export type WierszMeczu = {
    * ⛔ To jest MIANOWNIK wagi. `null` → 90 minut, jako decyzja produktowa.
    */
   dlugoscMeczu?: number | null;
+  /**
+   * ⭐ PLAN-D-W4 — `match_contexts.match_rpe`. W bazie wypełnione w 2 z 2 wierszy,
+   * czyli mecz jest dziś NAJBLIŻEJ pełnego pomiaru `minuty × RPE`.
+   */
+  match_rpe?: number | null;
 };
 
 export function jednostkiZMeczow(wiersze: readonly WierszMeczu[]): JednostkaPracy[] {
@@ -687,6 +787,7 @@ export function jednostkiZMeczow(wiersze: readonly WierszMeczu[]): JednostkaPrac
     const waga = wagaMeczu(
       typeof w.minutes_played === 'number' ? w.minutes_played : null,
       typeof w.dlugoscMeczu === 'number' ? w.dlugoscMeczu : null,
+      typeof w.match_rpe === 'number' ? w.match_rpe : null,
     );
     out.push({
       klucz: `mecz:${w.id}`,
@@ -770,6 +871,17 @@ export function zrodloSesji(args: {
    * długości" (1 punkt), zgodnie z O100.
    */
   minutyZWpisow?: ReadonlyMap<number, number> | null;
+  /**
+   * ⭐ PLAN-D-W4 — `calendar_events.id` → RPE z wpisu wskazującego TĘ pozycję.
+   * Razem z minutami daje pomiar `minuty × RPE ⁄ 180`. ⛔ Brak nie blokuje.
+   */
+  rpeZWpisow?: ReadonlyMap<number, number> | null;
+  /**
+   * ⭐ PLAN-D-W4 — zwrot zwrotu obszarów tego zawodnika (`lib/zwrotObszaru.ts`).
+   * ⛔ Brak rankingu NIE odbiera nikomu punktów: trafność spada wtedy do 1,0
+   * dla całej pracy, czyli do bazy (decyzja Kuby 1A).
+   */
+  zwrot?: ZwrotObszarow | null;
 }): WejscieZrodla {
   if (args.wydarzenia === null) {
     return zrodloNieczytane('nie odczytałem wydarzeń kalendarza');
@@ -788,6 +900,24 @@ export function zrodloSesji(args: {
     const m = minuty.get(id);
     return typeof m === 'number' && Number.isFinite(m) ? m : null;
   };
+  const rpeMapa = args.rpeZWpisow ?? null;
+  const rpeDla = (id: number): number | null => {
+    if (rpeMapa === null) return null;
+    const r = rpeMapa.get(id);
+    return typeof r === 'number' && Number.isFinite(r) ? r : null;
+  };
+  const zwrot = args.zwrot ?? null;
+  // ⭐ TRAFNOŚĆ LICZY SIĘ Z SEGMENTU POZYCJI — i TYLKO stąd.
+  //
+  // ⛔ ZNALEZISKO WŁASNEJ MUTACJI, 18.08.2026: stała tu druga bramka
+  // („zewnętrzna praca nie dostaje premii"), a pierwsza siedzi w `wagaSesji`,
+  // która dla zobowiązania oddaje płaskie 3 i trafności NIE MNOŻY W OGÓLE.
+  // Mutacja kasująca tę bramkę NIE ZMIENIAŁA ANI JEDNEJ LICZBY — czyli był to
+  // kod, który wygląda jak reguła i nigdy nie rozstrzyga (pas Y4).
+  // ⛔ Reguła „klub i mecz zawsze 1,0" mieszka od teraz w JEDNYM miejscu:
+  // w gałęzi `zobowiazanie` funkcji `wagaSesji` (O92).
+  const trafnoscDla = (segment: string | null): number =>
+    (zwrot === null ? TRAFNOSC_BAZOWA : trafnoscSesji({ zwrot, obszar: segment, zewnetrzna: false }));
   const segmentDla = (idBloku: string | null): string | null => {
     if (args.segmentBloku === null || typeof idBloku !== 'string' || idBloku.length === 0) return null;
     return args.segmentBloku.get(idBloku) ?? null;
@@ -826,6 +956,8 @@ export function zrodloSesji(args: {
         maWpisWDzienniku: wpisy.has(w.idWydarzenia),
         ...(faktyWydarzenia.get(w.idWydarzenia) ?? {}),
         minutyZmierzone: minutyDla(w.idWydarzenia),
+        rpeZmierzone: rpeDla(w.idWydarzenia),
+        trafnosc: trafnoscDla(segmentWydarzenia.get(w.idWydarzenia) ?? null),
       });
     }
   }
@@ -844,6 +976,8 @@ export function zrodloSesji(args: {
       maWpisWDzienniku: maWpis,
       ...(faktyWydarzenia.get(w.id) ?? {}),
       minutyZmierzone: minutyDla(w.id),
+      rpeZmierzone: rpeDla(w.id),
+      trafnosc: trafnoscDla(segmentWydarzenia.get(w.id) ?? null),
     });
   }
 
@@ -1045,6 +1179,11 @@ export function policzNagrode(
       nastepnyProg = { id: p.id, nazwa: p.nazwa, miara: p.miara, prog: p.prog, masz, brakuje: p.prog - masz };
     }
   }
+
+  // ⭐ PLAN-D-W4 — ZAOKRĄGLENIE NASTĘPUJE TU I TYLKO TU, na sumie wartości
+  // surowych. ⛔ Zaokrąglanie po drodze zjadało premię za trafność.
+  punkty = Math.round(punkty);
+  punktyWCelu = Math.round(punktyWCelu);
 
   return {
     rodzaj: 'policzona',
