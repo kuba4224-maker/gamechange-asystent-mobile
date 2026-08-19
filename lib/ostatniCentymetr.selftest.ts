@@ -284,8 +284,20 @@ function check(label: string, cond: boolean, detail: string) {
   // zero rzeczy przeciętych zgięciem). Powstał, bo bateria mutacji tego pasa
   // wykazała, że PIĘĆ z tych reguł nie miało w repozytorium ANI JEDNEJ asercji.
   // Używa tego samego, poprawnego idiomu `bezKomentarzy` co pozostałe 37.
+  // ⭐ AKTUALIZACJA 18.08.2026, PAS S3: 38 → 39. Liczba WZROSŁA O JEDEN i to
+  // NIE JEST regres: pas S3 dopisał `lib/zdobyczeRundy.selftest.ts` — strażnika
+  // trzech zdobyczy rundy przebudowy (obietnica 23 „ocena należy do rzeczy:
+  // dotykasz kafla", 68 „przycisk «+» jest widoczny i jest przyciskiem",
+  // 42 „miara nazywa się ROZWÓJ"). Powstał, bo bateria mutacji NA PLIKACH
+  // PRODUKTU wykazała, że CZTERNAŚCIE mutacji łamiących obietnice tej rundy
+  // przechodzi przez 52 strażników bez ani jednego zapalenia — w tym
+  // skasowanie JEDNĄ LINIĄ wywołania, które otwiera arkusz oceny.
+  // Używa tego samego, poprawnego idiomu `bezKomentarzy` co pozostałe 38.
+  // ⚠️ `lib/obciazenie.selftest.ts` (pas D1, ten sam wieczór) NIE JEST na tej
+  // liście — sprawdzone uruchomieniem na stanie dysku z 18.08, 22:30 UTC:
+  // bez mojego pliku licznik pokazuje 38 i zapadka jest zielona.
   // ⛔ Liczba jest przestawiona, nie poluzowana: nadal RÓWNOŚĆ.
-  const PLIKOW_Z_WZORCEM_18_08_2026 = 38;
+  const PLIKOW_Z_WZORCEM_18_08_2026 = 39;
   check(`⭐ D6 ZAPADKA NA RÓWNOŚĆ — plików z wzorcem „blok przed linią" jest DOKŁADNIE ${PLIKOW_Z_WZORCEM_18_08_2026}`,
     zWzorcem.length === PLIKOW_Z_WZORCEM_18_08_2026,
     `${zWzorcem.length}: ${zWzorcem.join(', ')} — ⛔ jeżeli liczba WZROSŁA, ktoś dopisał `

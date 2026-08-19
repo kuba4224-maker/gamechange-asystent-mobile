@@ -122,7 +122,9 @@
 // go NIE podnoszą, bo wtedy na ekranie są już prawdziwe dane i migotanie
 // byłoby gorsze niż jego brak.
 import { useState, useCallback, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import {
+  View, Text, TouchableOpacity, ScrollView, StyleSheet, RefreshControl, TextInput,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -350,6 +352,18 @@ import { naglowekArkusza } from '../../lib/arkusz';
 import {
   rzeczyMeczu, podpisArkuszaMeczu, czegoNieUmiemyZapisac,
   MECZ_WIECEJ_WEJSCIE, MECZ_CZEKA_NA_KOLUMNE,
+  // ⭐⭐ PLAN-D-D8 18.08.2026 — REGUŁY ŚCIEŻKI MECZU. ⛔ Ani jedna z tych
+  // liczb i ani jedno z tych zdań nie powstaje w tym pliku: ekran je RYSUJE,
+  // a rozstrzyga je moduł, który da się uruchomić w strażniku bez Reacta.
+  MINUTY_NA_BOISKU, DLUGOSCI_MECZU,
+  POLE_MINUTY_NA_BOISKU, POLE_DLUGOSC_MECZU,
+  wynikMeczu, zdecydujOZapisieMeczu, opisZapisuMeczuDoLogu,
+  SKALA_OCENY, POLE_SAMOOCENA, POLE_STAN_MENTALNY, POLE_WARUNKI,
+  POLE_POZYCJA, POLE_WYNIK, POLE_NOTATKA,
+  WARUNKI_TAK, WARUNKI_NIE, WYNIK_MY, WYNIK_ONI,
+  MECZ_WIECEJ_DOBROWOLNE, MECZ_WIECEJ_ZAPISZ, MECZ_WIECEJ_ZAPISANO,
+  PUSTE_WIECEJ_O_MECZU, POZYCJE_DO_WYBORU,
+  type OcenaMeczu, type WiecejOMeczu, type StanKontekstuMeczu,
 } from '../../lib/meczWiecej';
 import {
   sprawdzPrzedDodaniem, wolnoUtworzycWydarzenie,
@@ -411,6 +425,14 @@ import {
 import {
   zbudujWejsciaWgladow,
   rocznikZOdpowiedzi,
+  // ⭐⭐ PLAN-D-D8 18.08.2026 — PRZEMIANOWANIE WIERSZA MECZU MA JEDNO MIEJSCE.
+  // Do dziś stała tu rzutka `as unknown as WierszMeczuNagroda[]`, która nie
+  // przemianowuje ani jednego pola: `match_length_minutes` z bazy NIGDY nie
+  // stawało się `dlugoscMeczu`, więc waga meczu liczyła się z założonych
+  // 90 minut ZAWSZE. ⛔ Rzutka przez `unknown` wyłącza kompilator, a testy
+  // widziały właściwość, której w czasie wykonania nie było.
+  meczDlaNagrody,
+  type WierszMeczuWgl,
   TABELA_MECZOW, SELECT_MECZOW,
   TABELA_PROFILU, SELECT_PROFILU,
   TABELA_KATALOGU, SELECT_KATALOGU, KOLUMNA_ODBIORCY, ODBIORCY_KATALOGU,
@@ -1183,7 +1205,11 @@ const PLUS_DODAJ_NOWE = 'Dodaj nowe wydarzenie →';
 type StanArkusza =
   | { rodzaj: 'ocena'; klucz: string }
   | { rodzaj: 'oceny' }
-  | { rodzaj: 'meczWiecej'; tytul: string }
+  // ⭐ PLAN-D-D8 — `klucz` DOSZEDŁ i nie jest wygodą: bez niego arkusz
+  // „powiedz więcej" nie wie, do którego wiersza `match_contexts` dokłada,
+  // więc każdy zapis wstawiałby nowy wiersz i licznik pracy liczyłby ten
+  // sam mecz tyle razy, ile razy zawodnik dotknął „Zapisz".
+  | { rodzaj: 'meczWiecej'; tytul: string; klucz: string }
   | { rodzaj: 'plus' }
   | { rodzaj: 'kolizja' }
   // ⭐ PAS W1 (D-1 + decyzja D-B Kuby): cały materiał jednej odpowiedzi.
@@ -1280,6 +1306,32 @@ export default function DzisScreen() {
   const [bolMiejsce, setBolMiejsce] = useState<string | null>(null);
   /** ⭐ PLAN-D-O1 — powód nieobecności. ⛔ `null` to „nie wiemy", nie „bez powodu". */
   const [powodWybrany, setPowodWybrany] = useState<PowodNieobecnosci | null>(null);
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐⭐ PLAN-D-D8 18.08.2026 — ŚCIEŻKA MECZU. DWIE LICZBY, NIE JEDNA.
+  //
+  // ⛔ OBIE STARTUJĄ PUSTE i to jest ta sama reguła, co przy RPE (Z6):
+  // wartość zaznaczona z góry przestaje być podpowiedzią i staje się
+  // pomiarem, a produkt zmierzyłby wtedy własne założenie zamiast zawodnika.
+  // ⛔ `null` NIE JEST ZEREM. „Nie zaznaczyłem" i „nie wszedłem na boisko"
+  // to dwa różne fakty o zawodniku i mają dwa różne stany na ekranie (R5).
+  // ═════════════════════════════════════════════════════════════════
+  const [minutyNaBoisku, setMinutyNaBoisku] = useState<number | null>(null);
+  const [dlugoscMeczu, setDlugoscMeczu] = useState<number | null>(null);
+  /** ⭐ Sześć rzeczy z arkusza „powiedz więcej". ⛔ Wszystkie puste na start. */
+  const [wiecejOMeczu, setWiecejOMeczu] = useState<WiecejOMeczu>(PUSTE_WIECEJ_O_MECZU);
+  /**
+   * ⭐ KTÓRY WIERSZ `match_contexts` NALEŻY DO KTÓREGO WYSTĄPIENIA.
+   * ⛔ Klucz to `Pytanie.klucz`, wartość to `match_contexts.id`.
+   * ⚠️ GRANICA DOWODU (Z0): ta mapa żyje w stanie ekranu, więc po zamknięciu
+   * aplikacji jest pusta. `match_contexts` NIE MA kolumny wskazującej
+   * `calendar_events` (zmierzone 18.08.2026), więc produkt nie umie odnaleźć
+   * wiersza, który sam założył wczoraj. Domknięcie wymaga kolumny wiążącej
+   * i jest wypisane w nocie pasa jako dług, a nie przemilczane.
+   */
+  const [kontekstyMeczu, setKontekstyMeczu] = useState<Record<string, number>>({});
+  /** ⛔ Osobny od `bladWerdyktu`: zapis meczu może się nie udać przy udanej ocenie. */
+  const [bladMeczu, setBladMeczu] = useState<string | null>(null);
+  const [zapisanoMecz, setZapisanoMecz] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
@@ -2172,7 +2224,12 @@ export default function DzisScreen() {
         ? zrodloNieczytane(`mecze: ${powodBledu(meczeRes.error)}`)
         : {
           rodzaj: 'jest',
-          jednostki: jednostkiZMeczow(meczeRes.data as unknown as WierszMeczuNagroda[]),
+          // ⭐ PLAN-D-D8 — `meczDlaNagrody` przemianowuje `match_length_minutes`
+          // na `dlugoscMeczu`. ⛔ To JEST tą zmianą: bez niej mecz 60-minutowy
+          // rozegrany w całości dawał 3 punkty zamiast 4.
+          jednostki: jednostkiZMeczow(
+            (meczeRes.data as unknown as WierszMeczuWgl[]).map(meczDlaNagrody),
+          ),
         },
       segmentyCelow,
     };
@@ -2587,6 +2644,16 @@ export default function DzisScreen() {
       }
     }
 
+    // ⭐⭐ PLAN-D-D8 — MECZ MA DRUGĄ POŁOWĘ ODPOWIEDZI I ONA IDZIE GDZIE INDZIEJ.
+    // Minuty na boisku i długość meczu NIE MAJĄ kolumn w `daily_logs`; ich
+    // miejsce to `match_contexts`. ⛔ Zapis stoi TU, po udanym wpisie
+    // potreningowym, świadomie: gdyby stał przed nim, nieudany wpis do
+    // dziennika zostawiłby wiersz meczu bez ciężkości i bez bólu, a zawodnik
+    // zobaczyłby błąd po tym, jak połowa odpowiedzi już się zapisała.
+    if (faktyPozycji(p.idWydarzenia).eventType === 'match') {
+      await zapiszKontekstMeczu(p.klucz);
+    }
+
     console.log(`dzis: [PLAN-D-O1] ${opisOcenyDoLogu({
       werdykt: p.stan.rodzaj === 'odpowiedziane' ? p.stan.werdykt : null,
       payload: zbudujPayloadIZrodla(wartosci),
@@ -2600,7 +2667,93 @@ export default function DzisScreen() {
     setCzasZPlanu(false);
     setRpeWybrane(rpePoczatkowe());
     setBolMiejsce(null);
+    // ⛔ MINUT I DŁUGOŚCI NIE CZYŚCIMY DO ZERA, tylko do „nie zaznaczone" —
+    // zero jest ODPOWIEDZIĄ („nie wszedłem na boisko"), a nie stanem pustym (R5).
+    setMinutyNaBoisku(null);
+    setDlugoscMeczu(null);
     await load();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PLAN-D-D8 18.08.2026 — ZAPIS KONTEKSTU MECZU. JEDNA DROGA, DWA WEJŚCIA.
+  //
+  // ⛔ JEDNA FUNKCJA, BO INACZEJ BYŁYBY DWIE. Minuty na boisku zapisuje ścieżka
+  // oceny, a samoocenę i notatkę arkusz „powiedz więcej" — ale OBIE piszą
+  // do TEGO SAMEGO wiersza `match_contexts`. Dwie funkcje znaczyłyby dwa
+  // wiersze na jeden mecz, a licznik pracy policzyłby go dwa razy.
+  //
+  // ⛔ DECYZJĘ „wstaw czy dołóż" PODEJMUJE CZYSTA FUNKCJA
+  // (`zdecydujOZapisieMeczu`), a ten kod ją WYKONUJE. Ten sam podział,
+  // co przy bramce „+" (`lib/dodanieWstecz.ts`).
+  //
+  // ⚠️ ODDAJE `true`, gdy nie ma się na co skarżyć — także wtedy, gdy świadomie
+  // NIC nie zapisał (pusty formularz nie jest awarią). Porażką jest wyłącznie
+  // odrzucony zapis, i tylko ona ustawia `bladMeczu`.
+  // ═══════════════════════════════════════════════════════════════════
+  async function zapiszKontekstMeczu(klucz: string): Promise<boolean> {
+    if (!currentUser) return false;
+    const ocena: OcenaMeczu = { minutyNaBoisku, dlugoscMeczu, rpe: rpeWybrane };
+    const stan: StanKontekstuMeczu = kontekstyMeczu[klucz] === undefined
+      ? { rodzaj: 'brak' }
+      : { rodzaj: 'zapisany', id: kontekstyMeczu[klucz] };
+    const decyzja = zdecydujOZapisieMeczu({
+      idZawodnika: currentUser.id, stan, ocena, wiecej: wiecejOMeczu,
+    });
+    console.log(`dzis: [PLAN-D-D8] ${opisZapisuMeczuDoLogu(decyzja)}`);
+
+    if (decyzja.rodzaj === 'nie_zapisuj') {
+      // ⛔ ZDANIE ALBO CISZA — nigdy „coś poszło nie tak". Brak zdania znaczy,
+      // że nie ma o czym mówić zawodnikowi (np. pusty formularz przy ocenie).
+      setBladMeczu(decyzja.zdanie);
+      return decyzja.zdanie === null;
+    }
+
+    if (decyzja.rodzaj === 'aktualizuj') {
+      const { data: zmienione, error: bladU } = await supabase
+        .from('match_contexts')
+        .update(decyzja.zmiany)
+        .eq('id', decyzja.id)
+        .select('id');
+      if (bladU) {
+        setBladMeczu(toJestBrakDostepu(bladU)
+          ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+          : 'Nie udało się zapisać meczu: ' + bladU.message);
+        return false;
+      }
+      // ⚠️ O61 — PostgREST przy odmowie RLS na UPDATE nie zwraca błędu, tylko
+      // ZERO zmienionych wierszy. Bez tego „nie mam uprawnień" byłoby
+      // nieodróżnialne od „zapisano".
+      if (!zmienione || zmienione.length === 0) {
+        setBladMeczu('Nie udało się zapisać meczu: baza nie zmieniła ani jednego wiersza.');
+        return false;
+      }
+      setBladMeczu(null);
+      setZapisanoMecz(klucz);
+      return true;
+    }
+
+    const { data: wstawione, error: bladW } = await supabase
+      .from('match_contexts')
+      .insert(decyzja.wiersz)
+      .select('id');
+    if (bladW) {
+      setBladMeczu(toJestBrakDostepu(bladW)
+        ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+        : 'Nie udało się zapisać meczu: ' + bladW.message);
+      return false;
+    }
+    const idWiersza = Array.isArray(wstawione) && wstawione.length > 0
+      ? Number(wstawione[0].id) : null;
+    if (idWiersza === null || !Number.isFinite(idWiersza)) {
+      setBladMeczu('Nie udało się zapisać meczu: baza nie przyjęła tego wiersza.');
+      console.warn('[PLAN-D-D8] insert match_contexts dotknął ZERO wierszy — najpewniej RLS.');
+      return false;
+    }
+    // ⭐ OD TEJ CHWILI KOLEJNE ZAPISY DOKŁADAJĄ, ZAMIAST WSTAWIAĆ.
+    setKontekstyMeczu((poprzednie) => ({ ...poprzednie, [klucz]: idWiersza }));
+    setBladMeczu(null);
+    setZapisanoMecz(klucz);
+    return true;
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -3355,6 +3508,13 @@ export default function DzisScreen() {
     // podpowiedzi ISTNIEJE i jest sprawdzany uruchomieniowo; danych nie ma
     // i ekran mówi to wprost, zamiast wstawiać wypełniacz.
     const podpowiedz = podpowiedzCzasu(null);
+    // ⭐⭐ PLAN-D-D8 — MECZ MA WŁASNĄ POSTAĆ KROKU „ile trwało i jak ciężko".
+    // ⛔ To NIE jest osobny krok: `krokiOceny()` z `lib/ocenaZKafla.ts` zostaje
+    // nietknięte, zmienia się WYŁĄCZNIE to, co ten krok rysuje przy meczu.
+    // Osobny krok znaczyłby, że ścieżka meczu i ścieżka treningu mogą się
+    // po cichu rozjechać w kolejności i w zapisie.
+    const toMecz = faktyPozycji(p.idWydarzenia).eventType === 'match';
+    const wynik = wynikMeczu({ minutyNaBoisku, dlugoscMeczu, rpe: rpeWybrane });
     return (
       <View style={styles.ocenaKroki}>
         {krokiOceny(p.stan.werdykt).filter((k) => k.widoczny && !k.obowiazkowy).map((k) => (
@@ -3366,20 +3526,67 @@ export default function DzisScreen() {
             </TouchableOpacity>
             {otwarty(k.id) && k.id === 'czas_i_rpe' ? (
               <View>
-                <Text style={styles.licznikPodpis}>{POLE_CZAS}</Text>
-                <View style={styles.pytanieOdpowiedzi}>
-                  {MINUTY_DO_WYBORU.map((m) => (
-                    <TouchableOpacity
-                      key={m}
-                      disabled={leci}
-                      style={[styles.pytanieBtn, czasWybrany === m && styles.pytanieBtnWybrany]}
-                      onPress={() => { setCzasWybrany(m); setCzasZPlanu(podpowiedz.jest && podpowiedz.minuty === m); }}
-                    >
-                      <Text style={[styles.pytanieBtnTxt, czasWybrany === m && styles.pytanieBtnTxtWybrany]}>{`${m} min`}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {podpowiedz.jest ? null : <Text style={styles.licznikPodpis}>{podpowiedz.powod}</Text>}
+                {/* ═══════════════════════════════════════════════════════
+                    ⭐⭐ PLAN-D-D8 — DWA POLA W JEDNYM BLOKU, WYNIK TRZECIĄ LINIĄ.
+                    ⛔ Osobne bloki byłyby błędem, a nie układem: bez długości
+                    meczu minuty na boisku nie znaczą nic (45′ z 60′ ≠ 45′ z 90′),
+                    więc rozdzielenie ich zaprosiłoby zawodnika do podania
+                    pierwszej i zignorowania drugiej.
+                    ⛔ ŻADNA WARTOŚĆ NIE JEST ZAZNACZONA Z GÓRY (Z6).
+                    ═══════════════════════════════════════════════════════ */}
+                {toMecz ? (
+                  <View style={styles.meczBlok}>
+                    <Text style={styles.licznikPodpis}>{POLE_MINUTY_NA_BOISKU}</Text>
+                    <View style={styles.pytanieOdpowiedzi}>
+                      {MINUTY_NA_BOISKU.map((m) => (
+                        <TouchableOpacity
+                          key={`min-${m}`}
+                          disabled={leci}
+                          style={[styles.pytanieBtn, minutyNaBoisku === m && styles.pytanieBtnWybrany]}
+                          onPress={() => setMinutyNaBoisku(minutyNaBoisku === m ? null : m)}
+                        >
+                          <Text style={[styles.pytanieBtnTxt, minutyNaBoisku === m && styles.pytanieBtnTxtWybrany]}>{String(m)}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Text style={styles.licznikPodpis}>{POLE_DLUGOSC_MECZU}</Text>
+                    <View style={styles.pytanieOdpowiedzi}>
+                      {DLUGOSCI_MECZU.map((m) => (
+                        <TouchableOpacity
+                          key={`dl-${m}`}
+                          disabled={leci}
+                          style={[styles.pytanieBtn, dlugoscMeczu === m && styles.pytanieBtnWybrany]}
+                          onPress={() => setDlugoscMeczu(dlugoscMeczu === m ? null : m)}
+                        >
+                          <Text style={[styles.pytanieBtnTxt, dlugoscMeczu === m && styles.pytanieBtnTxtWybrany]}>{`${m} min`}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {/* ⭐ TRZECIA LINIA TEGO SAMEGO BLOKU. ⛔ Zero minut ma
+                        WŁASNY stan i własne zdanie — nie jest brakiem odpowiedzi
+                        i nie kasuje meczu z historii. */}
+                    {wynik.rodzaj === 'zero_minut'
+                      ? <Text style={styles.meczZeroMinut}>{wynik.zdanie}</Text>
+                      : <Text style={styles.licznikPodpis}>{wynik.zdanie}</Text>}
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.licznikPodpis}>{POLE_CZAS}</Text>
+                    <View style={styles.pytanieOdpowiedzi}>
+                      {MINUTY_DO_WYBORU.map((m) => (
+                        <TouchableOpacity
+                          key={m}
+                          disabled={leci}
+                          style={[styles.pytanieBtn, czasWybrany === m && styles.pytanieBtnWybrany]}
+                          onPress={() => { setCzasWybrany(m); setCzasZPlanu(podpowiedz.jest && podpowiedz.minuty === m); }}
+                        >
+                          <Text style={[styles.pytanieBtnTxt, czasWybrany === m && styles.pytanieBtnTxtWybrany]}>{`${m} min`}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {podpowiedz.jest ? null : <Text style={styles.licznikPodpis}>{podpowiedz.powod}</Text>}
+                  </>
+                )}
                 <Text style={styles.licznikPodpis}>{POLE_RPE}</Text>
                 {/* ⛔⭐ D3 — DZIESIĘĆ PRZYCISKÓW I ANI JEDEN NIE JEST WSTĘPNIE
                     ZAZNACZONY. Zaznaczenie bierze się WYŁĄCZNIE z `rpeWybrane`,
@@ -3401,6 +3608,12 @@ export default function DzisScreen() {
                 <TouchableOpacity style={styles.pytanieBtn} disabled={leci} onPress={() => zapiszSzczegolyOceny(p)}>
                   <Text style={styles.pytanieBtnTxt}>{ZAPISZ_SZCZEGOL}</Text>
                 </TouchableOpacity>
+                {/* ⚠️ Błąd zapisu meczu stoi PRZY tym przycisku, nie na górze
+                    arkusza — inaczej zawodnik nie połączy go z ruchem, który
+                    przed chwilą wykonał (O61). */}
+                {toMecz && bladMeczu !== null
+                  ? <Text style={styles.pytanieBlad}>{bladMeczu}</Text>
+                  : null}
                 <Text style={styles.licznikPodpis}>{RESZTA_DOBROWOLNA}</Text>
               </View>
             ) : null}
@@ -3571,7 +3784,7 @@ export default function DzisScreen() {
               {mecz ? (
                 <TouchableOpacity
                   style={styles.inlineLink}
-                  onPress={() => setArkusz({ rodzaj: 'meczWiecej', tytul: p.tytul })}
+                  onPress={() => setArkusz({ rodzaj: 'meczWiecej', tytul: p.tytul, klucz: p.klucz })}
                 >
                   <Text style={styles.cardAction}>{MECZ_WIECEJ_OTWORZ}</Text>
                 </TouchableOpacity>
@@ -3718,12 +3931,119 @@ export default function DzisScreen() {
     }
 
     if (arkusz.rodzaj === 'meczWiecej') {
+      // ⭐⭐ PLAN-D-D8 18.08.2026 — SZEŚĆ PÓL, KTÓRE NAPRAWDĘ ZAPISUJĄ.
+      // ⛔ Do dziś ten arkusz wypisywał sześć NAPISÓW i odsyłał do pełnej karty
+      // meczu. Napis, który nic nie zapisuje, jest obietnicą, nie funkcją (R1).
+      const klaczM = arkusz.klucz;
+      const ustaw = (zmiana: Partial<WiecejOMeczu>) =>
+        setWiecejOMeczu((poprzednie) => ({ ...poprzednie, ...zmiana }));
+      const liczbaZPola = (t: string): number | null => {
+        const oczyszczone = t.replace(/[^0-9]/g, '');
+        // ⛔ Puste pole to „nie podał", a nie zero — inaczej każdy mecz, którego
+        // wyniku zawodnik nie pamięta, zapisałby się jako 0:0 (R5).
+        if (oczyszczone === '') return null;
+        return Number(oczyszczone);
+      };
       return (
         <>
           <Text style={styles.cardBody}>{podpisArkuszaMeczu()}</Text>
-          {rzeczyMeczu('arkusz_wiecej').map((r) => (
-            <Text key={r.kolumna} style={styles.arkuszWiersz}>{r.napis}</Text>
-          ))}
+          <Text style={styles.licznikPodpis}>{MECZ_WIECEJ_DOBROWOLNE}</Text>
+
+          {/* 1. SAMOOCENA — ⛔ bez wartości zaznaczonej z góry. */}
+          <Text style={styles.licznikPodpis}>{POLE_SAMOOCENA}</Text>
+          <View style={styles.pytanieOdpowiedzi}>
+            {SKALA_OCENY.map((n) => (
+              <TouchableOpacity
+                key={`sr-${n}`}
+                style={[styles.pytanieBtn, wiecejOMeczu.samoocena === n && styles.pytanieBtnWybrany]}
+                onPress={() => ustaw({ samoocena: wiecejOMeczu.samoocena === n ? null : n })}
+              >
+                <Text style={[styles.pytanieBtnTxt, wiecejOMeczu.samoocena === n && styles.pytanieBtnTxtWybrany]}>{String(n)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 2. STAN MENTALNY */}
+          <Text style={styles.licznikPodpis}>{POLE_STAN_MENTALNY}</Text>
+          <View style={styles.pytanieOdpowiedzi}>
+            {SKALA_OCENY.map((n) => (
+              <TouchableOpacity
+                key={`ms-${n}`}
+                style={[styles.pytanieBtn, wiecejOMeczu.stanMentalny === n && styles.pytanieBtnWybrany]}
+                onPress={() => ustaw({ stanMentalny: wiecejOMeczu.stanMentalny === n ? null : n })}
+              >
+                <Text style={[styles.pytanieBtnTxt, wiecejOMeczu.stanMentalny === n && styles.pytanieBtnTxtWybrany]}>{String(n)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 3. WARUNKI — ⛔ trzy wartości, nie dwie: `null` znaczy „nie zapytaliśmy". */}
+          <Text style={styles.licznikPodpis}>{POLE_WARUNKI}</Text>
+          <View style={styles.pytanieOdpowiedzi}>
+            {[[WARUNKI_NIE, false] as const, [WARUNKI_TAK, true] as const].map(([napis, wartosc]) => (
+              <TouchableOpacity
+                key={napis}
+                style={[styles.pytanieBtn, wiecejOMeczu.wymagajaceWarunki === wartosc && styles.pytanieBtnWybrany]}
+                onPress={() => ustaw({ wymagajaceWarunki: wiecejOMeczu.wymagajaceWarunki === wartosc ? null : wartosc })}
+              >
+                <Text style={[styles.pytanieBtnTxt, wiecejOMeczu.wymagajaceWarunki === wartosc && styles.pytanieBtnTxtWybrany]}>{napis}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 4. POZYCJA — ⛔ etykiety wyprowadzone z `positions.id`, nie przepisane. */}
+          <Text style={styles.licznikPodpis}>{POLE_POZYCJA}</Text>
+          <View style={styles.pytanieOdpowiedzi}>
+            {POZYCJE_DO_WYBORU.map((poz) => (
+              <TouchableOpacity
+                key={poz}
+                style={[styles.pytanieBtn, wiecejOMeczu.pozycja === poz && styles.pytanieBtnWybrany]}
+                onPress={() => ustaw({ pozycja: wiecejOMeczu.pozycja === poz ? null : poz })}
+              >
+                <Text style={[styles.pytanieBtnTxt, wiecejOMeczu.pozycja === poz && styles.pytanieBtnTxtWybrany]}>{poz}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 5. WYNIK — dwie kolumny, nie jedna: `own_score` i `opponent_score`. */}
+          <Text style={styles.licznikPodpis}>{POLE_WYNIK}</Text>
+          <View style={styles.pytanieOdpowiedzi}>
+            <TextInput
+              style={styles.meczPoleWyniku}
+              keyboardType="number-pad"
+              placeholder={WYNIK_MY}
+              placeholderTextColor={colors.textSecondary}
+              value={wiecejOMeczu.bramkiMy === null ? '' : String(wiecejOMeczu.bramkiMy)}
+              onChangeText={(t) => ustaw({ bramkiMy: liczbaZPola(t) })}
+            />
+            <TextInput
+              style={styles.meczPoleWyniku}
+              keyboardType="number-pad"
+              placeholder={WYNIK_ONI}
+              placeholderTextColor={colors.textSecondary}
+              value={wiecejOMeczu.bramkiOni === null ? '' : String(wiecejOMeczu.bramkiOni)}
+              onChangeText={(t) => ustaw({ bramkiOni: liczbaZPola(t) })}
+            />
+          </View>
+
+          {/* 6. NOTATKA */}
+          <Text style={styles.licznikPodpis}>{POLE_NOTATKA}</Text>
+          <TextInput
+            style={styles.meczNotatka}
+            multiline
+            placeholder={POLE_NOTATKA}
+            placeholderTextColor={colors.textSecondary}
+            value={wiecejOMeczu.notatka ?? ''}
+            onChangeText={(t) => ustaw({ notatka: t })}
+          />
+
+          <TouchableOpacity style={styles.pytanieBtn} onPress={() => zapiszKontekstMeczu(klaczM)}>
+            <Text style={styles.pytanieBtnTxt}>{MECZ_WIECEJ_ZAPISZ}</Text>
+          </TouchableOpacity>
+          {bladMeczu !== null ? <Text style={styles.pytanieBlad}>{bladMeczu}</Text> : null}
+          {bladMeczu === null && zapisanoMecz === klaczM
+            ? <Text style={styles.licznikPodpis}>{MECZ_WIECEJ_ZAPISANO}</Text>
+            : null}
           {/* ⛔ CZEGO PRODUKT NIE UMIE ZAPISAĆ — imiennie, na ekranie.
               `match_contexts.match_length_minutes` NIE ISTNIEJE (zmierzone
               18.08.2026), więc arkusz mówi to zamiast pokazywać pole,
@@ -4210,6 +4530,39 @@ const styles = StyleSheet.create({
   },
   /** Wiersz listy w arkuszu — bez ramki, bo to nie jest przycisk. */
   arkuszWiersz: { ...typography.body, fontSize: 13, color: colors.textSecondary, paddingVertical: 5 },
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PLAN-D-D8 — ŚCIEŻKA MECZU. ⛔ Wszystko stoi W ARKUSZU, czyli poza
+  // `ScrollView`, więc koszt na ekranie „Dziś" wynosi ZERO dp. Wzorzec
+  // przeniesiony z `components/PracaWLiczbach.tsx` i z pasa A1.
+  // ═══════════════════════════════════════════════════════════════════
+  /** ⛔ JEDEN BLOK NA DWIE LICZBY — ramka niesie to, że bez siebie nic nie znaczą. */
+  meczBlok: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: radii.md,
+    padding: 10, marginBottom: 8,
+  },
+  /**
+   * ⭐ ZERO MINUT MA WŁASNY WYGLĄD, nie mniejszą czcionkę tej samej rzeczy.
+   * ⛔ ZERO CZERWIENI (Z2): to nie jest ostrzeżenie ani ocena zawodnika —
+   * czerwień w tym produkcie należy wyłącznie do bólu i stanu ochronnego.
+   */
+  meczZeroMinut: {
+    ...typography.body, fontSize: 13, color: colors.textPrimary,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.md, padding: 10, marginTop: 6,
+  },
+  /** Dwa wąskie pola wyniku — `own_score` i `opponent_score`. */
+  meczPoleWyniku: {
+    ...typography.body, fontSize: 14, color: colors.textPrimary, minWidth: 64,
+    minHeight: minTouchHeight, paddingHorizontal: 12,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.md, marginRight: 8,
+  },
+  meczNotatka: {
+    ...typography.body, fontSize: 14, color: colors.textPrimary, minHeight: 72,
+    padding: 10, textAlignVertical: 'top',
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radii.md, marginBottom: 8,
+  },
   /** Wybór w arkuszu („+" i kolizja) — to JEST przycisk, więc ma dotyk 48 dp. */
   arkuszWybor: {
     minHeight: minTouchHeight, justifyContent: 'center',

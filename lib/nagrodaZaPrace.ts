@@ -356,10 +356,14 @@ export function punktyRozwojuNaEkranie(surowe: number): number {
 }
 
 /**
- * ⚠️ BRZMIENIE — DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-W1).
+ * ⭐ BRZMIENIE ZATWIERDZONE PRZEZ KUBĘ 18.08.2026 (M2, decyzja domknięta
+ * w poleceniu pasa D8 §4.2). ⛔ ZNACZNIK „do przejrzenia" ZDJĘTY — od dziś
+ * to jest brzmienie produktu, a nie propozycja czekająca na kogoś.
+ *
  * ⛔ Zero punktów nie może wyglądać jak zero wydarzenia. Zawodnik, który
  * pojechał, rozgrzał się i nie wszedł, ma to zobaczyć jako FAKT — bez oceny
- * jego osoby i bez punktu pocieszenia.
+ * jego osoby i bez punktu pocieszenia. Mecz ZOSTAJE w historii: zawodnik
+ * na nim był, nie dostaje tylko punktów za pracę, której nie wykonał.
  */
 export const MECZ_BEZ_MINUT_NA_BOISKU =
   'Nie wszedłeś na boisko — ten mecz nie dokłada pracy do licznika. Mecz zostaje w Twojej historii.';
@@ -779,8 +783,18 @@ export type WierszMeczu = {
    */
   minutes_played?: number | null;
   /**
-   * ⭐ PLAN-D-W1 — długość CAŁEGO meczu (`calendar_events.planned_minutes`).
-   * ⛔ To jest MIANOWNIK wagi. `null` → 90 minut, jako decyzja produktowa.
+   * ⭐ PLAN-D-W1 — długość CAŁEGO meczu. ⛔ To jest MIANOWNIK wagi.
+   * `null` → 90 minut, jako decyzja produktowa, nie jako pomiar.
+   *
+   * ⭐⭐ POPRAWIONE 18.08.2026 (PAS D8) — ŹRÓDŁO BYŁO OPISANE BŁĘDNIE.
+   * Ten komentarz mówił do dziś `calendar_events.planned_minutes`.
+   * ⛔ ZMIERZONE 18.08.2026: `match_contexts` NIE MA ANI JEDNEJ kolumny
+   * wskazującej `calendar_events` — więc odczyt z `planned_minutes` nie miałby
+   * po czym trafić w ten wiersz. Prawdziwym źródłem jest własna kolumna
+   * `match_contexts.match_length_minutes` (CHECK 0 < n ≤ 150, założona
+   * na produkcji 18.08.2026), a przemianowuje ją `meczDlaNagrody()`
+   * z `lib/wejsciaWgladow.ts`. ⚠️ Komentarz o kształcie danych z zewnętrznego
+   * źródła musi mieć datę i źródło (R4) — poprzedni miał tylko nazwę i była zła.
    */
   dlugoscMeczu?: number | null;
   /**

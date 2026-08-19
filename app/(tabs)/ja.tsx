@@ -79,6 +79,7 @@ import {
   NAZWA_ROZWOJU,
   OBCIAZENIE_NIE_POLICZONE_ZDANIE,
   OBCIAZENIE_ZAMIAST_LICZBY,
+  policzObciazenieZOdczytow,
   PRACA_DODATKOWA_BRAK,
   PRACA_DODATKOWA_WEJSCIE,
   PRZYPIS_CZEGO_TU_NIE_MA,
@@ -97,6 +98,7 @@ import {
   type ArkuszTrafnosci,
   type KluczPozycji,
   type ModelProfilu,
+  type OdczytyDoRozwoju,
 } from '../../lib/ekranProfilu';
 import ArkuszeProfilu from '../../components/ArkuszeProfilu';
 
@@ -260,7 +262,14 @@ export default function JaScreen() {
       }
     }
 
-    const nagroda = policzRozwojZOdczytow({
+    // ⭐⭐ PLAN-D-D1 18.08.2026 — JEDEN ZBIÓR WIERSZY, DWIE MIARY.
+    // ⛔ Gdyby rozwój i obciążenie powstawały z dwóch osobnych odczytów,
+    // zawodnik zobaczyłby obok siebie dwie liczby, których nie da się ze sobą
+    // pogodzić, a rozjazd wyglądałby jak zmiana obciążenia.
+    // ⛔ TYP PODANY WPROST, a nie wywnioskowany. `odczytTabeli` jest ogólne,
+    // więc bez tej adnotacji wiersze schodzą do `unknown` — złapał to
+    // `npx tsc --noEmit` 18.08.2026, a suita tego nie widzi (Z-4).
+    const odczyty: OdczytyDoRozwoju = {
       // ⛔ Rozpoznanie „odczyt padł" robi MODUŁ, nie ekran — patrz `odczytTabeli`.
       wydarzenia: odczytTabeli(wydarzeniaRes.error, wydarzeniaRes.data, 'wydarzeń kalendarza', zaloguj),
       dziennik: odczytTabeli(dziennikRes.error, dziennikRes.data, 'wpisów Dziennika', zaloguj),
@@ -268,7 +277,12 @@ export default function JaScreen() {
       mecze: odczytTabeli(meczeRes.error, meczeRes.data, 'meczów', zaloguj),
       cele: odczytTabeli(celeRes.error, celeRes.data, 'listy celów', zaloguj),
       zwrot: t.zwrot,
-    });
+    };
+    const nagroda = policzRozwojZOdczytow(odczyty);
+    // ⛔ TE SAME `odczyty`, BEZ `zwrot` w środku wzoru: obciążenie liczy się
+    // z minut i ciężkości, a trafność nie ma jak do niego wejść — funkcja
+    // nie ma parametru, którym dałoby się ją podać (`lib/obciazenie.ts`).
+    const obciazenie = policzObciazenieZOdczytow(odczyty, { dzis: toLocalDateStr(new Date()) });
 
     const raportIstnieje = raportRes.error
       ? null
@@ -392,6 +406,8 @@ export default function JaScreen() {
           cel: wierszProfilu ? wierszProfilu.goal_direction : null,
         },
         raportRodzicaIstnieje: raportIstnieje,
+        obciazenieOkna: obciazenie.okno,
+        obciazenieOdniesienia: obciazenie.odniesienie,
       }),
     });
   }, [currentUser]);
@@ -452,6 +468,9 @@ export default function JaScreen() {
 
   const model = stan === null ? null : stan.model;
   const rozwoj = model === null ? null : model.rozwoj;
+  // ⛔ `null` znaczy „jeszcze nie wczytałem", a nie „nie policzone" — to są
+  // trzy różne rzeczy i ekran rysuje każdą innym zdaniem (R5).
+  const obciazenie = model === null ? null : model.obciazenie7;
   // ⛔ Dopóki nie ma modelu, podpisy są PUSTE — nie zerowe i nie zmyślone.
   const podpisy: string[] = model === null ? [] : model.pozycje.map((p) => p.podpis);
 
@@ -487,16 +506,38 @@ export default function JaScreen() {
                       : ROZWOJ_NIE_POLICZONE(rozwoj.powod)}
               </Text>
             </View>
-            {/* ⛔ OBCIĄŻENIE: JEDEN OSIĄGALNY WARIANT — nazwana pustka.
-                Powód stoi w `lib/ekranProfilu.ts`: jedyna funkcja, która dziś
-                wygląda na miarę obciążenia, sumuje wartość DOROBKU (z trafnością
-                w środku), więc trafniejsza praca „obciążałaby" bardziej. */}
+            {/* ⭐⭐ OBCIĄŻENIE — od pasa D1 (18.08.2026) PRAWDZIWA LICZBA.
+                ⛔ Wzór `minuty × ciężkość ⁄ przelicznik`, BEZ trafności:
+                ta sama praca celująca w wąskie gardło obciąża ciało dokładnie
+                tyle samo. ⛔ ANI OCENY, ANI PROGU, ANI BARWY ZALEŻNEJ OD
+                WARTOŚCI — obciążenie jest faktem o zawodniku, nie werdyktem.
+                Dlatego liczba idzie tym SAMYM stylem, co rozwój, i nie ma
+                obok siebie ani jednego przymiotnika. */}
             <View style={styles.miara}>
               <Text style={styles.miaraNazwa}>{NAZWA_OBCIAZENIA}</Text>
-              <Text style={styles.miaraLiczba}>{OBCIAZENIE_ZAMIAST_LICZBY}</Text>
-              <Text style={styles.miaraPodpis}>{OBCIAZENIE_NIE_POLICZONE_ZDANIE}</Text>
+              <Text style={styles.miaraLiczba}>
+                {obciazenie !== null && obciazenie.rodzaj === 'policzone'
+                  ? obciazenie.liczba
+                  : OBCIAZENIE_ZAMIAST_LICZBY}
+              </Text>
+              <Text style={styles.miaraPodpis}>
+                {obciazenie === null
+                  ? (pustkaOdczytu === null ? '' : pustkaOdczytu.tekst)
+                  : obciazenie.rodzaj === 'policzone'
+                    ? obciazenie.podpis
+                    : obciazenie.rodzaj === 'nic_nie_wazy'
+                      ? obciazenie.powod
+                      : OBCIAZENIE_NIE_POLICZONE_ZDANIE(obciazenie.powod)}
+              </Text>
             </View>
           </View>
+          {/* ⭐ OKNO ODNIESIENIA — GOŁY FAKT, wewnątrz TEGO SAMEGO panelu.
+              ⛔ Ani jednego dp poza panelem i ani jednej nowej pozycji ekranu:
+              „Profil" ma pięć pozycji i ma je zachować. ⛔ Zdanie nie mówi
+              „cięższy" ani „lżejszy" — mówi, ile było, i nic poza tym (Z0). */}
+          {obciazenie !== null && obciazenie.rodzaj === 'policzone' && obciazenie.odniesienie !== null
+            ? <Text style={styles.miaraOdniesienie}>{obciazenie.odniesienie}</Text>
+            : null}
         </View>
 
         {/* ── ⭐ ZDANIE O PRACY DODATKOWEJ — klikalne ────────────────
@@ -616,6 +657,13 @@ const styles = StyleSheet.create({
   },
   miaraLiczba: { ...typography.display, fontSize: 44, lineHeight: 46, color: colors.onInk, marginTop: 2 },
   miaraPodpis: { ...typography.body, fontSize: 10.5, color: colors.onInkMuted, marginTop: 3, lineHeight: 14 },
+  // ⭐ PLAN-D-D1 — OKNO ODNIESIENIA. ⛔ Ten sam kolor i ta sama waga co podpis
+  // miary: gdyby zdanie o odniesieniu było wyróżnione, byłoby werdyktem
+  // o zawodniku, a jest faktem. ⛔ Zero barwy zależnej od wartości.
+  miaraOdniesienie: {
+    ...typography.body, fontSize: 10.5, color: colors.onInkMuted,
+    marginTop: 9, paddingTop: 7, borderTopWidth: 1, borderTopColor: colors.onInkLine, lineHeight: 14,
+  },
 
   pracaDodatkowa: {
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,

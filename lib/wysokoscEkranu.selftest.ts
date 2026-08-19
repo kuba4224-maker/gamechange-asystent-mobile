@@ -309,11 +309,19 @@ const ZAPADKI_POZOSTALE = [
   // JEDNYM ZDANIEM: panel dwóch miar dostał liczby w rozmiarze z makiety
   // (40 → 44 px, `.two .v`) i ciaśniejszy oddech (14 → 13 dp), a tytuł ekranu
   // dostał wysokość linii, żeby przestał gubić ogonki — razem −4 dp.
-  { ekran: 'ja', pozycji: 6, widocznych: 6, przecietych: 0, wysokoscDp: 598,
+  // ⭐ PRZESTAWIONA 18.08.2026 (PAS D1): 598 → 629 dp, ⛔ LICZBA POZYCJI BEZ ZMIANY.
+  // JEDNYM ZDANIEM: obciążenie przestało być nazwaną pustką i dostało liczbę,
+  // a pod dwiema miarami stanęło JEDNO zdanie o oknie odniesienia (28 dni).
+  // ⛔ Zdanie weszło DO WNĘTRZA istniejącego panelu, a nie jako szósta pozycja
+  // ekranu — dlatego `pozycji` i `widocznych` zostają na szóstce, a „Profil"
+  // ma nadal PIĘĆ pozycji za dotknięciem. Zapas do zgięcia: 808 − 629 = 179 dp.
+  { ekran: 'ja', pozycji: 6, widocznych: 6, przecietych: 0, wysokoscDp: 629,
     ustawiona: '18.08.2026',
-    powod: 'pas W1 — panel dwóch miar wg makiety v3 („.two .v" = 44 px, obie liczby równe), '
-      + 'tekst na ciemnym panelu z własnych tokenów onInk/onInkMuted, tytuł z wysokością '
-      + 'linii; 602 → 598 dp, zero rzeczy pod zgięciem i zero przeciętych' },
+    powod: 'pas D1 — druga miara („Obciążenie · 7 dni") dostała PRAWDZIWĄ LICZBĘ '
+      + 'z wzoru minuty × ciężkość ⁄ 180, a pod panelem dwóch miar stanęło jedno '
+      + 'zdanie o oknie odniesienia 28 dni, jako goły fakt bez procentu i bez '
+      + 'przymiotnika; 598 → 629 dp (+31), zero rzeczy pod zgięciem, zero przeciętych, '
+      + 'liczba pozycji ekranu BEZ ZMIANY' },
   { ekran: 'dziennik', pozycji: 21, widocznych: 14, przecietych: 1, wysokoscDp: 3712,
     ustawiona: '17.08.2026',
     powod: 'pas M2 — historia wpisów rysuje do 20 wierszy (`.limit(20)` w tym ekranie), '

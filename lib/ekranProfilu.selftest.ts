@@ -22,7 +22,12 @@ import {
   NAZWA_FILTRU_PROGOW,
   NAZWA_OBCIAZENIA,
   NAZWA_ROZWOJU,
+  OBCIAZENIE_BEZ_LICZBY,
+  OBCIAZENIE_NIC_NIE_WAZY,
   OBCIAZENIE_NIE_POLICZONE_POWOD,
+  OBCIAZENIE_NIE_POLICZONE_ZDANIE,
+  OBCIAZENIE_ODNIESIENIE,
+  OBCIAZENIE_PODPIS,
   OBCIAZENIE_ZAMIAST_LICZBY,
   POWOD_FILTRU_PROGOW,
   PRACA_DODATKOWA_BRAK,
@@ -39,7 +44,9 @@ import {
   progiNaEkranie,
   rozwojZNagrody,
   trafnoscZawodnika,
+  policzObciazenieZOdczytow,
   wejscieNagrodyZOdczytow,
+  wejscieObciazeniaZOdczytow,
   wybierzPozycje,
   zbudujModelProfilu,
   zdanieOPracyDodatkowej,
@@ -52,10 +59,20 @@ import {
 import {
   PROGI,
   policzNagrode,
+  wagaSesji,
   type JednostkaPracy,
   type NagrodaZaPrace,
   type WejscieNagrody,
 } from './nagrodaZaPrace';
+import {
+  OKNO_OBCIAZENIA_DNI,
+  OKNO_ODNIESIENIA_DNI,
+  opisObciazeniaDoLogu,
+  policzObciazenieWOknie,
+  type ObciazenieWOknie,
+} from './obciazenieOstatnichDni';
+import { PRZELICZNIK_OBCIAZENIA, obciazenieSesji } from './obciazenie';
+// ⛔ Zdanie do konsoli, nie brzmienie — używane WYŁĄCZNIE w komunikatach asercji.
 import { zmierzEkran } from './wysokoscEkranu';
 import { rozpoznajPustke, zyweZrodlo } from './trzyPustki';
 
@@ -110,6 +127,42 @@ const WYNIKI_PRAWDZIWE = {
 };
 const POZYCJA_PRAWDZIWA = 'Boczny obrońca';
 
+/** ⭐ Dzisiaj podane z zewnątrz — ten strażnik nie ma zegara, tak jak moduł. */
+const DZIS_D1 = '2026-08-18';
+
+/**
+ * ⭐ ODCZYTY, NA KTÓRYCH DA SIĘ ZOBACZYĆ OBIE MIARY NARAZ. Jedna sesja
+ * z DWIEMA liczbami (30 minut, ciężkość 6) i przypisanym segmentem — czyli
+ * dokładnie ten kształt, który na produkcji daje 1,000 punktu obciążenia.
+ */
+function odczytyZSesja(dzien = '2026-08-17'): OdczytyDoRozwoju {
+  return {
+    wydarzenia: {
+      rodzaj: 'jest',
+      wiersze: [{
+        id: 34, scheduled_date: dzien, status: 'completed', recurrence_rule: null,
+        focus_block_id: 'blok-1', event_type: 'own_training', source: 'player', planned_minutes: 30,
+      }],
+    },
+    dziennik: {
+      rodzaj: 'jest',
+      wiersze: [{
+        id: 16, entry_type: 'post_training', created_at: `${dzien}T19:00:00Z`,
+        payload: { duration_minutes: 30, rpe: 6 }, calendar_event_id: 34,
+      }],
+    },
+    odpowiedziKontrolne: { rodzaj: 'jest', wiersze: [] },
+    mecze: { rodzaj: 'jest', wiersze: [] },
+    cele: { rodzaj: 'jest', wiersze: [{ segment_id: 'moc' }] },
+    zwrot: null,
+  };
+}
+
+function okna(o: OdczytyDoRozwoju): { okno: ObciazenieWOknie; odniesienie: ObciazenieWOknie } {
+  return policzObciazenieZOdczytow(o, { dzis: DZIS_D1 });
+}
+const OKNA_MODELU = okna(odczytyZSesja());
+
 function model(nadpisz: Partial<WejscieModelu> = {}): WejscieModelu {
   const t = trafnoscZawodnika({
     wyniki: WYNIKI_PRAWDZIWE, pozycjaZDiagnozy: POZYCJA_PRAWDZIWA,
@@ -126,6 +179,8 @@ function model(nadpisz: Partial<WejscieModelu> = {}): WejscieModelu {
     liczby: LICZBY_PUSTE,
     daneICel: dane,
     raportRodzicaIstnieje: false,
+    obciazenieOkna: OKNA_MODELU.okno,
+    obciazenieOdniesienia: OKNA_MODELU.odniesienie,
     ...nadpisz,
   };
 }
@@ -158,15 +213,34 @@ console.log('\n══ A. ROZWÓJ NIGDY NIE MALEJE ══════════
     `${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
 }
 
-check('⭐⛔ (A2) `lib/ekranProfilu.ts` nie zna ani `oknoDni`, ani `dzis`, ani modułu okna',
-  !/oknoDni/.test(modulZywy) && !/\bdzis\b/.test(modulZywy)
-  && !/obciazenieOstatnichDni/.test(modulZywy)
-  && !/from\s+'\.\/obciazenieOstatnichDni'/.test(zrodloModulu),
-  'okno weszło do modułu ekranu 2');
+// ⭐ PRZECELOWANE 18.08.2026 (pas D1). DO 18.08 TA ASERCJA ZABRANIAŁA
+// MODUŁOWI EKRANU 2 ZNAĆ OKNO W OGÓLE — i to była właściwa ochrona na czas,
+// kiedy jedyna funkcja o nazwie „obciążenie" sumowała wartość DOROBKU.
+// ⛔ Od pasa D1 okno jest podpięte, więc zakaz importu przestałby cokolwiek
+// chronić. W jego miejsce stoi zakaz WĘŻSZY I MOCNIEJSZY: moduł ekranu wolno
+// mu okno WOŁAĆ, ⛔ nie wolno mu okna ANI ZEGARA MIEĆ U SIEBIE.
+check('⭐⛔ (A2) moduł ekranu 2 NIE MA ZEGARA — dzisiejszą datę podaje ekran',
+  !/new Date\(/.test(modulZywy) && !/Date\.now\(/.test(modulZywy),
+  'moduł sięgnął po zegar — od tej chwili ta sama liczba znaczy co innego o północy');
 
-check('⛔ (A2b) ekran „Profil" nie importuje `policzObciazenieWOknie` ani `zdanieObciazenia`',
-  !/policzObciazenieWOknie|zdanieObciazenia|obciazenieOstatnichDni/.test(zrodloEkranu),
-  'ekran sięgnął po miarę, która sumuje wartość dorobku');
+check('⭐⛔ (A2b) moduł ekranu 2 NIE PRZEPISAŁ SOBIE wzoru obciążenia',
+  !/\/\s*180\b/.test(modulZywy) && !/\b180\b/.test(modulZywy)
+  && !/minuty\s*\*/.test(modulZywy)
+  && /PRZELICZNIK_OBCIAZENIA/.test(readFileSync('lib/obciazenie.ts', 'utf8')),
+  'przelicznik ma drugą kopię — pierwsza poprawka rozjedzie oba miejsca');
+
+{
+  // ⭐⭐ (A2c) NAJWAŻNIEJSZA ASERCJA STRUKTURALNA PASA D1.
+  // Obciążenie nie może zależeć od trafności, a trafność mieszka wyłącznie
+  // w `lib/zwrotObszaru.ts` i wchodzi do pracy przez `lib/nagrodaZaPrace.ts`.
+  // ⛔ Jeżeli którykolwiek z dwóch plików obciążenia zaimportuje choć jedną
+  // nazwę z któregokolwiek z nich, droga istnieje — reszta jest kwestią czasu.
+  const pliki = ['lib/obciazenie.ts', 'lib/obciazenieOstatnichDni.ts'];
+  const zle = pliki.filter((f) => /from\s+'\.\/(nagrodaZaPrace|zwrotObszaru)'/.test(readFileSync(f, 'utf8')));
+  check('⭐⭐⛔ (A2c) ŻADEN z dwóch plików obciążenia nie importuje trafności ani dorobku',
+    zle.length === 0,
+    `importują: ${zle.join(', ')} — trafność ma drogę do obciążenia`);
+}
 
 {
   // A3 — „nie policzone" NIE MA pola `punkty` i nie da się go narysować zerem.
@@ -209,14 +283,86 @@ check('⛔ (A2b) ekran „Profil" nie importuje `policzObciazenieWOknie` ani `zd
 console.log('\n══ B. PRZY OBCIĄŻENIU ŻADNEJ OCENY ═════════════════════════════');
 
 {
-  const zakazane = ['lekko', 'średnio', 'ciężko', 'próg', 'ostrzeż', 'alarm', 'czerw', 'za dużo', 'za mało', 'powinieneś'];
-  // ⛔ Sprawdzamy WYŁĄCZNIE stałe obciążenia, bo „próg" jest w tym pliku
-  // poprawnym słowem o odznakach — a przy obciążeniu nie ma prawa paść.
-  const galazObciazenia = [OBCIAZENIE_NIE_POLICZONE_POWOD, OBCIAZENIE_ZAMIAST_LICZBY,
-    ...Object.values(PRACA_DODATKOWA_BRAK)].join(' ').toLowerCase();
-  const trafione = zakazane.filter((z) => galazObciazenia.includes(z));
-  check('⛔ (B1) w brzmieniach obciążenia nie ma ani jednego przymiotnika oceny',
+  // ⭐ WZMOCNIONE 18.08.2026 (pas D1) NA DWA SPOSOBY.
+  //
+  // 1. GAŁĄŹ JEST PEŁNA. Do 18.08 stały w niej DWIE stałe, bo tyle ich było.
+  //    Od dziś obciążenie ma na ekranie liczbę, podpis, okno odniesienia
+  //    i dwa zdania o pustce — i każde z nich musi przejść tę samą listę.
+  // 2. ⚠️ WZORCE MAJĄ GRANICE SŁOWA, A NIE SĄ PODCIĄGIEM. Wersja z 18.08 rano
+  //    pytała `includes('ciężko')` — a słowo `ciężkość` zawiera `ciężkoś`.
+  //    Strażnik zapaliłby się na NAZWIE DRUGIEJ SKŁADOWEJ WZORU, czyli na
+  //    rzeczy, bez której obciążenia nie da się w ogóle opisać, i jedynym
+  //    sposobem na zieleń byłoby przemianowanie ciężkości. `\bciężko\b`
+  //    łapie przymiotnik dnia i przepuszcza rzeczownik pomiaru.
+  // ⚠️ ⛔ `\b` W JAVASCRIPCIE JEST ASCII I NIE ZNA POLSKICH LITER — zmierzone
+  // 18.08.2026 na tej właśnie asercji: `/\bciężko\b/` ZAPALAŁO SIĘ na słowie
+  // „ciężkość", bo `ś` nie jest dla `\b` literą, więc po `ciężko` wypadała
+  // granica słowa. Dlatego granice budujemy sami, z polskim alfabetem w środku.
+  const LITERA = 'A-Za-z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ';
+  const slowo = (rdzen: string, koncowki = ''): RegExp =>
+    new RegExp(`(?<![${LITERA}])${rdzen}${koncowki}(?![${LITERA}])`, 'i');
+  const zakazane: [string, RegExp][] = [
+    ['lekko', slowo('lekko')], ['średnio', slowo('średnio')], ['ciężko', slowo('ciężko')],
+    ['bardzo ciężko', /bardzo\s+ciężko/i], ['próg', slowo('pr[oó]g', '(u|i|iem|[oó]w|owa|owy)?')],
+    ['ostrzeżenie', /ostrzeż/i], ['alarm', /\balarm/i], ['czerwień', /\bczerw/i],
+    ['za dużo', /za\s+dużo/i], ['za mało', /za\s+mało/i], ['powinieneś', /\bpowin(ien|na|no|ieneś)/i],
+    ['dobrze', slowo('dobrze')], ['słabo', /\bsłab/i], ['ranking', /\branking/i],
+    ['inni zawodnicy', /innych\s+zawodnik/i],
+  ];
+  const galazObciazenia = [
+    NAZWA_OBCIAZENIA, OBCIAZENIE_NIE_POLICZONE_POWOD, OBCIAZENIE_ZAMIAST_LICZBY,
+    OBCIAZENIE_PODPIS, OBCIAZENIE_NIC_NIE_WAZY, OBCIAZENIE_BEZ_LICZBY(2),
+    OBCIAZENIE_ODNIESIENIE('3,5'), OBCIAZENIE_NIE_POLICZONE_ZDANIE('sieć padła'),
+    ...Object.values(PRACA_DODATKOWA_BRAK),
+  ].join(' \n ');
+  const trafione = zakazane.filter(([, r]) => r.test(galazObciazenia)).map(([n]) => n);
+  check(`⛔ (B1) w ${8 + Object.keys(PRACA_DODATKOWA_BRAK).length} brzmieniach obciążenia nie ma ani jednego z ${zakazane.length} przymiotników werdyktu`,
     trafione.length === 0, trafione.join(', '));
+  // ⭐ Strażnik strażnika: lista naprawdę łapie, a nie jest ozdobą.
+  check('⭐ (B1b) (strażnik strażnika) ta sama lista ZAPALA się na próbce z werdyktem',
+    zakazane.some(([, r]) => r.test('ten tydzień był bardzo ciężko i za dużo')),
+    'lista przymiotników nie łapie nawet jawnej próbki');
+  // ⭐ …i PRZEPUSZCZA rzeczownik pomiaru — inaczej byłaby nie do spełnienia.
+  check('⭐ (B1c) …i PRZEPUSZCZA słowo „ciężkość", bez którego nie ma wzoru',
+    !zakazane.some(([, r]) => r.test('minuty razy ciężkość przez przelicznik')),
+    'strażnik zabrania nazwać drugą składową wzoru');
+
+  // ⭐⭐ (B1d) ZNALEZISKO WŁASNEJ BATERII MUTACJI, 18.08.2026.
+  // ⛔ Asercja wyżej czyta STAŁE. Mutacja „przy obciążeniu pojawia się ocena"
+  // dopisała przymiotnik NIE DO STAŁEJ, tylko do miejsca jej użycia
+  // (`podpis: \`${OBCIAZENIE_PODPIS} — to bardzo ciężko\``) — i NIE ZAPALIŁA
+  // ANI JEDNEJ ASERCJI W CAŁYM REPOZYTORIUM. To jest dokładnie ta choroba,
+  // przed którą ostrzega pas S1: strażnik pyta o stałą zamiast o to, co
+  // naprawdę wychodzi na ekran.
+  // ⭐ Od dziś pytamy o WYNIK: budujemy model w czterech stanach i przeglądamy
+  // KAŻDY napis, który z gałęzi obciążenia wychodzi do zawodnika.
+  const stanyObciazenia: readonly ObciazenieWOknie[] = [
+    OKNA_MODELU.okno,
+    policzObciazenieWOknie({ sesje: { rodzaj: 'jest', sesje: [] }, mecze: { rodzaj: 'jest', sesje: [] } },
+      { dzis: DZIS_D1, oknoDni: OKNO_OBCIAZENIA_DNI }),
+    policzObciazenieWOknie({
+      sesje: {
+        rodzaj: 'jest',
+        sesje: [{
+          klucz: 'x', rodzaj: 'sesja', kiedy: { rodzaj: 'dzien_pracy', dzien: DZIS_D1 },
+          pomiar: { minuty: 90, ciezkosc: null },
+        }],
+      },
+      mecze: { rodzaj: 'jest', sesje: [] },
+    }, { dzis: DZIS_D1, oknoDni: OKNO_OBCIAZENIA_DNI }),
+    { rodzaj: 'nie_policzone', powod: 'nie odczytałem meczów', nieodczytane: ['mecze'] },
+  ];
+  const napisyZWyniku: string[] = [];
+  for (const st of stanyObciazenia) {
+    const m = zbudujModelProfilu(model({ obciazenieOkna: st, obciazenieOdniesienia: st })).obciazenie7;
+    for (const v of Object.values(m)) if (typeof v === 'string') napisyZWyniku.push(v);
+  }
+  const trafioneWWyniku = zakazane
+    .filter(([, r]) => napisyZWyniku.some((n) => r.test(n)))
+    .map(([n]) => n);
+  check(`⭐⭐⛔ (B1d) …i ŻADEN z ${napisyZWyniku.length} napisów, które gałąź obciążenia NAPRAWDĘ oddaje, nie niesie werdyktu`,
+    trafioneWWyniku.length === 0,
+    `${trafioneWWyniku.join(', ')} — w: ${napisyZWyniku.filter((n) => zakazane.some(([, r]) => r.test(n))).join(' | ')}`);
 }
 
 {
@@ -231,51 +377,128 @@ console.log('\n══ B. PRZY OBCIĄŻENIU ŻADNEJ OCENY ═══════�
 }
 
 {
-  // B3 — JEDEN OSIĄGALNY WARIANT.
-  const o = obciazenieNaEkranie();
-  check('⭐⭐ (B3) `obciazenieNaEkranie()` oddaje wyłącznie `nie_policzone`',
-    o.rodzaj === 'nie_policzone', JSON.stringify(o));
-  // ⛔ CAŁA deklaracja, do końca wiersza — nie „do pierwszego średnika".
-  // Pierwszy średnik siedzi WEWNĄTRZ `{ rodzaj: 'nie_policzone'; powod: string }`,
-  // więc krótszy wzorzec przepuszczał dołożenie drugiego wariantu (zmierzone
-  // baterią mutacji tego pasa: M1 nie zapaliła).
-  const warianty = (zrodloModulu.match(/export type ObciazenieNaEkranie =([^\n]*)/)?.[1] ?? '');
-  const ileWariantow = (warianty.match(/rodzaj: '/g) ?? []).length;
-  check('⭐⭐ (B3b) typ `ObciazenieNaEkranie` ma DOKŁADNIE JEDEN wariant',
-    ileWariantow === 1 && warianty.includes("rodzaj: 'nie_policzone'") && !warianty.includes('|'),
-    `deklaracja: ${warianty}`);
-  check('⭐⭐ (B3c) `obciazenieNaEkranie` nie przyjmuje ANI JEDNEGO argumentu',
-    /export function obciazenieNaEkranie\(\)/.test(zrodloModulu),
-    'funkcja dostała czym liczyć — a nie ma czym');
-  // ⛔ WZMOCNIONA 18.08.2026 (pas S1) — ZNALEZISKO Z BATERII MUTACJI.
+  // ⭐⭐⛔ B3 — ZAPADKA A3 PRZECELOWANA, NIE SKASOWANA (pas D1, 18.08.2026).
   //
-  // Do 18.08 ta asercja pytała, czy `OBCIAZENIE_ZAMIAST_LICZBY` pada GDZIEKOLWIEK
-  // w pliku ekranu. ⛔ To za mało i zmierzyłem to mutacją: ta sama stała stoi
-  // TAKŻE w kaflu ROZWOJU (jako jego zapasowy znak), więc podmiana liczby
-  // obciążenia na twarde `0` zostawiała wystąpienie w pliku i strażnik
-  // ŚWIECIŁ NA ZIELONO przy zerze narysowanym zawodnikowi jako pomiar.
-  // Mutacja „obciążenie dostaje liczbę zamiast «nie policzone»" nie zapaliła
-  // ani jednej asercji w całym repozytorium — czyli tej reguły nikt nie pilnował.
-  //
-  // Od dziś pytamy o KAFEL OBCIĄŻENIA, wycięty od jego nazwy do końca bloku:
-  // liczba w NIM ma być tą stałą i niczym innym.
-  const kafelObciazenia = (() => {
-    const od = ekranZywy.indexOf('{NAZWA_OBCIAZENIA}');
-    if (od < 0) return null;
-    const koniec = ekranZywy.indexOf('</View>', od);
-    return koniec < 0 ? null : ekranZywy.slice(od, koniec);
+  // CO PILNOWAŁA DO 18.08: że `ObciazenieNaEkranie` ma DOKŁADNIE JEDEN
+  // osiągalny wariant `nie_policzone`. ⭐ To była właściwa ochrona na czas,
+  // w którym jedyna funkcja o nazwie „obciążenie" sumowała wartość DOROBKU.
+  // CO PILNUJE OD DZIŚ: że obciążenie NIE ZALEŻY OD TRAFNOŚCI — i pilnuje
+  // tego URUCHOMIENIEM, a nie czytaniem tekstu.
+  const o = obciazenieNaEkranie(OKNA_MODELU.okno, OKNA_MODELU.odniesienie);
+  check('⭐ (B3) `obciazenieNaEkranie` oddaje na prawdziwym kształcie danych LICZBĘ',
+    o.rodzaj === 'policzone', JSON.stringify(o));
+  check('⭐ (B3a) `obciazenieNaEkranie` przyjmuje DWA okna — samo niczego nie liczy',
+    /export function obciazenieNaEkranie\(\s*\n\s*okno: ObciazenieWOknie,\s*\n\s*odniesienie: ObciazenieWOknie,/.test(zrodloModulu),
+    'funkcja dostała czym liczyć sama — arytmetyka wróciła do modułu ekranu');
+
+  // ⚠️ WYCINAMY DO PUSTEJ LINII, a nie „do pierwszego średnika": średniki
+  // siedzą WEWNĄTRZ pól wariantu, więc krótszy wzorzec czytał jeden wariant
+  // i przepuszczał dołożenie następnych (zmierzone na tej asercji 18.08).
+  const warianty = (() => {
+    const odT = zrodloModulu.indexOf('export type ObciazenieNaEkranie =');
+    if (odT < 0) return '';
+    const koniec = zrodloModulu.indexOf('\n\n', odT);
+    return zrodloModulu.slice(odT, koniec < 0 ? zrodloModulu.length : koniec);
   })();
-  check('⛔ (B3d) na ekranie w miejscu liczby obciążenia stoi znak, nie zero',
+  const ileWariantow = (warianty.match(/rodzaj: '/g) ?? []).length;
+  check('⭐ (B3b) typ `ObciazenieNaEkranie` ma DOKŁADNIE TRZY warianty — nie dwa i nie cztery',
+    ileWariantow === 3
+    && warianty.includes("rodzaj: 'policzone'")
+    && warianty.includes("rodzaj: 'nic_nie_wazy'")
+    && warianty.includes("rodzaj: 'nie_policzone'"),
+    `wariantów: ${ileWariantow} — ${warianty.replace(/\s+/g, ' ').slice(0, 200)}`);
+
+  // ⭐⭐⭐ (B3c) MUTACJA OBOWIĄZKOWA NR 1 PASA D1, ZAPISANA JAKO ASERCJA.
+  // TE SAME WIERSZE, DWA RAZY. Raz bez zwrotu obszarów (trafność 1,0 wszędzie),
+  // raz ze zwrotem (praca własna w obszarze trafnym dostaje 1,5).
+  // ⛔ ROZWÓJ MA SIĘ RÓŻNIĆ — inaczej przełącznik nic nie robi i cała asercja
+  //    świeciłaby na zielono, nic nie mierząc.
+  // ⛔ OBCIĄŻENIE MA BYĆ IDENTYCZNE CO DO LICZBY.
+  // (i) NA POJEDYNCZEJ SESJI — 30 minut, ciężkość 6, dwie trafności.
+  const FAKTY_SESJI = {
+    eventType: 'own_training', source: 'player', maSesjeTrenera: false,
+    minutyZmierzone: 30, minutyZPlanu: 30, rpeZmierzone: 6,
+  };
+  const rozwojBaza = wagaSesji({ ...FAKTY_SESJI, trafnosc: 1.0 });
+  const rozwojPremia = wagaSesji({ ...FAKTY_SESJI, trafnosc: 1.5 });
+  const obcSesji = obciazenieSesji({ minuty: 30, ciezkosc: 6 });
+  check('⭐⭐ (B3c) …przełącznik trafności NAPRAWDĘ zmienia ROZWÓJ (bez tego reszta nic nie mierzy)',
+    rozwojPremia.punkty > rozwojBaza.punkty,
+    `rozwój 1,0=${rozwojBaza.punkty} · 1,5=${rozwojPremia.punkty}`);
+  check('⭐⭐⭐ (B3c) …a OBCIĄŻENIE tej samej sesji jest JEDNO — funkcja nie ma parametru trafności',
+    obcSesji.rodzaj === 'zmierzone' && obcSesji.surowe === rozwojBaza.punkty
+    && /export function obciazenieSesji\(p: PomiarSesji\)/.test(readFileSync('lib/obciazenie.ts', 'utf8')),
+    `obciążenie=${JSON.stringify(obcSesji)} · rozwój przy trafności 1,0=${rozwojBaza.punkty}`);
+  check('⭐⭐⭐ (B3c) …i cała teza produktu DOMYKA SIĘ RACHUNKIEM: ROZWÓJ = OBCIĄŻENIE × TRAFNOŚĆ',
+    obcSesji.rodzaj === 'zmierzone'
+    && Math.abs(obcSesji.surowe * 1.5 - rozwojPremia.punkty) < 1e-9,
+    `${obcSesji.rodzaj === 'zmierzone' ? obcSesji.surowe : '—'} × 1,5 vs ${rozwojPremia.punkty}`);
+
+  // (ii) NA CAŁYM OKNIE — te same wiersze, dwa różne zwroty obszarów.
+  const t = trafnoscZawodnika({
+    wyniki: WYNIKI_PRAWDZIWE, pozycjaZDiagnozy: POZYCJA_PRAWDZIWA,
+    pozycjaZProfilu: null, rodzajePracy: 'silownia',
+  });
+  const bezTrafnosci: OdczytyDoRozwoju = { ...odczytyZSesja(), zwrot: null };
+  const zTrafnoscia: OdczytyDoRozwoju = { ...odczytyZSesja(), zwrot: t.zwrot };
+  const obcBez = okna(bezTrafnosci).okno;
+  const obcZ = okna(zTrafnoscia).okno;
+  check('⭐⭐⭐ (B3c) …a OBCIĄŻENIE W OKNIE przy tych samych wierszach jest IDENTYCZNE',
+    obcBez.rodzaj === 'policzone' && obcZ.rodzaj === 'policzone'
+    && obcBez.punkty === obcZ.punkty,
+    `${opisObciazeniaDoLogu(obcBez)} VS ${opisObciazeniaDoLogu(obcZ)}`);
+
+  // ⭐ (B3d) KOTWICA PRODUKCYJNA: 30 minut przy ciężkości 6 to DOKŁADNIE
+  // jeden punkt obciążenia — bo przelicznik jest z tego zdania zbudowany.
+  // ⛔ To jest ten sam wiersz, który 18.08.2026 stoi na koncie
+  // `gamechangemartaseweryn@gmail.com` (calendar_events.id = 34).
+  check('⭐⭐ (B3d) 30 minut × ciężkość 6 = DOKŁADNIE 1 punkt obciążenia',
+    obcBez.rodzaj === 'policzone' && obcBez.punkty === 1
+    && (30 * 6) / PRZELICZNIK_OBCIAZENIA === 1,
+    opisObciazeniaDoLogu(obcBez));
+
+  // ⭐ (B3e) PUSTKA NIE MA LICZBY. Zera nie ma z czego narysować.
+  const pusto = obciazenieNaEkranie(
+    policzObciazenieWOknie({ sesje: { rodzaj: 'jest', sesje: [] }, mecze: { rodzaj: 'jest', sesje: [] } },
+      { dzis: DZIS_D1, oknoDni: OKNO_OBCIAZENIA_DNI }),
+    policzObciazenieWOknie({ sesje: { rodzaj: 'jest', sesje: [] }, mecze: { rodzaj: 'jest', sesje: [] } },
+      { dzis: DZIS_D1, oknoDni: OKNO_ODNIESIENIA_DNI }),
+  );
+  check('⭐⛔ (B3e) „nic nie waży w oknie" NIE MA pola `liczba` — zera nie ma z czego narysować',
+    pusto.rodzaj === 'nic_nie_wazy' && !('liczba' in pusto), JSON.stringify(pusto));
+  check('⭐ (B3f) …i to jest INNY stan niż „nie policzone" — dwa różne zdania',
+    pusto.rodzaj === 'nic_nie_wazy'
+    && obciazenieNaEkranie(
+      { rodzaj: 'nie_policzone', powod: 'sieć padła', nieodczytane: ['mecze'] },
+      { rodzaj: 'nie_policzone', powod: 'sieć padła', nieodczytane: ['mecze'] },
+    ).rodzaj === 'nie_policzone'
+    && OBCIAZENIE_NIC_NIE_WAZY !== OBCIAZENIE_NIE_POLICZONE_ZDANIE('sieć padła'),
+    'pustka i awaria mówią tym samym zdaniem');
+
+  // ⛔ (B3g) NA EKRANIE LICZBA IDZIE Z MODELU, a nie z literału.
+  // ⚠️ ZNALEZISKO PASA S1, KTÓRE ZOSTAJE W MOCY: pytanie „czy stała pada
+  // GDZIEKOLWIEK w pliku" przepuszczało mutację, bo ta sama stała stoi też
+  // w kaflu rozwoju. Pytamy o KAFEL OBCIĄŻENIA, wycięty od jego nazwy.
+  const kafelObciazenia = (() => {
+    const odK = ekranZywy.indexOf('{NAZWA_OBCIAZENIA}');
+    if (odK < 0) return null;
+    const koniec = ekranZywy.indexOf('</View>', odK);
+    return koniec < 0 ? null : ekranZywy.slice(odK, koniec);
+  })();
+  check('⛔ (B3g) w kaflu obciążenia liczba pochodzi z modelu, a znak zastępczy z nazwanej stałej',
     OBCIAZENIE_ZAMIAST_LICZBY === '—'
     && kafelObciazenia !== null
-    && /<Text style=\{styles\.miaraLiczba\}>\{OBCIAZENIE_ZAMIAST_LICZBY\}<\/Text>/.test(kafelObciazenia),
+    && /obciazenie\.rodzaj === 'policzone'/.test(kafelObciazenia)
+    && /OBCIAZENIE_ZAMIAST_LICZBY/.test(kafelObciazenia)
+    && !/<Text style=\{styles\.miaraLiczba\}>\s*\{?\s*['"0-9]/.test(kafelObciazenia),
     kafelObciazenia === null
       ? 'nie znajduję kafla obciążenia na ekranie — ta asercja nie znaczy nic'
-      : `obciążenie dostało liczbę. Kafel: ${kafelObciazenia.replace(/\s+/g, ' ').slice(0, 160)}`);
+      : `kafel: ${kafelObciazenia.replace(/\s+/g, ' ').slice(0, 200)}`);
 }
 
-check('⛔ (B4) `zdanieObciazenia` nadal nie ma konsumenta w `app/` ani `components/`',
-  !/zdanieObciazenia/.test(zrodloEkranu), 'ta sama pomyłka weszła tylnymi drzwiami');
+check('⛔ (B4) ekran NIE RYSUJE zdania z konsoli — `opisObciazeniaDoLogu` nie jest brzmieniem',
+  !/opisObciazeniaDoLogu/.test(zrodloEkranu) && !/opisObciazeniaDoLogu/.test(zrodloArkuszy),
+  'zdanie diagnostyczne trafiło na ekran zawodnika');
 
 {
   // B5 — zero porównań (N3). Przypis „czego tu nie ma" jest jedynym wyjątkiem
@@ -474,7 +697,7 @@ console.log('\n══ F. IMPORTY URUCHOMIONE, NIE PRZECZYTANE ══════
   // każdy import ekranu jest URUCHOMIONY i musi coś oddać.
   const m = zbudujModelProfilu(model());
   check('⭐ (F1) `zbudujModelProfilu` rozwiązuje się i oddaje komplet pól',
-    m.rozwoj.rodzaj === 'jest' && m.obciazenie7.rodzaj === 'nie_policzone'
+    m.rozwoj.rodzaj === 'jest' && m.obciazenie7.rodzaj === 'policzone'
     && m.pracaDodatkowa.rodzaj === 'jest' && m.pozycje.length === 5 && m.przypis.length > 20,
     JSON.stringify({ r: m.rozwoj.rodzaj, o: m.obciazenie7.rodzaj, p: m.pracaDodatkowa.rodzaj }));
   const a = arkuszTrafnosci({ maDiagnoze: true, pozycja: m.pozycje.length ? { pozycja: POZYCJA_PRAWDZIWA, zrodlo: 'diagnoza' } : { pozycja: null, zrodlo: 'nie_znam' }, zwrot: model().zwrot, rodzajePracy: 'silownia,bieganie,stretching,technika' });
@@ -557,9 +780,25 @@ console.log('\n══ G. BATERIA MUTACJI ═════════════
   // ⛔ Każda mutacja łamie regułę TEGO pasa i musi zapalić strażnika IMIENNIE.
   type Mutacja = [string, () => boolean];
   const mutacje: Mutacja[] = [
-    ['M1 ⛔ obciążenie dostaje liczbę zamiast „nie policzone"', () => {
-      const zmutowane = { rodzaj: 'policzone', punkty: 13 } as unknown as ReturnType<typeof obciazenieNaEkranie>;
-      return zmutowane.rodzaj !== 'nie_policzone';
+    // ⭐⭐ PRZECELOWANA 18.08.2026 (pas D1). Do 18.08 brzmiała „obciążenie
+    // dostaje liczbę zamiast «nie policzone»" — od dziś liczba jest tym,
+    // co ma stać na ekranie, więc ta mutacja przestała cokolwiek psuć.
+    // ⛔ W jej miejsce stoi MUTACJA OBOWIĄZKOWA PASA D1: obciążenie zaczyna
+    // zależeć od trafności. Mutant sumuje `j.punkty` (wartość rozwoju) zamiast
+    // `minuty × ciężkość` — czyli DOKŁADNIE defekt sprzed 18.08.
+    ['M1 ⛔⛔ obciążenie zaczyna zależeć od trafności (defekt sprzed pasa D1)', () => {
+      const f = {
+        eventType: 'own_training', source: 'player', maSesjeTrenera: false,
+        minutyZmierzone: 30, minutyZPlanu: 30, rpeZmierzone: 6,
+      };
+      // Mutant: „obciążenie" = waga DOROBKU tej sesji, czyli z trafnością.
+      const mutantBaza = wagaSesji({ ...f, trafnosc: 1.0 }).punkty;
+      const mutantPremia = wagaSesji({ ...f, trafnosc: 1.5 }).punkty;
+      const prawdziwe = obciazenieSesji({ minuty: 30, ciezkosc: 6 });
+      // Zapala się, bo mutant daje DWIE różne liczby tam, gdzie prawdziwe
+      // obciążenie daje jedną — i to jest dokładnie defekt sprzed 18.08.
+      return mutantBaza !== mutantPremia
+        && prawdziwe.rodzaj === 'zmierzone' && prawdziwe.surowe === mutantBaza;
     }],
     ['M2 ⛔ rozwój przycięty oknem — może zmaleć', () => {
       const okno = (js: readonly JednostkaPracy[]) =>
@@ -603,7 +842,8 @@ console.log('\n══ G. BATERIA MUTACJI ═════════════
   check(`⭐⭐ (G) KAŻDA z ${mutacje.length} mutacji zapala strażnika imiennie`,
     nieZapalone === null, `nie zapaliła: ${nieZapalone}`);
   check('⭐ (G2) …a prawdziwe reguły są po baterii NIETKNIĘTE',
-    obciazenieNaEkranie().rodzaj === 'nie_policzone'
+    obciazenieNaEkranie(OKNA_MODELU.okno, OKNA_MODELU.odniesienie).rodzaj === 'policzone'
+    && okna({ ...odczytyZSesja(), zwrot: null }).okno.rodzaj === 'policzone'
     && rozwojZNagrody(policzNagrode(wejscie([]))).rodzaj === 'jeszcze_nic'
     && new Set(Object.values(PRACA_DODATKOWA_BRAK)).size === 4
     && wybierzPozycje({ zDiagnozy: 'Boczny obrońca', zProfilu: null }).zrodlo === 'diagnoza',

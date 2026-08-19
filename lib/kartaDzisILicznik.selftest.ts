@@ -788,19 +788,27 @@ function cialoEksportu(src: string, nazwa: string): string | null {
 // w całym repozytorium poza własnym selftestem. ⛔ To NIE JEST ciche wypadnięcie
 // — co ten moduł liczył i co trzeba zrobić, żeby wrócił, stoi w nocie
 // `claude/PRZEKAZANIE_PAS_L1_17_08_2026.md` (nagrobek, D7).
-const SILNIKI_BEZ_EKRANU: { klucz: string; kto: string; dlaczego: string }[] = [
-  {
-    klucz: 'lib/obciazenieOstatnichDni.ts :: policzObciazenieWOknie',
-    kto: 'Kuba — przebudowa architektury informacji, po niej podpięcie do ekranu (pas L1, 17.08.2026)',
-    dlaczego: 'Silnik obciążenia ostatnich dni powstał w pasie L1 na decyzję Kuby (wariant A: '
-      + 'obciążenie ostatnich 7 dni na pierwszym planie, dorobek całkowity niżej). ⛔ TEN SAM PAS '
-      + 'MIAŁ JAWNY ZAKAZ dotykania tego, gdzie cokolwiek stoi na ekranie — Kuba przebudowuje '
-      + 'właśnie architekturę informacji i każda zmiana układu poszłaby do kosza. Dlatego silnik '
-      + 'jest zbudowany, zmierzony na żywych danych i NIEPODPIĘTY: świadomie i z datą. '
-      + '⚠️ Pozycja wypada z tej listy w dniu, w którym ekran zacznie wołać '
-      + '`policzObciazenieWOknie` — strażnik sam o tym powie.',
-  },
-];
+// ⭐⭐ PLAN-D-D1 18.08.2026 — LISTA JEST PUSTA I TO JEST DOBRA WIADOMOŚĆ.
+//
+// ⛔ NAGROBEK, ŻEBY NIC NIE ZNIKNĘŁO PO CICHU (B3). Do 18.08 stała tu jedna
+// pozycja: `lib/obciazenieOstatnichDni.ts :: policzObciazenieWOknie`, zgłoszona
+// przez pas L1 (17.08.2026) z powodem: silnik obciążenia ostatnich dni powstał
+// na decyzję Kuby, ale ten sam pas miał JAWNY ZAKAZ dotykania ekranów, bo Kuba
+// przebudowywał wtedy architekturę informacji. Silnik był zbudowany, zmierzony
+// na żywych danych i NIEPODPIĘTY — świadomie i z datą.
+//
+// ⭐ POZYCJA WYPADŁA DOKŁADNIE TAK, JAK ZAPOWIADAŁ JEJ WŁASNY OPIS: „w dniu,
+// w którym ekran zacznie wołać `policzObciazenieWOknie`". Pas D1 podpiął go
+// do ekranu „Profil" przez `policzObciazenieZOdczytow` w `lib/ekranProfilu.ts`,
+// a druga miara („Obciążenie · 7 dni") przestała być nazwaną pustką i dostała
+// liczbę z wzoru `minuty × ciężkość ⁄ 180`.
+//
+// ⚠️ ZNALEZISKO PRZY OKAZJI, WARTE ZAPAMIĘTANIA: detektor niżej wycina ciało
+// funkcji od PIERWSZEGO `{` po nawiasach podpisu. Funkcja z typem wyniku
+// zapisanym w podpisie jako `{ … }` oddawała TYP zamiast CIAŁA — i wtedy
+// wywołania z jej wnętrza były dla detektora niewidoczne. Pas D1 nazwał ten
+// typ (`ObciazenieDwochOkien`), zamiast obchodzić detektor.
+const SILNIKI_BEZ_EKRANU: { klucz: string; kto: string; dlaczego: string }[] = [];
 
 const KLUCZE_SILNIKOW_BEZ_EKRANU = new Set(SILNIKI_BEZ_EKRANU.map((s) => s.klucz));
 

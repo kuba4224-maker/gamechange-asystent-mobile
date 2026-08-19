@@ -20,22 +20,30 @@
 //     poprawce i OBA miejsca wyglądałyby poprawnie.
 //
 // ═════════════════════════════════════════════════════════════════════
-// ⭐⛔ NAJWAŻNIEJSZE ZDANIE TEGO PLIKU — OBCIĄŻENIE NIE MA DZIŚ MIARY
+// ⭐⛔ NAJWAŻNIEJSZE ZDANIE TEGO PLIKU — SKĄD BIERZE SIĘ OBCIĄŻENIE
 // ═════════════════════════════════════════════════════════════════════
-// `policzObciazenieWOknie` (`lib/obciazenieOstatnichDni.ts`) WYGLĄDA jak
-// gotowa miara obciążenia i NIĄ NIE JEST. Sumuje `j.punkty`, a `j.punkty`
-// niesie w sobie TRAFNOŚĆ: ta sama sesja 30 min × RPE 5 waży 1,0 przy
-// trafności 1,0 i 1,5 przy 1,5. Podpięcie tego pod liczbę nazwaną
-// „OBCIĄŻENIE" powiedziałoby zawodnikowi, że TRAFNIEJSZA PRACA BARDZIEJ
-// OBCIĄŻA CIAŁO — czyli dokładną odwrotność tezy produktu
-// (ROZWÓJ = OBCIĄŻENIE × TRAFNOŚĆ, więc trafność podnosi rozwój, a nie
-// obciążenie).
+// ⚠️ CO BYŁO ZEPSUTE DO 18.08.2026 (pas A3 nazwał to, pas D1 naprawił):
+// `policzObciazenieWOknie` WYGLĄDAŁO na gotową miarę obciążenia i nią NIE
+// BYŁO. Sumowało `j.punkty`, a `j.punkty` niesie w sobie TRAFNOŚĆ: ta sama
+// sesja 30 min × RPE 5 ważyła 1,0 przy trafności 1,0 i 1,5 przy 1,5.
+// Podpięcie tego pod liczbę nazwaną „OBCIĄŻENIE" powiedziałoby zawodnikowi,
+// że TRAFNIEJSZA PRACA BARDZIEJ OBCIĄŻA CIAŁO — czyli odwrotność tezy
+// produktu (ROZWÓJ = OBCIĄŻENIE × TRAFNOŚĆ).
 //
-// ⛔ DO CZASU PASA D1 `OBCIĄŻENIE · 7 dni` MA DOKŁADNIE JEDEN OSIĄGALNY
-// WARIANT: `nie_policzone`. Nazwana pustka, nie liczba. Pilnują tego dwie
-// asercje strażnika: jedna liczy warianty typu, druga czyta ten plik jako
-// tekst i żąda, żeby nie było w nim ani jednego importu z
-// `obciazenieOstatnichDni`.
+// ⭐ OD PASA D1 (18.08.2026) obciążenie liczy `lib/obciazenie.ts` wzorem
+// `minuty × ciężkość ⁄ przelicznik`, a okno kroczące — `lib/obciazenieOstatnichDni.ts`.
+// ⛔ ŻADEN Z TYCH DWÓCH PLIKÓW NIE IMPORTUJE ANI JEDNEJ NAZWY
+// z `lib/nagrodaZaPrace.ts` ani z `lib/zwrotObszaru.ts`. Trafność nie ma
+// tam drogi — to jest brak połączenia, a nie dyscyplina do zapamiętania.
+//
+// ⛔ ZAPADKA PRZECELOWANA, NIE SKASOWANA. Pas A3 pilnował, że `obciazenie7`
+// ma jeden osiągalny wariant `nie_policzone`. Od pasa D1 w jej miejsce stoi
+// asercja mocniejsza i URUCHAMIANA: te same odczyty, raz ze zwrotem obszarów
+// i raz bez niego, muszą dać RÓŻNY rozwój i IDENTYCZNE obciążenie.
+//
+// ⛔ TEN PLIK MA JEDNO POLE, KTÓREGO WCZEŚNIEJ NIE MIAŁ: `dzis`. Okno
+// kroczące bez dzisiejszej daty nie istnieje. ⛔ Zegara tu nadal nie ma —
+// datę podaje ekran, tak samo jak wszędzie indziej w tym repozytorium.
 
 import {
   PROGI,
@@ -55,6 +63,19 @@ import {
   zrodloSesji,
   zrodloNieczytane,
 } from './nagrodaZaPrace';
+import {
+  dzienZeZnacznika,
+  liczbaObciazeniaNaEkran,
+  type SesjaObciazenia,
+} from './obciazenie';
+import {
+  OKNO_OBCIAZENIA_DNI,
+  OKNO_ODNIESIENIA_DNI,
+  policzObciazenieWOknie,
+  zrodloObciazeniaNieczytane,
+  type ObciazenieWOknie,
+  type WejscieObciazenia,
+} from './obciazenieOstatnichDni';
 import { WERDYKTY_NIEPODANE } from './wykonanieSesji';
 import {
   MAPA_PRACY_WLASNEJ,
@@ -127,10 +148,29 @@ export type RozwojNaEkranie =
   | { rodzaj: 'nie_policzone'; powod: string };
 
 /**
- * ⭐ OBCIĄŻENIE · 7 DNI. ⛔ JEDEN OSIĄGALNY WARIANT DO CZASU D1.
- * Dołożenie tu wariantu `policzone` zapala strażnika imiennie.
+ * ⭐ OBCIĄŻENIE · OKNO KROCZĄCE. TRZY WARTOŚCI, I TRZECIA NIE JEST OZDOBĄ (R5).
+ *
+ *   `policzone`    — jest liczba i jest z czego ją policzyć;
+ *   `nic_nie_wazy` — odczyt się udał i w oknie nic nie waży. ⛔ To NIE JEST awaria
+ *                    i ⛔ NIE MA POLA `liczba` — zera nie ma z czego narysować;
+ *   `nie_policzone`— któregoś źródła nie odczytałem.
+ *
+ * ⛔ Ani w jednym wariancie nie ma miejsca na przymiotnik, próg ani barwę.
+ * Obciążenie jest faktem o zawodniku, nie werdyktem o nim.
  */
-export type ObciazenieNaEkranie = { rodzaj: 'nie_policzone'; powod: string };
+export type ObciazenieNaEkranie =
+  | {
+    rodzaj: 'policzone';
+    /** ⭐ Gotowy napis, zaokrąglony RAZ. ⛔ Ekran nie zaokrągla po raz drugi. */
+    liczba: string;
+    podpis: string;
+    /** ⭐ Okno odniesienia jako FAKT. `null` = nie ma czym go podać. */
+    odniesienie: string | null;
+    /** ⛔ Sesje w oknie bez minut albo bez ciężkości — nazwane, nie doliczone. */
+    bezLiczby: number;
+  }
+  | { rodzaj: 'nic_nie_wazy'; powod: string }
+  | { rodzaj: 'nie_policzone'; powod: string };
 
 /** Dlaczego zdania o pracy dodatkowej nie ma. ⛔ Cztery różne braki, cztery zdania. */
 export type PowodBrakuPracyDodatkowej =
@@ -164,7 +204,12 @@ export const TYTUL_EKRANU = 'TWÓJ PROFIL';
 
 /** ⛔ Dwa rzeczowniki, dwa różne słowa. Nigdy sklejone w jedno (N1, O92). */
 export const NAZWA_ROZWOJU = 'Rozwój';
-export const NAZWA_OBCIAZENIA = 'Obciążenie · 7 dni';
+/**
+ * ⛔ DŁUGOŚĆ OKNA WCHODZI TU ZE STAŁEJ, a nie z palca. Do 18.08 stała tu
+ * siódemka wpisana ręcznie — czyli druga kopia liczby, która przy pierwszej
+ * poprawce rozjechałaby się z oknem i nadal wyglądała poprawnie.
+ */
+export const NAZWA_OBCIAZENIA = `Obciążenie · ${OKNO_OBCIAZENIA_DNI} dni`;
 
 /** ⛔ Jednostka rozwoju. Słowo „jednostka pracy" nie wraca — nie ma desygnatu. */
 export const JEDNOSTKA_ROZWOJU_WIELE = 'punktów rozwoju';
@@ -180,15 +225,40 @@ export const ROZWOJ_NIE_POLICZONE = (powod: string) =>
   `Nie udało mi się tego policzyć (${powod}). To nie znaczy, że nie masz dorobku — pociągnij w dół.`;
 
 /**
- * ⭐ POWÓD, DLA KTÓREGO OBCIĄŻENIA NIE MA NA EKRANIE — napisany zawodnikowi,
- * nie programiście. ⛔ Ani oceny, ani progu, ani przymiotnika o ciężkości.
+ * ⭐ BRZMIENIA OBCIĄŻENIA — wszystkie tutaj. ⛔ Ani jednego przymiotnika
+ * o tym, jaka ta liczba jest, ani jednego progu, ani jednej barwy.
+ * ⛔ Słowa skali dnia („lekko", „bardzo ciężko") NIE PADAJĄ na tym ekranie:
+ * `slowoObciazenia` opisuje POJEDYNCZY DZIEŃ na widoku tygodnia, a nie sumę
+ * z okna — a przy sumie każde takie słowo byłoby werdyktem o zawodniku.
  */
 export const OBCIAZENIE_NIE_POLICZONE_POWOD =
-  'nie mamy jeszcze miary obciążenia';
-export const OBCIAZENIE_NIE_POLICZONE_ZDANIE =
-  'Nie policzone — nie mamy jeszcze miary tego, ile ciało wzięło na siebie. To jest osobna liczba od rozwoju i powstanie osobno.';
+  'nie udało mi się odczytać wszystkiego, z czego liczy się obciążenie';
+export const OBCIAZENIE_NIE_POLICZONE_ZDANIE = (powod: string) =>
+  `Nie policzone — ${powod}. To nie znaczy, że nic nie robisz; znaczy, że nie mam z czego policzyć.`;
 /** ⛔ Znak w miejscu liczby. Nie „0" — zero byłoby pomiarem, którego nie ma. */
 export const OBCIAZENIE_ZAMIAST_LICZBY = '—';
+
+/** ⭐ Jednostka i jedyna własność miary, którą wolno napisać obok liczby. */
+export const OBCIAZENIE_PODPIS = `${JEDNOSTKA_OBCIAZENIA_WIELE}, ostatnie ${OKNO_OBCIAZENIA_DNI} dni · może spaść i to jest w porządku`;
+
+/**
+ * ⭐ OKNO ODNIESIENIA JAKO GOŁY FAKT. ⛔ Bez procentu, bez przymiotnika
+ * i bez prognozy: model jest liniowy, a ryzyko urazu nie jest (Z0).
+ */
+export const OBCIAZENIE_ODNIESIENIE = (liczba: string) =>
+  `Ostatnie ${OKNO_ODNIESIENIA_DNI} dni: ${liczba} ${JEDNOSTKA_OBCIAZENIA_WIELE}.`;
+
+/**
+ * ⛔ NIC NIE WAŻY W OKNIE — i to jest coś innego niż „nie policzyłem".
+ * ⚠️ Dwa różne zdania, bo to są dwa różne fakty o zawodniku (R5): brak zapisów
+ * kontra zapisy bez dwóch liczb, z których obciążenie w ogóle powstaje.
+ */
+export const OBCIAZENIE_NIC_NIE_WAZY =
+  'W tym oknie nie ma ani jednej pracy. To nie jest zero — to jest brak zapisu.';
+export const OBCIAZENIE_BEZ_LICZBY = (ile: number) =>
+  `${ile === 1 ? 'Jedna praca w tym oknie nie ma' : `${ile} prace w tym oknie nie mają`} `
+  + 'podanych minut albo tego, jak było — a bez obu tych liczb nie ma z czego policzyć obciążenia. '
+  + 'To nie jest zero.';
 
 export const PRACA_DODATKOWA_ZDANIE = (ile: number, trafia: number) =>
   `Z ${liczebnikDopelniacz(ile)} rzeczy, które robisz dodatkowo, w Twój największy zwrot `
@@ -352,6 +422,7 @@ export type PozycjaNaEkranie = {
 export type ModelProfilu = {
   tytul: string;
   rozwoj: RozwojNaEkranie;
+  /** ⭐ Nazwa pola została — zmieniła się WYŁĄCZNIE wartość, którą niesie. */
   obciazenie7: ObciazenieNaEkranie;
   pracaDodatkowa: PracaDodatkowaNaEkranie;
   pozycje: readonly PozycjaNaEkranie[];
@@ -373,6 +444,10 @@ export type WejscieModelu = {
   daneICel: DaneICel;
   /** Czy cokolwiek o zawodniku wychodzi na zewnątrz. `null` = nie odczytałem. */
   raportRodzicaIstnieje: boolean | null;
+  /** ⭐ Okno kroczące 7 dni — wynik `policzObciazenieZOdczytow`. */
+  obciazenieOkna: ObciazenieWOknie;
+  /** ⭐ Okno odniesienia 28 dni — z tego samego wejścia, w jednym przebiegu. */
+  obciazenieOdniesienia: ObciazenieWOknie;
 };
 
 /**
@@ -388,13 +463,41 @@ export function rozwojZNagrody(n: NagrodaZaPrace): RozwojNaEkranie {
 }
 
 /**
- * ⭐⛔ OBCIĄŻENIE · 7 DNI — JEDEN OSIĄGALNY WARIANT DO CZASU D1.
- * Ta funkcja nie przyjmuje ANI JEDNEGO argumentu i to nie jest niedopatrzenie:
- * nie ma czego jej podać. Gdy powstanie prawdziwa miara obciążenia (bez
- * trafności w środku), zmieni się TU i strażnik to zauważy.
+ * ⭐⭐ OBCIĄŻENIE NA EKRANIE — z dwóch okien, bez ani jednego przymiotnika.
+ *
+ * ⛔ Ta funkcja NIE LICZY NICZEGO SAMA: dostaje dwa gotowe wyniki okna
+ * i zamienia je na napisy. Cała arytmetyka stoi w `lib/obciazenie.ts`,
+ * całe okno w `lib/obciazenieOstatnichDni.ts`.
+ *
+ * ⛔ Zaokrąglenie następuje RAZ, w `liczbaObciazeniaNaEkran`. Ekran dostaje
+ * gotowy napis i nie ma go czym zaokrąglić drugi raz.
  */
-export function obciazenieNaEkranie(): ObciazenieNaEkranie {
-  return { rodzaj: 'nie_policzone', powod: OBCIAZENIE_NIE_POLICZONE_POWOD };
+export function obciazenieNaEkranie(
+  okno: ObciazenieWOknie,
+  odniesienie: ObciazenieWOknie,
+): ObciazenieNaEkranie {
+  if (okno.rodzaj === 'nie_policzone') {
+    return { rodzaj: 'nie_policzone', powod: okno.powod };
+  }
+  if (okno.rodzaj === 'brak_pracy_w_oknie') {
+    return {
+      rodzaj: 'nic_nie_wazy',
+      powod: okno.bezLiczby.length > 0
+        ? OBCIAZENIE_BEZ_LICZBY(okno.bezLiczby.length)
+        : OBCIAZENIE_NIC_NIE_WAZY,
+    };
+  }
+  return {
+    rodzaj: 'policzone',
+    liczba: liczbaObciazeniaNaEkran(okno.punkty),
+    podpis: OBCIAZENIE_PODPIS,
+    // ⛔ Okno odniesienia wchodzi WYŁĄCZNIE wtedy, gdy samo jest policzone.
+    // Podanie go z pustki byłoby wpisaniem zera tam, gdzie prawdą jest „nie wiem".
+    odniesienie: odniesienie.rodzaj === 'policzone'
+      ? OBCIAZENIE_ODNIESIENIE(liczbaObciazeniaNaEkran(odniesienie.punkty))
+      : null,
+    bezLiczby: okno.bezLiczby.length,
+  };
 }
 
 /** Który z czterech braków zaszedł — rozstrzygane ze STANU, nie z tekstu powodu. */
@@ -543,7 +646,7 @@ export function zbudujModelProfilu(we: WejscieModelu): ModelProfilu {
   return {
     tytul: TYTUL_EKRANU,
     rozwoj: rozwojZNagrody(we.nagroda),
-    obciazenie7: obciazenieNaEkranie(),
+    obciazenie7: obciazenieNaEkranie(we.obciazenieOkna, we.obciazenieOdniesienia),
     pracaDodatkowa: pracaDodatkowaNaEkranie(we),
     pozycje: pozycjeProfilu(we),
     przypis: PRZYPIS_CZEGO_TU_NIE_MA,
@@ -681,6 +784,135 @@ export function wejscieNagrodyZOdczytow(o: OdczytyDoRozwoju): WejscieNagrody {
  */
 export function policzRozwojZOdczytow(o: OdczytyDoRozwoju): NagrodaZaPrace {
   return policzNagrode(wejscieNagrodyZOdczytow(o));
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// 6b. ⭐ WEJŚCIE OBCIĄŻENIA Z TYCH SAMYCH ODCZYTÓW
+// ═════════════════════════════════════════════════════════════════════
+//
+// ⭐⛔ TO JEST MIEJSCE, W KTÓRYM DWIE MIARY SIĘ ROZCHODZĄ — i jedyne.
+// Te same wiersze wchodzą do dwóch funkcji. Rozwój dostaje `zwrot` (czyli
+// trafność); obciążenie NIE DOSTAJE GO W OGÓLE i nie ma parametru, którym
+// dałoby się go podać. Dzięki temu „ta sama praca, inny cel" daje INNY rozwój
+// i IDENTYCZNE obciążenie — a to jest cała teza produktu, sprowadzona
+// do jednej różnicy w dwóch wywołaniach obok siebie.
+//
+// ⛔ CO JEST DOWODEM, ŻE SESJA W OGÓLE SIĘ ODBYŁA. Ekran „Profil" nie czyta
+// werdyktów (mówi to wprost przez `WERDYKTY_NIEPODANE`), więc zostają dwa
+// dowody: `status='completed'` na wierszu i wpis w Dzienniku wskazujący TĘ
+// pozycję. ⛔ Reguła cykliczna nie ma prawa wejść: jeden jej wiersz ma wiele
+// wystąpień, a `status` i wpis opisują WIERSZ — policzenie ich znaczyłoby
+// obciążenie za każdy wtorek w historii z jednego wpisu.
+//
+// ⚠️ SESJA, KTÓRA SIĘ ODBYŁA I NIE MA OBU LICZB, NIE JEST POMIJANA. Wchodzi
+// do okna i wychodzi z niego jako `bezLiczby` — nazwana, policzona, nie
+// doliczona do sumy. ⛔ Zero byłoby zdaniem „ciało nic nie wzięło" (R5).
+
+const POWOD_BEZ_DATY_SESJI = 'sesja bez daty w kalendarzu';
+const POWOD_BEZ_DATY_MECZU = 'zapisany mecz bez daty powstania wiersza';
+
+export function wejscieObciazeniaZOdczytow(o: OdczytyDoRozwoju): WejscieObciazenia {
+  // ⛔ Bez Dziennika nie ma ani minut, ani ciężkości — czyli nie ma obciążenia.
+  // To jest „nie odczytałem", a nie „nic nie ważyło".
+  if (o.wydarzenia.rodzaj === 'nie_odczytano' || o.dziennik.rodzaj === 'nie_odczytano') {
+    const powod = o.wydarzenia.rodzaj === 'nie_odczytano'
+      ? `kalendarz: ${o.wydarzenia.powod}`
+      : `Dziennik: ${o.dziennik.rodzaj === 'nie_odczytano' ? o.dziennik.powod : ''}`;
+    return {
+      sesje: zrodloObciazeniaNieczytane(powod),
+      mecze: o.mecze.rodzaj === 'nie_odczytano'
+        ? zrodloObciazeniaNieczytane(`mecze: ${o.mecze.powod}`)
+        : { rodzaj: 'jest', sesje: [] },
+    };
+  }
+
+  const pomiary = pomiaryZWpisow(o.dziennik);
+  const minutyMapa = pomiary.minuty;
+  const rpeMapa = pomiary.rpe;
+  const liczbaZMapy = (m: ReadonlyMap<number, number> | null, id: number): number | null => {
+    if (m === null) return null;
+    const x = m.get(id);
+    return typeof x === 'number' && Number.isFinite(x) ? x : null;
+  };
+
+  const sesje: SesjaObciazenia[] = [];
+  for (const w of o.wydarzenia.wiersze) {
+    if (!w || typeof w.id !== 'number' || !Number.isFinite(w.id)) continue;
+    if (typeof w.recurrence_rule === 'string' && w.recurrence_rule.length > 0) continue;
+    const minuty = liczbaZMapy(minutyMapa, w.id);
+    const ciezkosc = liczbaZMapy(rpeMapa, w.id);
+    const odbylaSie = w.status === 'completed' || minuty !== null || ciezkosc !== null;
+    if (!odbylaSie) continue;
+    const dzien = dzienZeZnacznika(w.scheduled_date);
+    sesje.push({
+      klucz: `sesja:${w.id}`,
+      rodzaj: 'sesja',
+      kiedy: dzien === null
+        ? { rodzaj: 'nieznana', powod: POWOD_BEZ_DATY_SESJI }
+        : { rodzaj: 'dzien_pracy', dzien },
+      pomiar: { minuty, ciezkosc },
+    });
+  }
+
+  const mecze: SesjaObciazenia[] = [];
+  if (o.mecze.rodzaj === 'jest') {
+    for (const w of o.mecze.wiersze) {
+      if (!w || typeof w.id !== 'number' || !Number.isFinite(w.id)) continue;
+      const dzien = dzienZeZnacznika(w.created_at);
+      mecze.push({
+        klucz: `mecz:${w.id}`,
+        rodzaj: 'mecz',
+        // ⛔ Mecz odbył się kiedyś, a wiersz powstał, gdy zawodnik go zapisał.
+        // Nie mamy czym tego rozróżnić, więc nie udajemy, że mamy (Z0).
+        kiedy: dzien === null
+          ? { rodzaj: 'nieznana', powod: POWOD_BEZ_DATY_MECZU }
+          : { rodzaj: 'dzien_zapisu', dzien },
+        pomiar: {
+          minuty: typeof w.minutes_played === 'number' ? w.minutes_played : null,
+          ciezkosc: typeof w.match_rpe === 'number' ? w.match_rpe : null,
+        },
+      });
+    }
+  }
+
+  return {
+    sesje: { rodzaj: 'jest', sesje },
+    mecze: o.mecze.rodzaj === 'nie_odczytano'
+      ? zrodloObciazeniaNieczytane(`mecze: ${o.mecze.powod}`)
+      : { rodzaj: 'jest', sesje: mecze },
+  };
+}
+
+/**
+ * ⭐ JEDNO WEJŚCIE → OBA OKNA, w jednym przebiegu i z jednego zbioru wierszy.
+ *
+ * ⛔ DWA WYWOŁANIA, NIE DWA ZAPYTANIA. Gdyby okna liczyły się z dwóch odczytów,
+ * zawodnik zobaczyłby obok siebie dwie liczby, których nie da się ze sobą
+ * pogodzić — a rozjazd wyglądałby wtedy jak zmiana obciążenia.
+ */
+/**
+ * ⭐ NAZWANY KSZTAŁT, A NIE OBIEKT W PODPISIE — i to nie jest kosmetyka.
+ * ⚠️ ZMIERZONE 18.08.2026: strażnik F1-2 („funkcje liczące pracę bez ani
+ * jednego konsumenta") wycina ciało funkcji, szukając PIERWSZEGO `{` po
+ * nawiasach podpisu. Typ wyniku zapisany w podpisie jako `{ … }` jest tym
+ * pierwszym nawiasem, więc strażnik czytał TYP zamiast CIAŁA i nie widział
+ * w nim wywołania `policzObciazenieWOknie`. Skutek: silnik podpięty do ekranu
+ * nadal figurowałby na liście długu jako „NIEPODPIĘTY".
+ */
+export type ObciazenieDwochOkien = {
+  okno: ObciazenieWOknie;
+  odniesienie: ObciazenieWOknie;
+};
+
+export function policzObciazenieZOdczytow(
+  o: OdczytyDoRozwoju,
+  args: { dzis: string },
+): ObciazenieDwochOkien {
+  const we = wejscieObciazeniaZOdczytow(o);
+  return {
+    okno: policzObciazenieWOknie(we, { dzis: args.dzis, oknoDni: OKNO_OBCIAZENIA_DNI }),
+    odniesienie: policzObciazenieWOknie(we, { dzis: args.dzis, oknoDni: OKNO_ODNIESIENIA_DNI }),
+  };
 }
 
 // ═════════════════════════════════════════════════════════════════════

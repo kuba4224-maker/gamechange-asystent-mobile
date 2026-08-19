@@ -46,6 +46,7 @@
 import { toLocalDateStr } from './date-utils';
 import { powodBledu, wejscieZOdpowiedzi } from './listaZadan';
 import type { Wejscie } from './kolejkaPodania';
+import type { WierszMeczu } from './nagrodaZaPrace';
 import type {
   WejsciaWgladow,
   WpisDziennikaWglad,
@@ -107,6 +108,21 @@ export type WierszMeczuWgl = {
   created_at: string;
   match_rpe: number | null;
   entered_recovery_state: string | null;
+  /**
+   * ⭐ PLAN-D-W1 17.08.2026 — minuty NA BOISKU. `null` = nie wiemy (R5).
+   * ⚠️ Do 18.08.2026 kolumna była w `SELECT_MECZOW`, ale NIE BYŁO JEJ W TYM
+   * TYPIE ani w żadnym mapowaniu — czyli baza ją oddawała, a produkt ją
+   * wyrzucał. To jest ten sam kształt defektu, który pas D8 usuwa niżej.
+   */
+  minutes_played: number | null;
+  /**
+   * ⭐ PLAN-D-D8 18.08.2026 — DŁUGOŚĆ CAŁEGO MECZU (mianownik wagi).
+   * ⛔ `match_contexts` NIE MA relacji z `calendar_events` (zmierzone
+   * 18.08.2026), więc długość meczu MUSI być własną kolumną tej tabeli —
+   * nie da się jej odczytać z `planned_minutes`. `null` = nie wiemy;
+   * `wagaMeczu()` podstawia wtedy 90 jako DECYZJĘ PRODUKTOWĄ, nie pomiar.
+   */
+  match_length_minutes: number | null;
 };
 
 /** Jedyna kolumna katalogu podpowiedzi, jakiej WT-26 potrzebuje. */
@@ -127,7 +143,28 @@ export const TABELA_MECZOW = 'match_contexts';
 // (CHECK 0–130) i była WYRZUCANA: waga meczu liczyła się bez minut na boisku,
 // więc dziesięciominutowe wejście ważyło tyle, co pełne 90 minut.
 // ⚠️ To jest ROZSZERZENIE istniejącego zapytania, nie nowe zapytanie.
-export const SELECT_MECZOW = 'id,created_at,match_rpe,entered_recovery_state,minutes_played';
+//
+// ⭐⭐ PLAN-D-D8 18.08.2026 — doszło `match_length_minutes`, i to jest POŁOWA
+// tego pasa. ⛔ ZMIERZONE PRZED ZMIANĄ: kolumna powstała na produkcji 18.08,
+// ekran meczu ją zapisywał, a TA LISTA jej nie czytała — więc `wagaMeczu()`
+// dostawała `null` i podstawiała 90 ZAWSZE. Skutek dla zawodnika U13, który
+// zagrał pełne 60 minut meczu 60-minutowego: 3 punkty zamiast 4, czyli kara
+// za to, że jego mecz jest krótszy. ⛔ Pole zapisane i nigdy nieodczytane
+// wygląda dokładnie jak pole, którego nie ma — z tą różnicą, że nikt go nie szuka.
+export const SELECT_MECZOW =
+  'id,created_at,match_rpe,entered_recovery_state,minutes_played,match_length_minutes';
+
+/**
+ * ⭐ KOLUMNY, KTÓRYCH MAPOWANIE NAPRAWDĘ UŻYWA — wyprowadzone z `SELECT_MECZOW`,
+ * nie przepisane obok niego.
+ *
+ * ⛔ PO CO TO ISTNIEJE. Strażnik, który czyta napis `SELECT_MECZOW` i porównuje
+ * go z własną listą, dowodzi tylko tego, że dwa napisy są zgodne. Ta stała
+ * pozwala sprawdzić rzecz o jeden stopień prawdziwszą: że każda kolumna,
+ * po którą sięga `meczDlaNagrody()`, JEST w zapytaniu — a więc że rozszerzenie
+ * typu naprawdę się zastosowało, a nie tylko zostało napisane.
+ */
+export const KOLUMNY_MECZOW: readonly string[] = SELECT_MECZOW.split(',');
 
 /**
  * Rocznik zawodnika (WT-26). JEDYNE źródło wieku, jakie appka ma
@@ -218,6 +255,33 @@ export function wpisBoluDlaWgladu(w: WierszBoluWgl): WpisBoluWglad {
     miejsce: w.body_location,
     intensywnosc: liczbaAlboNull(w.intensity) ?? 0,
     wykluczaZTreningu: w.excludes_from_training === true,
+  };
+}
+
+/**
+ * ⭐⭐ PLAN-D-D8 18.08.2026 — WIERSZ `match_contexts` → WIERSZ LICZNIKA PRACY.
+ *
+ * ⛔ PO CO OSOBNA FUNKCJA, SKORO WCZEŚNIEJ WYSTARCZAŁA RZUTKA. Ekran „Dziś"
+ * robił do 18.08 `meczeRes.data as unknown as WierszMeczu[]`. Rzutka nie
+ * przemianowuje pól: `match_length_minutes` z bazy NIGDY nie stało się
+ * `dlugoscMeczu`, którego szuka `jednostkiZMeczow()`. Kompilator tego nie
+ * łapie (rzutka przez `unknown` wyłącza sprawdzanie), testy tego nie łapią
+ * (w czasie wykonania właściwość po prostu nie istnieje i wychodzi `null`),
+ * a zawodnik widzi liczbę policzoną z założonych 90 minut.
+ * ⭐ To jest CAŁY powód, dla którego ta funkcja istnieje: przemianowanie ma
+ * być JEDNYM miejscem, które da się uruchomić w strażniku.
+ *
+ * ⛔ `dlugoscMeczu` NIE MA WARTOŚCI ZASTĘPCZEJ. Brak długości to „nie wiemy",
+ * a nie „90" — dziewięćdziesiątkę podstawia dopiero `wagaMeczu()` i robi to
+ * jawnie, jako decyzję produktową (R5, Z0).
+ */
+export function meczDlaNagrody(w: WierszMeczuWgl): WierszMeczu {
+  return {
+    id: w.id,
+    created_at: w.created_at,
+    minutes_played: liczbaAlboNull(w.minutes_played),
+    dlugoscMeczu: liczbaAlboNull(w.match_length_minutes),
+    match_rpe: liczbaAlboNull(w.match_rpe),
   };
 }
 
