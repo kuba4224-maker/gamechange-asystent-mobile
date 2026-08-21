@@ -49,7 +49,23 @@ import {
   czyOknoPorankaOtwarte,
   powodOdmowyZapisuPoranka,
   OKNO_PORANKA_ZAMKNIETE_ZDANIE,
+  // ⭐ PLAN-D PAS D3 21.08.2026 — CZTERY STANY ANKIETY, NIE DWA (R5).
+  // Zgłoszone przez pas T2 (§7.4) i przez niego NIEZROBIONE: do 21.08 zawodnik,
+  // który wypełnił ankietę rano, widział po 12:00 DOKŁADNIE to samo, co ten,
+  // któremu przepadła. Cała reguła stoi w `lib/oknoPoranka.ts`; ten ekran ją
+  // WYKONUJE i nigdzie nie rozstrzyga sam.
+  stanAnkietyPorannej,
+  ANKIETA_PORANNA_WYPELNIONA_ZDANIE,
+  ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE,
+  type OdczytDzisiejszegoWpisu,
 } from '../../lib/oknoPoranka';
+// ⭐⭐ PLAN-D PAS D3 21.08.2026 — NAKŁADKA, KTÓRA NIE ZABIERA Z EKRANU.
+// ⛔ `components/Arkusz.tsx` jest `Modal`-em, czyli osobnym drzewem NAD ekranem:
+// stoi POZA `ScrollView`, więc jego treść kosztuje ekran ZERO dp. To jest
+// prawda o React Native, nie pomiar urządzenia — i miara `lib/wysokoscEkranu.ts`
+// liczy to tak samo, więc zapadka i ekran mówią jedno.
+import Arkusz from '../../components/Arkusz';
+import type { NaglowekArkusza } from '../../lib/arkusz';
 
 // JEDNA DROGA B2 08.08.2026 — lokalne kopie 17 lokalizacji bólu, ich mapy nazw
 // i listy lokalizacji bez strony ciała usunięte; wszystkie trzy pochodzą teraz
@@ -179,6 +195,52 @@ type HistoryRow = {
   session_type: string | null; payload: any; pain_entries: any[];
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ D3 — SZEŚĆ ARKUSZY TEGO EKRANU I ICH NAGŁÓWKI
+// ═══════════════════════════════════════════════════════════════════
+// ⛔ ZERO NOWYCH SŁÓW WIDOCZNYCH DLA ZAWODNIKA. Tytuł każdego arkusza to
+// DOKŁADNIE ten napis, który stał nad tą rzeczą, kiedy leżała na ekranie —
+// co do znaku, razem z nawiasem i zakresem skali. Kicker „Dziennik" też nie
+// jest nowy: to `title` tej zakładki w `app/(tabs)/_layout.tsx`.
+//
+// ⚠️ `RODZAJE_ARKUSZA` w `lib/arkusz.ts` jest listą ZAMKNIĘTĄ i pilnuje jej
+// strażnik wymagający wejścia z ekranu „Dziś" dla każdej pozycji. ⛔ Tego
+// ekranu tam nie ma, więc dopisanie tu sześciu rodzajów zapaliłoby CUDZĄ
+// zapadkę. Dlatego rodzaje arkuszy DZIENNIKA żyją tutaj — tak samo jak
+// rodzaje arkuszy meczu żyją w `mecz.tsx` od pasa M2 — a wspólny jest
+// KOMPONENT i wspólna reguła („nakładka nie zabiera z ekranu").
+//
+// ⛔ PODPIS JEST PUSTY WE WSZYSTKICH SZEŚCIU. Każdy z tych arkuszy trzyma
+// DOKŁADNIE JEDNĄ rzecz, której własna etykieta jest już jego tytułem;
+// zdanie pod tytułem byłoby parafrazą tytułu, czyli nowym słowem bez nowej
+// informacji. Arkusze meczu mają podpisy, bo tam jeden arkusz zbiera po
+// osiem pól i bez spisu treści nie wiadomo, co w nim jest.
+type RodzajArkuszaDziennika =
+  | 'nastroj'     // wpis poranny: nastrój / motywacja
+  | 'notatka'     // wpis poranny: wolna notatka
+  | 'powiazanie'  // wpis potreningowy: powiązanie z wydarzeniem kalendarza
+  | 'zmeczenie'   // wpis potreningowy: zmęczenie po treningu
+  | 'bol'         // wspólne dla obu wpisów: ból
+  | 'historia';   // wspólne dla obu wpisów: historia wpisów
+
+/**
+ * ⛔ NAPISY WIERSZY WEJŚCIA I TYTUŁY ARKUSZY POCHODZĄ Z JEDNEGO MIEJSCA.
+ * Dwa miejsca to dwa brzmienia do zatwierdzania i dwa, które się rozjadą —
+ * a wtedy zawodnik dotyka wiersza „Notatka" i trafia do arkusza „Uwagi".
+ */
+const NAPIS_ARKUSZA: Record<RodzajArkuszaDziennika, string> = {
+  nastroj: 'Nastrój / motywacja (0 = fatalny, 10 = świetny)',
+  notatka: 'Notatka (opcjonalnie)',
+  powiazanie: 'Powiąż z zaplanowanym wydarzeniem (opcjonalnie)',
+  zmeczenie: 'Zmęczenie po treningu (0 = brak, 10 = wykończony)',
+  bol: 'Boli Cię dziś coś?',
+  historia: 'Historia wpisów',
+};
+
+function naglowekArkuszaDziennika(rodzaj: RodzajArkuszaDziennika): NaglowekArkusza {
+  return { kicker: 'Dziennik', tytul: NAPIS_ARKUSZA[rodzaj], podpis: '' };
+}
+
 export default function DziennikScreen() {
   const { currentUser } = useAuth();
   const [entryType, setEntryType] = useState<'morning' | 'post_training'>('morning');
@@ -220,6 +282,17 @@ export default function DziennikScreen() {
   const [painSide, setPainSide] = useState('');
   const [painIntensity, setPainIntensity] = useState<number>();
   const [painExcludes, setPainExcludes] = useState(false);
+
+  // ⭐⭐ D3 21.08.2026 — WEJŚCIE I TREŚĆ ARKUSZA ŻYJĄ W JEDNYM STANIE.
+  // ⛔ TO JEST WARUNEK 3 POLECENIA (kolejność nienegocjowalna): `trescArkusza()`
+  // rysuje WYŁĄCZNIE rodzaj, który jest otwarty, a otworzyć go da się wyłącznie
+  // wierszem wejścia. Nie istnieje stan tego pliku, w którym pole zeszło
+  // z ekranu, a wejścia do niego jeszcze nie ma.
+  const [arkusz, setArkusz] = useState<RodzajArkuszaDziennika | null>(null);
+  // ⭐⭐ D3 — ODCZYT DZISIEJSZEGO WPISU PORANNEGO, KTÓREGO TEN EKRAN NIGDY NIE ROBIŁ.
+  // ⛔ Wartość początkowa to `nieznany`, a nie `niema`: zanim odczyt wróci,
+  // produkt NAPRAWDĘ nie wie — i ma to powiedzieć, zamiast zgadywać (R5).
+  const [dzisiejszyPoranek, setDzisiejszyPoranek] = useState<OdczytDzisiejszegoWpisu>('nieznany');
 
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -283,6 +356,41 @@ export default function DziennikScreen() {
     setBlockPromptAnswered(false);
   }, [currentUser]);
 
+  /**
+   * ⭐⭐ D3 21.08.2026 — CZY DZISIEJSZY WPIS PORANNY JEST.
+   *
+   * ⛔ TRZY WARTOŚCI, NIE DWIE. Nieudany odczyt zostawia `nieznany`, a NIE
+   * `niema` — inaczej odmowa dostępu (RLS), brak sieci albo wygasły okres
+   * próbny mówiłyby zawodnikowi „nie wypełniłeś", czyli produkt kłamałby mu
+   * o jego własnej pracy. To ta sama cisza, którą pas C3 wyciągał z `?? []`.
+   *
+   * ⛔ ZERO LICZENIA (N1). Pytamy o JEDEN wiersz z DZISIAJ i o nic więcej:
+   * `limit(1)` i `select('id')`. Nie ma tu historii, z której dałoby się
+   * policzyć serię — i nie ma jej mieć.
+   *
+   * ⚠️ „Dziś" liczone jest TYM SAMYM zegarem lokalnym, co deduplikacja
+   * w `submitDailyLog` i co okno poranka (`OKNO_PORANKA_ZEGAR`). Dwa różne
+   * zegary na jednym ekranie dają godzinę, w której „dziś" znaczy dwie rzeczy.
+   */
+  const loadDzisiejszyPoranek = useCallback(async () => {
+    if (!currentUser) return;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const { data, error: err } = await supabase
+      .from('daily_logs')
+      .select('id')
+      .eq('user_id', currentUser.id)
+      .eq('entry_type', 'morning')
+      .gte('created_at', startOfDay.toISOString())
+      .limit(1);
+    if (err) {
+      console.warn(opisBleduOdczytuDoLogu('dziennik.loadDzisiejszyPoranek → daily_logs', err));
+      setDzisiejszyPoranek('nieznany');
+      return;
+    }
+    setDzisiejszyPoranek((data as any[]).length > 0 ? 'jest' : 'niema');
+  }, [currentUser]);
+
   const loadHistory = useCallback(async () => {
     if (!currentUser) return;
     const { data, error: err } = await supabase
@@ -308,7 +416,7 @@ export default function DziennikScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  useFocusEffect(useCallback(() => { populateCalendarLinkSelect(); loadHistory(); }, [populateCalendarLinkSelect, loadHistory]));
+  useFocusEffect(useCallback(() => { populateCalendarLinkSelect(); loadHistory(); loadDzisiejszyPoranek(); }, [populateCalendarLinkSelect, loadHistory, loadDzisiejszyPoranek]));
 
   // ⭐ PLAN-D-C3 15.08.2026 — jedna funkcja decyzyjna zamiast `history.length === 0`.
   const pustkaHistorii = rozpoznajPustke({
@@ -329,11 +437,17 @@ export default function DziennikScreen() {
   // rozstrzyga zegar odczytany w `submitDailyLog` w chwili dotknięcia.
   const oknoPorankaOtwarte = czyOknoPorankaOtwarte(new Date());
 
+  // ⭐⭐ D3 21.08.2026 — CZTERY STANY ANKIETY, NIE DWA (R5).
+  // ⛔ Liczony przy KAŻDYM renderze, z tego samego powodu co linia wyżej:
+  // zawodnik, który zostawił ekran otwarty przez południe, ma zobaczyć
+  // południe, a nie poranek. ⛔ Rozstrzyga `lib/oknoPoranka.ts`, nie ten plik.
+  const stanAnkiety = stanAnkietyPorannej(new Date(), dzisiejszyPoranek);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([populateCalendarLinkSelect(), loadHistory()]);
+    await Promise.all([populateCalendarLinkSelect(), loadHistory(), loadDzisiejszyPoranek()]);
     setRefreshing(false);
-  }, [populateCalendarLinkSelect, loadHistory]);
+  }, [populateCalendarLinkSelect, loadHistory, loadDzisiejszyPoranek]);
 
   const resetForm = () => {
     // AUDYT 28.07.2026: brakujący `setEntryType('morning')` — kontrakt sekcja 1
@@ -555,6 +669,10 @@ export default function DziennikScreen() {
       // nie zalicza sesji Bloku (to robi wyłącznie wpis potreningowy), więc ta
       // gałąź nie potrzebuje wariantu z paskiem Celu.
       setOk(updatedExisting ? 'Wpis zaktualizowany.' : journalSavedMessage(linkedToBlock));
+      // ⭐ D3 — po udanym zapisie porannym WIEMY, że wpis z dzisiaj jest.
+      // ⛔ To NIE JEST licznik (N1): to jedna wartość o JEDNYM dniu, ta sama,
+      // którą i tak odda odczyt przy następnym wejściu na ekran.
+      if (entryType === 'morning') setDzisiejszyPoranek('jest');
       resetForm();
       await loadHistory();
     } catch (e: any) {
@@ -580,204 +698,86 @@ export default function DziennikScreen() {
     }
   };
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-    <ScrollView
-      contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
-    >
-      <Text style={styles.title}>Dziennik zawodnika</Text>
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐⭐ D3 — TREŚĆ ARKUSZY: DOKŁADNIE TO, CO DO 21.08 LEŻAŁO NA EKRANIE
+  // ═══════════════════════════════════════════════════════════════
+  // ⛔ ANI JEDNA POZYCJA NIE MA STANU „USUNIĘTE" (B3). Poniżej stoi ten sam
+  // JSX, co dotąd — przeniesiony, nie przepisany. Etykieta każdej rzeczy
+  // wyszła z ciała arkusza tylko dlatego, że stała się jego TYTUŁEM
+  // (`NAPIS_ARKUSZA`), czyli tym samym napisem w innym miejscu.
+  function trescArkusza() {
+    if (arkusz === 'nastroj') {
+      return (
+        <ScalePicker value={moodMotivation} onChange={setMoodMotivation} colorForValue={higherIsBetterColor} />
+      );
+    }
 
-      <View style={styles.toggle}>
-        {/* ⭐⛔ PAS T2 19.08.2026 — KAFEL ANKIETY NIE ZNIKA PO 12:00.
-            Szarzeje (`toggleBtnPoOknie`) i zostaje dotykalny, żeby zawodnik
-            mógł dotknąć i PRZECZYTAĆ POWÓD. Reguła R5: kafel, który znika,
-            sprawia, że zawodnik nie odróżnia „wypełniłem" od „przepadło" —
-            a to są dwie różne rzeczy i tylko jedna z nich jest jego.
-            ⛔ Zaszarzenie NIE JEST czerwienią i nie jest ostrzeżeniem (Z2). */}
-        <TouchableOpacity
-          style={[
-            styles.toggleBtn,
-            entryType === 'morning' && styles.toggleBtnActive,
-            !oknoPorankaOtwarte && styles.toggleBtnPoOknie,
-          ]}
-          onPress={() => setEntryType('morning')}
-        >
-          <Text style={[styles.toggleTxt, entryType === 'morning' && styles.toggleTxtActive]}>Wpis poranny</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toggleBtn, entryType === 'post_training' && styles.toggleBtnActive]}
-          onPress={() => setEntryType('post_training')}
-        >
-          <Text style={[styles.toggleTxt, entryType === 'post_training' && styles.toggleTxtActive]}>Wpis potreningowy</Text>
-        </TouchableOpacity>
-      </View>
+    if (arkusz === 'notatka') {
+      return (
+        <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={freeNote} onChangeText={setFreeNote} multiline placeholder="Coś jeszcze warto zapisać?" />
+      );
+    }
 
-      {error && <Text style={styles.error}>{error}</Text>}
-      {ok && <Text style={styles.ok}>{ok}</Text>}
-
-      {entryType === 'morning' && !oknoPorankaOtwarte ? (
-        /* ⭐⛔ PAS T2 19.08.2026 — ZAMKNIĘTE OKNO PORANKA MÓWI, DLACZEGO.
-           ⛔ Formularz NIE JEST rysowany: pola, których nie da się zapisać,
-           byłyby zaproszeniem do pracy, która przepada przy dotknięciu
-           „Zapisz". ⭐ Ale kafel wyżej ZOSTAJE — to jest cała różnica między
-           „szarzeje" a „znika".
-           ⛔ To zdanie NIE MÓWI, ile dni z rzędu zawodnik nie wypełnił, bo
-           takiej liczby w tym produkcie nie ma i mieć nie będzie (N1).
-           ⛔ Wpis potreningowy jest nadal dostępny — okno dotyczy PORANKA. */
-        <View style={styles.oknoZamknieteBox}>
-          <Text style={styles.oknoZamknieteTxt}>{OKNO_PORANKA_ZAMKNIETE_ZDANIE}</Text>
+    if (arkusz === 'powiazanie') {
+      return (
+        <View style={styles.pickerWrap}>
+          <Picker selectedValue={calendarLinkId} onValueChange={setCalendarLinkId}>
+            <Picker.Item label="— nie dotyczy —" value="" />
+            {calendarLinkOptions.map((o) => <Picker.Item key={o.id} label={o.label} value={String(o.id)} />)}
+          </Picker>
         </View>
-      ) : entryType === 'morning' ? (
-        <>
-          <Text style={styles.label}>Ile godzin spałeś?</Text>
-          {/* ZMIANA 05.08.2026, na prośbę Kuby: było pole tekstowe (ryzyko
-              literówek/przecinka z klawiatury) — suwak, ten sam sprawdzony
-              komponent co reszta skal w tym formularzu.
-              ZMIANA 06.08.2026: zakres zawężony z 0-24 do 0-12 (realistyczny
-              zakres snu — 0-24 dawało fałszywe wrażenie, że pół doby przespanej
-              to "połowa suwaka"). `sleep_hours` nie ma węższego CHECK w bazie
-              niż 0-24, więc zawężenie w UI mieści się w istniejącym ograniczeniu;
-              silnik rekomendacji patrzy tylko na wartość, nie na max suwaka.
-              colorForValue: progi dopasowane do progu silnika (7h), nie gradient
-              ciągły — patrz lib/scale-colors.ts. */}
-          <ScalePicker
-            value={sleepHours}
-            onChange={setSleepHours}
-            min={0}
-            max={12}
-            step={0.5}
-            suffix="godz."
-            colorForValue={sleepHoursColor}
-          />
-          <Text style={styles.label}>Jakość snu (0 = fatalna, 10 = doskonała)</Text>
-          <ScalePicker value={sleepQuality} onChange={setSleepQuality} colorForValue={higherIsBetterColor} />
-          <Text style={styles.label}>Poranny poziom energii (0 = bardzo niski, 10 = pełnia energii)</Text>
-          {/* ZMIANA 06.08.2026, na prośbę Kuby: było "poranne zmęczenie" (jedyny
-              suwak w tej formie działający "im wyżej tym gorzej"). Dziś: energia
-              (im wyżej tym lepiej, spójnie z resztą), pokazana jako wariant
-              "bateria" ScalePickera — najbardziej intuicyjny sposób pokazania
-              "co się uzupełnia" (pomysł Kuby 06.08.2026), z opisem słownym pod
-              wartością. Konwersja na `morning_fatigue` przy zapisie, patrz
-              submitDailyLog. */}
-          <ScalePicker
-            value={morningEnergy}
-            onChange={setMorningEnergy}
-            variant="battery"
-            colorForValue={higherIsBetterColor}
-            describeValue={describeEnergyLevel}
-          />
-          <Text style={styles.label}>Nastrój / motywacja (0 = fatalny, 10 = świetny)</Text>
-          <ScalePicker value={moodMotivation} onChange={setMoodMotivation} colorForValue={higherIsBetterColor} />
-          <Text style={styles.label}>Notatka (opcjonalnie)</Text>
-          <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={freeNote} onChangeText={setFreeNote} multiline placeholder="Coś jeszcze warto zapisać?" />
-        </>
-      ) : (
-        <>
-          <Text style={styles.label}>Rodzaj sesji</Text>
-          <View style={styles.pickerWrap}>
-            <Picker selectedValue={sessionType} onValueChange={setSessionType}>
-              {Object.entries(SESSION_TYPE_LABELS).map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
-            </Picker>
-          </View>
-          <Text style={styles.label}>Czas trwania (minuty)</Text>
-          <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={duration} onChangeText={setDuration} placeholder="np. 90" />
-          {/* ZAPIS B7 08.08.2026 (SEDNO RUNDY 7) — zamiast liczyć na to, że
-              zawodnik sam otworzy picker niżej, pytamy wprost o sesję Bloku.
-              „Tak" ustawia DOKŁADNIE to samo powiązanie, które od zawsze
-              zalicza sesję we wskaźniku „N z M" (daily_logs.calendar_event_id)
-              — zero nowego znaczenia w bazie. „Nie" niczego nie ocenia i
-              chowa pytanie; picker zostaje dla każdego innego przypadku. */}
-          {blockSession && !blockPromptAnswered && !calendarLinkId ? (
-            <View style={styles.blockPromptBox}>
-              <Text style={styles.blockPromptQuestion}>
-                {blockSessionQuestion(blockSession, toLocalDateStr(new Date()))}
-              </Text>
-              <Text style={styles.blockPromptSession} numberOfLines={1}>{blockSession.title}</Text>
-              <View style={styles.blockPromptRow}>
-                <TouchableOpacity
-                  style={[styles.blockPromptBtn, styles.blockPromptBtnYes]}
-                  onPress={() => { setCalendarLinkId(String(blockSession.id)); setBlockPromptAnswered(true); }}
-                >
-                  <Text style={styles.blockPromptBtnYesTxt}>{BLOCK_LINK_YES_LABEL}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.blockPromptBtn}
-                  onPress={() => setBlockPromptAnswered(true)}
-                >
-                  <Text style={styles.blockPromptBtnTxt}>{BLOCK_LINK_NO_LABEL}</Text>
-                </TouchableOpacity>
+      );
+    }
+
+    if (arkusz === 'zmeczenie') {
+      return (
+        <ScalePicker value={postFatigue} onChange={setPostFatigue} colorForValue={neutralIntensityColor} />
+      );
+    }
+
+    if (arkusz === 'bol') {
+      return (
+        <View>
+          <TouchableOpacity style={styles.checkboxRow} onPress={() => setHasPain((v) => !v)}>
+            <Checkbox value={hasPain} onValueChange={setHasPain} />
+            <Text style={styles.checkboxLabel}>Boli Cię dziś coś?</Text>
+          </TouchableOpacity>
+          {hasPain && (
+            <>
+              <Text style={styles.label}>Lokalizacja</Text>
+              <View style={styles.pickerWrap}>
+                <Picker selectedValue={painLocation} onValueChange={setPainLocation}>
+                  {BODY_LOCATIONS.map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
+                </Picker>
               </View>
-            </View>
-          ) : null}
-          <Text style={styles.label}>Powiąż z zaplanowanym wydarzeniem (opcjonalnie)</Text>
-          <View style={styles.pickerWrap}>
-            <Picker selectedValue={calendarLinkId} onValueChange={setCalendarLinkId}>
-              <Picker.Item label="— nie dotyczy —" value="" />
-              {calendarLinkOptions.map((o) => <Picker.Item key={o.id} label={o.label} value={String(o.id)} />)}
-            </Picker>
-          </View>
-          <Text style={styles.label}>RPE — odczuwany wysiłek (0 = brak, 10 = maksymalny)</Text>
-          {/* colorForValue: świadomie NEUTRALNY (nie czerwony/zielony) — wysoki
-              wysiłek treningowy nie jest z definicji "zły", często jest celem.
-              Patrz lib/scale-colors.ts, neutralIntensityColor. */}
-          <ScalePicker value={rpe} onChange={setRpe} colorForValue={neutralIntensityColor} />
-          <Text style={styles.label}>Zmęczenie po treningu (0 = brak, 10 = wykończony)</Text>
-          <ScalePicker value={postFatigue} onChange={setPostFatigue} colorForValue={neutralIntensityColor} />
-        </>
-      )}
+              {!NON_LATERAL_LOCATIONS.has(painLocation) && (
+                <>
+                  <Text style={styles.label}>Strona</Text>
+                  <View style={styles.pickerWrap}>
+                    <Picker selectedValue={painSide} onValueChange={setPainSide}>
+                      <Picker.Item label="—" value="" />
+                      <Picker.Item label="Lewa" value="left" />
+                      <Picker.Item label="Prawa" value="right" />
+                    </Picker>
+                  </View>
+                </>
+              )}
+              <Text style={styles.label}>Intensywność (0 = ledwo wyczuwalny, 10 = nie do zniesienia)</Text>
+              {/* colorForValue: odwrócony gradient — tu im wyżej tym GORZEJ. */}
+              <ScalePicker value={painIntensity} onChange={setPainIntensity} colorForValue={higherIsWorseColor} />
+              <TouchableOpacity style={styles.checkboxRow} onPress={() => setPainExcludes((v) => !v)}>
+                <Checkbox value={painExcludes} onValueChange={setPainExcludes} />
+                <Text style={styles.checkboxLabel}>To wyklucza mnie z treningu</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      );
+    }
 
-      <View style={styles.block}>
-        <TouchableOpacity style={styles.checkboxRow} onPress={() => setHasPain((v) => !v)}>
-          <Checkbox value={hasPain} onValueChange={setHasPain} />
-          <Text style={styles.checkboxLabel}>Boli Cię dziś coś?</Text>
-        </TouchableOpacity>
-        {hasPain && (
-          <>
-            <Text style={styles.label}>Lokalizacja</Text>
-            <View style={styles.pickerWrap}>
-              <Picker selectedValue={painLocation} onValueChange={setPainLocation}>
-                {BODY_LOCATIONS.map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
-              </Picker>
-            </View>
-            {!NON_LATERAL_LOCATIONS.has(painLocation) && (
-              <>
-                <Text style={styles.label}>Strona</Text>
-                <View style={styles.pickerWrap}>
-                  <Picker selectedValue={painSide} onValueChange={setPainSide}>
-                    <Picker.Item label="—" value="" />
-                    <Picker.Item label="Lewa" value="left" />
-                    <Picker.Item label="Prawa" value="right" />
-                  </Picker>
-                </View>
-              </>
-            )}
-            <Text style={styles.label}>Intensywność (0 = ledwo wyczuwalny, 10 = nie do zniesienia)</Text>
-            {/* colorForValue: odwrócony gradient — tu im wyżej tym GORZEJ. */}
-            <ScalePicker value={painIntensity} onChange={setPainIntensity} colorForValue={higherIsWorseColor} />
-            <TouchableOpacity style={styles.checkboxRow} onPress={() => setPainExcludes((v) => !v)}>
-              <Checkbox value={painExcludes} onValueChange={setPainExcludes} />
-              <Text style={styles.checkboxLabel}>To wyklucza mnie z treningu</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-
-      {/* ⭐ PAS T2 19.08.2026 — przycisk po 12:00 SZARZEJE przy wpisie porannym,
-          a nie znika: zawodnik ma widzieć, że ekran jest ten sam i że to okno,
-          a nie awaria. ⛔ To jest wygląd — prawdziwa zapora stoi w
-          `submitDailyLog`, bo `disabled` przestaje obowiązywać w tej samej
-          sekundzie, w której ktoś zmieni ten JSX. */}
-      <TouchableOpacity
-        style={[styles.btn, (saving || (entryType === 'morning' && !oknoPorankaOtwarte)) && styles.btnDisabled]}
-        disabled={saving || (entryType === 'morning' && !oknoPorankaOtwarte)}
-        onPress={submitDailyLog}
-      >
-        <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Zapisz wpis'}</Text>
-      </TouchableOpacity>
-
-      <View style={{ marginTop: 40 }}>
-        <Text style={styles.sectionLabel}>Historia wpisów</Text>
+    /* arkusz === 'historia' — pustka i do dwudziestu kart, co do znaku jak dotąd. */
+    return (
+      <View>
         {/* ⭐ PLAN-D-C3 15.08.2026 — brzmienie „Brak wpisów — dodaj pierwszy
             powyżej." idzie CO DO ZNAKU (zakaz 4), razem z krokiem, który już
             w nim siedzi. Zmienia się wyłącznie to, KIEDY zawodnik je czyta. */}
@@ -866,7 +866,245 @@ export default function DziennikScreen() {
           );
         })}
       </View>
+    );
+  }
+
+  /**
+   * ⭐ D3 — JEDNO WEJŚCIE DO ARKUSZA, JEDEN KSZTAŁT (wzorzec pasa M2).
+   * ⛔ Strzałka „→" jest w tym produkcie afordancją dotknięcia, więc każdy
+   * taki wiersz MUSI być `TouchableOpacity` z `onPress` — napis ze strzałką
+   * bez akcji to fałszywy przycisk (pilnuje tego `pustkaWCalymRepo`).
+   * ⛔ Napis bierze się z `NAPIS_ARKUSZA`, czyli z TEGO SAMEGO miejsca, co
+   * tytuł arkusza — nie z drugiego literału obok.
+   */
+  function wejscieArkusza(rodzaj: RodzajArkuszaDziennika) {
+    return (
+      <TouchableOpacity
+        style={styles.wejscie}
+        accessibilityRole="button"
+        onPress={() => setArkusz(rodzaj)}
+      >
+        <Text style={styles.wejscieNapis}>{NAPIS_ARKUSZA[rodzaj]} →</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView
+      contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
+    >
+      <Text style={styles.title}>Dziennik zawodnika</Text>
+
+      <View style={styles.toggle}>
+        {/* ⭐⛔ PAS T2 19.08.2026 — KAFEL ANKIETY NIE ZNIKA PO 12:00.
+            Szarzeje (`toggleBtnPoOknie`) i zostaje dotykalny, żeby zawodnik
+            mógł dotknąć i PRZECZYTAĆ POWÓD. Reguła R5: kafel, który znika,
+            sprawia, że zawodnik nie odróżnia „wypełniłem" od „przepadło" —
+            a to są dwie różne rzeczy i tylko jedna z nich jest jego.
+            ⛔ Zaszarzenie NIE JEST czerwienią i nie jest ostrzeżeniem (Z2).
+            ⭐⭐ D3 21.08.2026 — I DLATEGO SZARZEJE DZIŚ TYLKO W JEDNYM
+            Z CZTERECH STANÓW. Do 21.08 warunkiem było samo `!oknoPorankaOtwarte`,
+            czyli zawodnik, który ankietę WYPEŁNIŁ, dostawał tę samą szarość,
+            co ten, któremu PRZEPADŁA. Szarość znaczy od dziś dokładnie jedno:
+            „okno zamknięte i wpisu z dzisiaj nie ma". */}
+        <TouchableOpacity
+          style={[
+            styles.toggleBtn,
+            entryType === 'morning' && styles.toggleBtnActive,
+            stanAnkiety === 'zamkniete_wpisu_nie_ma' && styles.toggleBtnPoOknie,
+          ]}
+          onPress={() => setEntryType('morning')}
+        >
+          <Text style={[styles.toggleTxt, entryType === 'morning' && styles.toggleTxtActive]}>Wpis poranny</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleBtn, entryType === 'post_training' && styles.toggleBtnActive]}
+          onPress={() => setEntryType('post_training')}
+        >
+          <Text style={[styles.toggleTxt, entryType === 'post_training' && styles.toggleTxtActive]}>Wpis potreningowy</Text>
+        </TouchableOpacity>
+      </View>
+
+      {error && <Text style={styles.error}>{error}</Text>}
+      {ok && <Text style={styles.ok}>{ok}</Text>}
+
+      {entryType === 'morning' && stanAnkiety === 'zamkniete_wpis_jest' ? (
+        /* ⭐⭐ D3 — STAN DRUGI Z CZTERECH: OKNO ZAMKNIĘTE, ALE WPIS JEST.
+           ⛔ To jest cała treść zadania §4: zawodnik, który wypełnił rano, ma
+           przeczytać, ŻE JEGO WPIS JEST — a nie to samo zdanie o przepadnięciu,
+           które czyta ktoś, kto nie wypełnił. ⛔ Zdanie nie chwali go za to,
+           że wypełnił, i nie liczy dni (N1). ⛔ Bez czerwieni (Z2). */
+        <View style={styles.stanAnkietyBox}>
+          <Text style={styles.stanAnkietyTxt}>{ANKIETA_PORANNA_WYPELNIONA_ZDANIE}</Text>
+        </View>
+      ) : entryType === 'morning' && stanAnkiety === 'zamkniete_nie_wiemy' ? (
+        /* ⭐⭐ D3 — STAN CZWARTY: NIE WIEMY, BO ODCZYT PADŁ.
+           ⛔ NIE ZLEWAMY GO Z „nie wypełniona". Odmowa dostępu, brak sieci
+           albo wygasły okres próbny nie są dowodem na to, że zawodnik czegoś
+           nie zrobił — a produkt, który to zrównuje, kłamie mu o jego pracy. */
+        <View style={styles.stanAnkietyBox}>
+          <Text style={styles.stanAnkietyTxt}>{ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE}</Text>
+        </View>
+      ) : entryType === 'morning' && stanAnkiety === 'zamkniete_wpisu_nie_ma' ? (
+        /* ⭐⛔ PAS T2 19.08.2026 — ZAMKNIĘTE OKNO PORANKA MÓWI, DLACZEGO.
+           ⛔ Formularz NIE JEST rysowany: pola, których nie da się zapisać,
+           byłyby zaproszeniem do pracy, która przepada przy dotknięciu
+           „Zapisz". ⭐ Ale kafel wyżej ZOSTAJE — to jest cała różnica między
+           „szarzeje" a „znika".
+           ⛔ To zdanie NIE MÓWI, ile dni z rzędu zawodnik nie wypełnił, bo
+           takiej liczby w tym produkcie nie ma i mieć nie będzie (N1).
+           ⛔ Wpis potreningowy jest nadal dostępny — okno dotyczy PORANKA. */
+        <View style={styles.oknoZamknieteBox}>
+          <Text style={styles.oknoZamknieteTxt}>{OKNO_PORANKA_ZAMKNIETE_ZDANIE}</Text>
+        </View>
+      ) : entryType === 'morning' ? (
+        /* ⭐⭐ D3 — RDZEŃ WPISU PORANNEGO: TRZY RZECZY O NOCY, KTÓRA MINĘŁA.
+           Sen w godzinach, jakość snu i poranna energia to trzy pomiary tego
+           samego — stanu, w jakim zawodnik wstał. ⛔ Nastrój / motywacja
+           i notatka NIE ZNIKNĘŁY: zeszły do arkuszy i mają wiersze wejścia
+           pod przyciskiem zapisu. */
+        <>
+          <Text style={styles.label}>Ile godzin spałeś?</Text>
+          {/* ZMIANA 05.08.2026, na prośbę Kuby: było pole tekstowe (ryzyko
+              literówek/przecinka z klawiatury) — suwak, ten sam sprawdzony
+              komponent co reszta skal w tym formularzu.
+              ZMIANA 06.08.2026: zakres zawężony z 0-24 do 0-12 (realistyczny
+              zakres snu — 0-24 dawało fałszywe wrażenie, że pół doby przespanej
+              to "połowa suwaka"). `sleep_hours` nie ma węższego CHECK w bazie
+              niż 0-24, więc zawężenie w UI mieści się w istniejącym ograniczeniu;
+              silnik rekomendacji patrzy tylko na wartość, nie na max suwaka.
+              colorForValue: progi dopasowane do progu silnika (7h), nie gradient
+              ciągły — patrz lib/scale-colors.ts. */}
+          <ScalePicker
+            value={sleepHours}
+            onChange={setSleepHours}
+            min={0}
+            max={12}
+            step={0.5}
+            suffix="godz."
+            colorForValue={sleepHoursColor}
+          />
+          <Text style={styles.label}>Jakość snu (0 = fatalna, 10 = doskonała)</Text>
+          <ScalePicker value={sleepQuality} onChange={setSleepQuality} colorForValue={higherIsBetterColor} />
+          <Text style={styles.label}>Poranny poziom energii (0 = bardzo niski, 10 = pełnia energii)</Text>
+          {/* ZMIANA 06.08.2026, na prośbę Kuby: było "poranne zmęczenie" (jedyny
+              suwak w tej formie działający "im wyżej tym gorzej"). Dziś: energia
+              (im wyżej tym lepiej, spójnie z resztą), pokazana jako wariant
+              "bateria" ScalePickera — najbardziej intuicyjny sposób pokazania
+              "co się uzupełnia" (pomysł Kuby 06.08.2026), z opisem słownym pod
+              wartością. Konwersja na `morning_fatigue` przy zapisie, patrz
+              submitDailyLog. */}
+          <ScalePicker
+            value={morningEnergy}
+            onChange={setMorningEnergy}
+            variant="battery"
+            colorForValue={higherIsBetterColor}
+            describeValue={describeEnergyLevel}
+          />
+        </>
+      ) : (
+        /* ⭐⭐ D3 — RDZEŃ WPISU POTRENINGOWEGO: co to była za sesja, ile
+           trwała, czy to była sesja Bloku i jak ciężko było. ⛔ Powiązanie
+           z wydarzeniem kalendarza i zmęczenie po treningu zeszły do arkuszy
+           — obie rzeczy mają wiersze wejścia pod przyciskiem zapisu. */
+        <>
+          <Text style={styles.label}>Rodzaj sesji</Text>
+          <View style={styles.pickerWrap}>
+            <Picker selectedValue={sessionType} onValueChange={setSessionType}>
+              {Object.entries(SESSION_TYPE_LABELS).map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
+            </Picker>
+          </View>
+          <Text style={styles.label}>Czas trwania (minuty)</Text>
+          <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={duration} onChangeText={setDuration} placeholder="np. 90" />
+          {/* ZAPIS B7 08.08.2026 (SEDNO RUNDY 7) — zamiast liczyć na to, że
+              zawodnik sam otworzy picker niżej, pytamy wprost o sesję Bloku.
+              „Tak" ustawia DOKŁADNIE to samo powiązanie, które od zawsze
+              zalicza sesję we wskaźniku „N z M" (daily_logs.calendar_event_id)
+              — zero nowego znaczenia w bazie. „Nie" niczego nie ocenia i
+              chowa pytanie; picker zostaje dla każdego innego przypadku —
+              ⭐ od 21.08 w arkuszu „Powiąż z zaplanowanym wydarzeniem". */}
+          {blockSession && !blockPromptAnswered && !calendarLinkId ? (
+            <View style={styles.blockPromptBox}>
+              <Text style={styles.blockPromptQuestion}>
+                {blockSessionQuestion(blockSession, toLocalDateStr(new Date()))}
+              </Text>
+              <Text style={styles.blockPromptSession} numberOfLines={1}>{blockSession.title}</Text>
+              <View style={styles.blockPromptRow}>
+                <TouchableOpacity
+                  style={[styles.blockPromptBtn, styles.blockPromptBtnYes]}
+                  onPress={() => { setCalendarLinkId(String(blockSession.id)); setBlockPromptAnswered(true); }}
+                >
+                  <Text style={styles.blockPromptBtnYesTxt}>{BLOCK_LINK_YES_LABEL}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.blockPromptBtn}
+                  onPress={() => setBlockPromptAnswered(true)}
+                >
+                  <Text style={styles.blockPromptBtnTxt}>{BLOCK_LINK_NO_LABEL}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+          <Text style={styles.label}>RPE — odczuwany wysiłek (0 = brak, 10 = maksymalny)</Text>
+          {/* colorForValue: świadomie NEUTRALNY (nie czerwony/zielony) — wysoki
+              wysiłek treningowy nie jest z definicji "zły", często jest celem.
+              Patrz lib/scale-colors.ts, neutralIntensityColor. */}
+          <ScalePicker value={rpe} onChange={setRpe} colorForValue={neutralIntensityColor} />
+        </>
+      )}
+
+      {/* ⭐ PAS T2 19.08.2026 — przycisk po 12:00 SZARZEJE przy wpisie porannym,
+          a nie znika: zawodnik ma widzieć, że ekran jest ten sam i że to okno,
+          a nie awaria. ⛔ To jest wygląd — prawdziwa zapora stoi w
+          `submitDailyLog`, bo `disabled` przestaje obowiązywać w tej samej
+          sekundzie, w której ktoś zmieni ten JSX. */}
+      <TouchableOpacity
+        style={[styles.btn, (saving || (entryType === 'morning' && !oknoPorankaOtwarte)) && styles.btnDisabled]}
+        disabled={saving || (entryType === 'morning' && !oknoPorankaOtwarte)}
+        onPress={submitDailyLog}
+      >
+        <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Zapisz wpis'}</Text>
+      </TouchableOpacity>
+
+      {/* ⭐⭐ D3 — WEJŚCIA ZASTĘPCZE. ⛔ TO JEST WARUNEK 3 POLECENIA: nie ma
+          stanu tego pliku, w którym pole zeszło z ekranu, a wejścia do niego
+          jeszcze nie ma. Każdy wiersz otwiera arkusz z DOKŁADNIE tą treścią,
+          która do 21.08 leżała na ekranie, i nosi DOKŁADNIE tę etykietę,
+          która nad nią stała.
+          ⛔ Dwa pierwsze wiersze zależą od rodzaju wpisu, bo zależą od niego
+          same pola: „nastrój" i „notatka" należą do poranka, „powiązanie"
+          i „zmęczenie" do wpisu potreningowego. ⭐ Ból i historia stoją
+          BEZWARUNKOWO — obie rzeczy dotyczą obu wpisów. */}
+      <View style={styles.wejscia}>
+        {entryType === 'morning' ? (
+          <>
+            {wejscieArkusza('nastroj')}
+            {wejscieArkusza('notatka')}
+          </>
+        ) : (
+          <>
+            {wejscieArkusza('powiazanie')}
+            {wejscieArkusza('zmeczenie')}
+          </>
+        )}
+        {wejscieArkusza('bol')}
+        {wejscieArkusza('historia')}
+      </View>
     </ScrollView>
+
+    {/* ── ARKUSZ ────────────────────────────────────────────────────
+        ⛔ STOI POZA `ScrollView`: to jest NAKŁADKA nad ekranem, a nie
+        kolejna rzecz na nim. Dlatego zdejmuje wysokość, zamiast ją
+        przesuwać — i dlatego miara ekranu liczy go na zero. */}
+    <Arkusz
+      widoczny={arkusz !== null}
+      naglowek={arkusz === null ? null : naglowekArkuszaDziennika(arkusz)}
+      naZamkniecie={() => setArkusz(null)}
+    >
+      {arkusz === null ? null : trescArkusza()}
+    </Arkusz>
     </SafeAreaView>
   );
 }
@@ -885,6 +1123,15 @@ const styles = StyleSheet.create({
   toggleBtnPoOknie: { opacity: 0.4 },
   oknoZamknieteBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.md, marginBottom: spacing.md },
   oknoZamknieteTxt: { ...typography.body, fontSize: 14, color: colors.textSecondary },
+  // ⭐⭐ D3 21.08.2026 — DWA POZOSTAŁE STANY ANKIETY (wpis JEST · NIE WIEMY).
+  // ⛔ ZERO CZERWIENI (Z2): ani „wpis jest", ani „nie udało się sprawdzić"
+  // nie są ostrzeżeniem o ciele. ⛔ Ramka jest wyraźniejsza niż przy
+  // przepadnięciu (lewa krecha zamiast pełnego obramowania), żeby te trzy
+  // stany dało się odróżnić W CIEMNO — ⭐ ale nośnikiem różnicy jest ZDANIE,
+  // nie kolor (K4): jeden na dwunastu chłopców nie rozróżnia części barw
+  // i czyta dokładnie to samo, co reszta.
+  stanAnkietyBox: { borderLeftWidth: 3, borderLeftColor: colors.textPrimary, borderRadius: radii.sm, backgroundColor: colors.surfaceElevated, padding: spacing.md, marginBottom: spacing.md },
+  stanAnkietyTxt: { ...typography.body, fontSize: 14, lineHeight: 19, color: colors.textPrimary },
   // W1: nadtytuły na ink3 (koncepcja: ink3 = podpisy, nadtytuły)
   label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 },
   sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: spacing.md },
@@ -917,4 +1164,17 @@ const styles = StyleSheet.create({
   historyDetail: { ...typography.body, fontSize: 13, color: colors.textSecondary },
   historySeparator: { color: colors.textSecondary },
   painTag: { fontSize: 11, marginTop: 4 },
+  // ⭐⭐ D3 21.08.2026 — WIERSZE WEJŚCIA DO ARKUSZY (kształt z pasa M2).
+  // ⛔ Bez podpisu pod napisem — patrz komentarz przy `RodzajArkuszaDziennika`:
+  // każdy arkusz tego ekranu trzyma DOKŁADNIE JEDNĄ rzecz, której etykieta
+  // jest już jego tytułem, więc podpis byłby parafrazą tytułu.
+  wejscia: { marginTop: 28 },
+  wejscie: {
+    minHeight: minTouchHeight,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: 10,
+  },
+  wejscieNapis: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
 });

@@ -29,7 +29,14 @@ import { colors, typography, spacing, radii, minTouchHeight } from '../../consta
 import { SEGMENT_LABELS, BODY_LOCATIONS, NON_LATERAL_LOCATIONS } from '../../lib/labels';
 import { MATCH_QUESTION_BANK } from '../../lib/matchQuestionBank';
 import { selectSegmentForMatch, resolveWordingKey, SegmentSelection, RecoveryState } from '../../lib/matchCascade';
-import { fetchPlayerMatchSelectionContext } from '../../lib/matchSegmentSelection';
+import {
+  fetchPlayerMatchSelectionContext,
+  // ⭐ PLAN-D-M3 21.08.2026 — odczyt „które segmenty ten mecz już ma" stoi
+  // w WARSTWIE I/O, a nie tutaj: `lib/matchCascade.selftest.ts` (I2-0)
+  // pilnuje, że ten ekran nie czyta wejść kaskady własnym zapytaniem, i ma
+  // rację. ⛔ Strażnik nie jest osłabiony — odczyt stanął tam, gdzie chce.
+  segmentyJuzZapisaneDlaMeczu,
+} from '../../lib/matchSegmentSelection';
 // PLAN-D-T 08.2026 (14.08.2026), zadanie T6 — komunikat o braku dostępu
 // zamiast surowego błędu RLS. Ten sam, którym pas K zastąpił błąd
 // w Dzienniku (`lib/dostepKonta.ts`). Zero nowej treści.
@@ -102,16 +109,48 @@ import { naglowekArkusza, type NaglowekArkusza } from '../../lib/arkusz';
 // ⭐ PLAN-D-D8 → M2: reguła sprzeczności minut i podpis arkusza meczu mają
 // DOKŁADNIE JEDNO miejsce — `lib/meczWiecej.ts` (pas D2). Ten ekran ich
 // UŻYWA. ⛔ Drugie brzmienie tej samej reguły byłoby drugim słownikiem (O92).
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PLAN-D-M3 21.08.2026 — PEŁNA KARTA MECZU PRZESTAJE MIEĆ WŁASNĄ DROGĘ
+// ZAPISU I ZACZYNA WIĄZAĆ WYDARZENIE.
+//
+// ⛔⛔ CO BYŁO ZEPSUTE — ZMIERZONE, NIE PRZYPUSZCZONE. `grep` na
+// `zdecydujOZapisieMeczu` i na `calendar_event_id` w tym pliku dawał 21.08
+// ZERO TRAFIEŃ. Ten ekran budował `body` własną ręką i robił `insert` do
+// `match_contexts` z pominięciem jedynej reguły zapisu meczu — a wiersz
+// zakładał ZAWSZE NIEZWIĄZANY.
+//
+// SKUTEK DLA ZAWODNIKA: zagrał mecz, wypełnił PEŁNĄ kartę — i licznik pracy
+// liczył ten mecz DWA RAZY (raz jako wydarzenie w kalendarzu, raz jako wiersz
+// `match_contexts`), czyli **7 punktów zamiast 4**. Pas D2 zamknął to na
+// ścieżce z kafla; ta ścieżka o tamtej naprawie nie wiedziała.
+//
+// ⭐ CO SIĘ ZMIENIŁO. Zapis idzie przez `zdecydujOZapisieMeczu` — JEDNO
+// źródło decyzji o zapisie meczu dla obu ekranów — z `idWydarzenia`
+// i `wydarzeniaZawodnika`, więc działa bramka właściciela z D2 §2.1.
+// ⛔ Wystąpienie ustalamy PRZED zapisem meczu, ale jego porażka NIE JEST
+// awarią zapisu: wiersz idzie wtedy z `calendar_event_id = null` i liczy się
+// normalnie. ⛔ Nikomu nie odbieramy punktów.
+// ═══════════════════════════════════════════════════════════════════
 import {
   minutyPonadDlugosc,
   MECZ_MINUTY_PONAD_DLUGOSC,
   podpisArkuszaMeczu,
+  zdecydujOZapisieMeczu,
+  opisZapisuMeczuDoLogu,
+  toJestDrugiWierszNaMecz,
+  MECZ_JUZ_MA_WIERSZ,
+  RODZAJE_MECZU,
+  napisRodzajuMeczu,
+  napisRodzajuZapisanegoMeczu,
+  POLE_RODZAJ_MECZU,
+  type OcenaMeczu,
+  type WiecejOMeczu,
+  type StanKontekstuMeczu,
 } from '../../lib/meczWiecej';
-
-const GAME_TYPE_LABELS: Record<string, string> = {
-  official_match: 'Mecz oficjalny', friendly: 'Sparing',
-  training_game: 'Gierka treningowa', tournament: 'Turniej',
-};
+// ⭐ PLAN-D-M3 — ten sam sposób odnajdywania własnego wiersza po restarcie,
+// którego używa „Dziś" (pas D2). ⛔ Bez niego druga ocena tego samego meczu
+// zakłada DRUGI wiersz, a licznik pracy liczy go drugi raz.
+import { mapaWierszyMeczuPoWydarzeniu } from '../../lib/wejsciaWgladow';
 const SEGMENT_AVAILABILITY_LABELS: Record<string, string> = {
   available: 'dostępne', partial: 'częściowo dostępne', unavailable: 'niedostępne',
 };
@@ -178,6 +217,13 @@ type MatchRow = {
   own_score: number | null; opponent_score: number | null;
   role: string | null; minutes_played: number | null; match_rpe: number | null;
   self_rating: number | null;
+  /**
+   * ⭐⭐ PLAN-D-M3 21.08.2026 — WIĄZANIE Z WYSTĄPIENIEM, odczytane z bazy.
+   * ⛔ To jest jedyna droga, którą ten ekran ODNAJDUJE swój wiersz po
+   * restarcie aplikacji. Pole zapisane i nieodczytane wygląda dokładnie tak
+   * samo jak pole, którego nie ma.
+   */
+  calendar_event_id: number | null;
 };
 
 // Jeden "slot" pytania segmentowego wyświetlanego na ekranie.
@@ -216,7 +262,12 @@ function naglowekArkuszaMeczu(rodzaj: RodzajArkuszaMeczu, tytulMeczu: string): N
     case 'wiecej':
       // ⭐ Tytuł i kicker z `lib/arkusz.ts` (pas A1), podpis z `lib/meczWiecej.ts`
       // (pas D8). ⛔ Ani jedno słowo nie powstaje w tym pliku.
-      return { ...naglowekArkusza('meczWiecej', tytulMeczu), podpis: podpisArkuszaMeczu() };
+      // ⭐⭐ PLAN-D-M3 21.08.2026 — PODPIS WIE, GDZIE STOI.
+      // ⛔ Do 21.08 kończył się tu zdaniem „Kolejne N zapisujesz w pełnej
+      // karcie meczu" — czyli odsyłał zawodnika tam, gdzie już jest.
+      // ⛔ Wariant nie powstaje w tym pliku: rozstrzyga go `lib/meczWiecej.ts`,
+      // a liczby wylicza z `RZECZY_O_MECZU`.
+      return { ...naglowekArkusza('meczWiecej', tytulMeczu), podpis: podpisArkuszaMeczu('pelna_karta') };
     case 'bol':
       return { kicker: 'Mecz', tytul: 'Boli Cię dziś coś?', podpis: '' };
     case 'historia':
@@ -230,7 +281,15 @@ export default function MeczScreen() {
   const { currentUser } = useAuth();
 
   // Pola już istniejące
-  const [gameType, setGameType] = useState('official_match');
+  /**
+   * ⭐⭐ PLAN-D-M3 21.08.2026 (Z6) — ⛔ ANI JEDNA WARTOŚĆ NIE JEST ZAZNACZONA
+   * Z GÓRY. Do 21.08 ten stan startował z `'official_match'`, więc zawodnik,
+   * który zagrał sparing i nie ruszył Pickera, zapisywał „Mecz oficjalny"
+   * i NIKT GO O TO NIE ZAPYTAŁ. Uchwyt, który gdzieś stoi, jest podpowiedzią.
+   * ⛔ `null` = nie wskazał. To NIE JEST `official_match` (R5) — przy zapisie
+   * podstawia się `RODZAJ_MECZU_Z_KAFLA`, ale te dwa stany są trzymane osobno.
+   */
+  const [gameType, setGameType] = useState<string | null>(null);
   const [ownScore, setOwnScore] = useState('');
   const [opponentScore, setOpponentScore] = useState('');
   const [role, setRole] = useState('');
@@ -288,6 +347,19 @@ export default function MeczScreen() {
   // ⭐ M2 — KTÓRY ARKUSZ JEST OTWARTY. `null` = ekran, nic nad nim.
   const [arkusz, setArkusz] = useState<RodzajArkuszaMeczu | null>(null);
 
+  /**
+   * ⭐⭐ PLAN-D-M3 21.08.2026 — DWA ŹRÓDŁA WIEDZY O TYM, CZY TEN MECZ JUŻ MA
+   * WIERSZ. Ta sama para, którą ma „Dziś" (pas D2 §4.3):
+   *   1. `idWierszaMeczuWWizycie` — wiersz założony W TEJ WIZYCIE.
+   *   2. `wierszeMeczuPoWydarzeniu` — wiersz założony KIEDYKOLWIEK, odczytany
+   *      z bazy po `calendar_event_id`.
+   * ⛔ Bez drugiego źródła po restarcie aplikacji ten sam mecz zakładałby
+   * DRUGI wiersz — czyli podwójne liczenie wracałoby tylnymi drzwiami.
+   */
+  const [idWierszaMeczuWWizycie, setIdWierszaMeczuWWizycie] = useState<number | null>(null);
+  const [wierszeMeczuPoWydarzeniu, setWierszeMeczuPoWydarzeniu] =
+    useState<Map<number, number>>(new Map());
+
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -342,7 +414,19 @@ export default function MeczScreen() {
       return;
     }
     setOdczytHistoriiUdanySie(true);
-    setHistory((rows ?? []) as MatchRow[]);
+    const wiersze = (rows ?? []) as MatchRow[];
+    setHistory(wiersze);
+    // ⭐⭐ PLAN-D-M3 — MAPA `calendar_events.id` → `match_contexts.id`.
+    // ⛔ NIEUDANY ODCZYT NIE CZYŚCI TEJ MAPY (`return` wyżej): wyczyszczenie
+    // znaczyłoby „ten mecz nie ma wiersza", czyli zaproszenie do założenia
+    // drugiego (Z0, wzorzec pasa D2).
+    setWierszeMeczuPoWydarzeniu(mapaWierszyMeczuPoWydarzeniu(
+      wiersze.map((r) => ({
+        id: r.id, created_at: r.created_at, match_rpe: r.match_rpe,
+        entered_recovery_state: null, minutes_played: r.minutes_played,
+        match_length_minutes: null, calendar_event_id: r.calendar_event_id,
+      })),
+    ));
   }, [currentUser]);
 
   // Wybór 2 pytań segmentowych z kaskady (Krok 3) — liczone RAZ, dopiero
@@ -459,6 +543,11 @@ export default function MeczScreen() {
   });
 
   const resetForm = () => {
+    // ⛔ PLAN-D-M3 — rodzaj wraca do „nie wskazał", a nie do `official_match`.
+    // ⚠️ `idWierszaMeczuWWizycie` NIE JEST tu czyszczone i to jest zamierzone:
+    // to on sprawia, że kolejne dotknięcie „Zapisz mecz" DOKŁADA do wiersza,
+    // zamiast zakładać drugi.
+    setGameType(null);
     setOwnScore(''); setOpponentScore(''); setRole(''); setMinutes(''); setDlugoscMeczu(''); setMatchRpe(undefined);
     setGodzinaMeczu('');
     setPlayedDifferentPosition(false); setPositionPlayedToday('');
@@ -478,23 +567,49 @@ export default function MeczScreen() {
 
   /**
    * PLAN-D-A7 — ODBICIE MECZU W KALENDARZU. Jeden tor, zero drugiego formularza.
+   * ⭐⭐ PLAN-D-M3 21.08.2026 — PRZEPISANE: ta funkcja ODDAJE TERAZ WYSTĄPIENIE.
    *
-   * Zwraca `null`, gdy się udało, albo POWÓD porażki (do logu). Ta funkcja
-   * ŚWIADOMIE NIE RZUCA: mecz jest już w `match_contexts` i nic, co stanie się
-   * tutaj, nie ma prawa tego cofnąć ani zamienić w komunikat o awarii zapisu.
+   * ⛔ DLACZEGO ODDAJE, A NIE TYLKO ZAPISUJE. Wiersz `match_contexts` musi
+   * nieść `calendar_event_id` (pas D2 §4.1), bo inaczej licznik pracy nie ma
+   * czym zestawić meczu z wydarzeniem i LICZY OBA. Identyfikator wystąpienia
+   * powstaje właśnie tutaj — albo jest odnaleziony wśród istniejących, albo
+   * wraca z `insert`-a. Zostawienie go w tej funkcji znaczyłoby, że pełna
+   * karta meczu nadal zakłada wiersze niezwiązane.
+   *
+   * ⭐ ODDAJE TAKŻE LISTĘ WYSTĄPIEŃ ZAWODNIKA. `ustalWiazanieMeczu` sprawdza
+   * WŁAŚCICIELA wystąpienia — klucz obcy tego nie pilnuje (D2 §3). Lista jest
+   * zbudowana z odczytu filtrowanego po `user_id`, więc niesie wyłącznie jego
+   * wystąpienia. ⛔ `null` znaczy „nie odczytałem" i NIE JEST pustym zbiorem
+   * (R5): przy nieznanej liście nie wiążemy niczego.
+   *
+   * ⚠️ ŚWIADOMIE NIE RZUCA. Porażka kalendarza nie ma prawa cofnąć ani
+   * zablokować zapisu meczu — wtedy `idWydarzenia` jest `null`, wiersz idzie
+   * niezwiązany i ⛔ liczy się NORMALNIE. Nikomu nie odbieramy punktów.
    *
    * ⚠️ `scheduled_date` to DZIŚ, i to jest granica, którą trzeba znać.
    * `match_contexts` nie ma pola „kiedy był mecz" — ma `created_at`, czyli
    * kiedy zawodnik go zapisał, i to tę datę ekran pokazuje w historii meczów
-   * (`renderMatchCard` niżej). Kafel w kalendarzu stoi więc dokładnie tam,
-   * gdzie produkt i tak już ten mecz umieszcza. Zawodnik, który opisuje mecz
-   * trzy dni po fakcie, dostanie kafel w złym dniu — to jest znalezisko tej
-   * rundy, opisane w nocie przekazania, a NIE rzecz, którą wolno tu zgadywać.
+   * (`renderMatchCard` niżej). Zawodnik, który opisuje mecz trzy dni po fakcie,
+   * dostanie kafel w złym dniu — to jest znalezisko poprzedniej rundy, a NIE
+   * rzecz, którą wolno tu zgadywać.
    */
-  async function dopiszMeczDoKalendarza(godzina: string | null): Promise<string | null> {
-    if (!currentUser) return 'brak zalogowanego zawodnika';
+  type WystapienieMeczu = {
+    /** `calendar_events.id` albo `null`, gdy nie udało się go ustalić. */
+    idWydarzenia: number | null;
+    /** ⛔ `null` = odczyt nie doszedł do skutku. To NIE jest pusty zbiór (R5). */
+    wydarzeniaZawodnika: ReadonlySet<number> | null;
+    /** Powód porażki do logu, albo `null`. */
+    blad: string | null;
+  };
+
+  async function ustalWystapienieMeczu(godzina: string | null): Promise<WystapienieMeczu> {
+    const nic: WystapienieMeczu = { idWydarzenia: null, wydarzeniaZawodnika: null, blad: null };
+    if (!currentUser) return { ...nic, blad: 'brak zalogowanego zawodnika' };
     const data = toLocalDateStr(new Date());
-    const tytul = GAME_TYPE_LABELS[gameType] || 'Mecz';
+    // ⭐ PLAN-D-M3 — tytuł kafla NIE MOŻE twierdzić „Mecz oficjalny", kiedy
+    // zawodnik rodzaju nie wskazał (Z0). `napisRodzajuMeczu(null)` oddaje
+    // neutralne „Mecz" — ten sam napis, który stał tu wcześniej jako `|| 'Mecz'`.
+    const tytul = napisRodzajuMeczu(gameType);
 
     // Krok 1 — CZY TEN MECZ JUŻ JEST W KALENDARZU. Bez tego odczytu nie da się
     // odróżnić „zaplanowałem i opisuję" od „opisuję bez planu", a to jest cała
@@ -510,8 +625,14 @@ export default function MeczScreen() {
       // wiedzy o tym, co już jest, jest dokładnie tym drugim torem, którego
       // ta runda zakazuje — a duplikat w kalendarzu jest gorszy niż jego brak,
       // bo wygląda na prawdziwy.
-      return `odczyt istniejących wierszy: ${odczytErr.message}`;
+      return { ...nic, blad: `odczyt istniejących wierszy: ${odczytErr.message}` };
     }
+
+    const istniejace = (istniejaceSurowe ?? []) as WierszKalendarzaDoDecyzji[];
+    // ⭐ ODCZYT SIĘ UDAŁ — od tej chwili lista JEST znana, także gdy jest pusta.
+    const moje = new Set<number>(
+      istniejace.map((w) => Number(w.id)).filter((n) => Number.isFinite(n)),
+    );
 
     const decyzja = zdecydujOWierszuMeczu({
       userId: currentUser.id,
@@ -521,7 +642,7 @@ export default function MeczScreen() {
       // ⭐ PLAN-D-W2 — pusto zostaje pustem: nie podstawiamy tu 90 minut,
       // bo zmyślona długość weszłaby do wagi pracy jako pomiar (Z0).
       dlugoscMeczu: dlugoscMeczu.trim() === '' ? null : Number(dlugoscMeczu),
-      istniejace: (istniejaceSurowe ?? []) as WierszKalendarzaDoDecyzji[],
+      istniejace,
     });
     console.log(`[PLAN-D-A7] mecz → kalendarz: ${decyzja.powod}`);
 
@@ -531,20 +652,55 @@ export default function MeczScreen() {
         .update(decyzja.zmiany)
         .eq('id', decyzja.id)
         .select('id');
-      if (updErr) return `aktualizacja id=${decyzja.id}: ${updErr.message}`;
+      if (updErr) {
+        return { idWydarzenia: null, wydarzeniaZawodnika: moje, blad: `aktualizacja id=${decyzja.id}: ${updErr.message}` };
+      }
       // ⚠️ PostgREST przy odmowie RLS na UPDATE nie zwraca błędu — zwraca ZERO
       // zmienionych wierszy. Bez tego sprawdzenia „nie mam uprawnień" byłoby
       // nieodróżnialne od „zapisano" (ten sam wzorzec, który pas A1 opisał
       // w `lib/focusBlockJournalLink.ts`).
       if (!zmienione || zmienione.length === 0) {
-        return `aktualizacja id=${decyzja.id} nie zmieniła ANI JEDNEGO wiersza (najczęściej RLS: calendar_events_update_own)`;
+        return {
+          idWydarzenia: null, wydarzeniaZawodnika: moje,
+          blad: `aktualizacja id=${decyzja.id} nie zmieniła ANI JEDNEGO wiersza (najczęściej RLS: calendar_events_update_own)`,
+        };
       }
-      return null;
+      // ⭐ Wystąpienie JEST na liście zawodnika — wzięło się z niej.
+      return { idWydarzenia: decyzja.id, wydarzeniaZawodnika: moje, blad: null };
     }
 
-    const { error: insErr } = await supabase.from('calendar_events').insert(decyzja.wiersz);
-    if (insErr) return `zapis nowego wiersza: ${insErr.message}`;
-    return null;
+    const { data: wstawione, error: insErr } = await supabase
+      .from('calendar_events').insert(decyzja.wiersz).select('id');
+    if (insErr) {
+      return { idWydarzenia: null, wydarzeniaZawodnika: moje, blad: `zapis nowego wiersza: ${insErr.message}` };
+    }
+    const noweId = Array.isArray(wstawione) && wstawione.length > 0 ? Number(wstawione[0].id) : NaN;
+    if (!Number.isFinite(noweId)) {
+      return {
+        idWydarzenia: null, wydarzeniaZawodnika: moje,
+        blad: 'zapis nowego wiersza kalendarza dotknął ZERO wierszy (najczęściej RLS)',
+      };
+    }
+    // ⛔ NOWE WYSTĄPIENIE DOPISUJEMY DO LISTY, bo bramka właściciela sprawdza
+    // przynależność WŁAŚNIE PO NIEJ. Bez tego wiersz, który sami przed chwilą
+    // założyliśmy dla tego zawodnika, zostałby odrzucony jako „spoza ekranu".
+    const zNowym = new Set<number>(moje);
+    zNowym.add(noweId);
+    return { idWydarzenia: noweId, wydarzeniaZawodnika: zNowym, blad: null };
+  }
+
+  /** ⛔ Ten sam powód, co wyżej — dla `pain_entries`. `null` = nie wiem. */
+  async function maJuzWpisBolowy(matchContextId: number): Promise<boolean | null> {
+    const { data, error: err } = await supabase
+      .from('pain_entries')
+      .select('id')
+      .eq('match_context_id', matchContextId)
+      .limit(1);
+    if (err) {
+      console.warn(opisBleduOdczytuDoLogu('mecz.maJuzWpisBolowy → pain_entries', err));
+      return null;
+    }
+    return (data ?? []).length > 0;
   }
 
   async function submitMatchContext() {
@@ -583,70 +739,148 @@ export default function MeczScreen() {
 
     setSaving(true);
     try {
-      const body = {
-        user_id: currentUser.id,
-        game_type: gameType,
-        own_score: ownScore !== '' ? Number(ownScore) : null,
-        opponent_score: opponentScore !== '' ? Number(opponentScore) : null,
-        role: role.trim() || null,
-        minutes_played: minutes !== '' ? Number(minutes) : null,
-        // ⭐⭐ PLAN-D-M2 19.08.2026 — JEDNA LINIA, KTÓREJ BRAKOWAŁO (§3 polecenia).
-        // ⛔ CO BYŁO ZŁE. Pole „ile trwał cały mecz" istnieje na tym ekranie od
-        // pasa W2, ale jechało WYŁĄCZNIE do `calendar_events.planned_minutes`.
-        // Kolumna `match_contexts.match_length_minutes` powstała później (18.08,
-        // pas D8) i ten ekran o niej nie wiedział — więc pełna karta meczu do
-        // dziś NIE ZAPISYWAŁA długości tam, gdzie liczą się punkty za mecz
-        // (`punktyMeczu` w `lib/nagrodaZaPrace.ts` czyta `match_length_minutes`).
-        // ⛔ Pusto zostaje pustem: nie podstawiamy 90, bo zmyślona długość
-        // weszłaby do wagi pracy jako pomiar (Z0, R5).
-        match_length_minutes: dlugoscMeczu.trim() !== '' ? Number(dlugoscMeczu) : null,
-        match_rpe: matchRpe !== undefined ? matchRpe : null,
-        self_rating: selfRating !== undefined ? selfRating : null,
-        mental_state: mentalState !== undefined ? mentalState : null,
-        free_note: freeNote.trim() || null,
-        position_played_today: playedDifferentPosition ? positionPlayedToday : null,
-        entered_recovery_state: enteredRecoveryState,
-        demanding_conditions: demandingConditions,
-      };
-      const { data: inserted, error: insErr } = await supabase.from('match_contexts').insert(body).select();
-      if (insErr) throw insErr;
-      const matchContextId = inserted?.[0]?.id;
+      // ═══════════════════════════════════════════════════════════════
+      // ⭐⭐ PLAN-D-M3 21.08.2026 — KROK 1: WYSTĄPIENIE. ZMIENIONA KOLEJNOŚĆ.
+      // ⛔ Do 21.08 kalendarz był domykany PO zapisie meczu, więc wiersz
+      // `match_contexts` nie miał czym się z wydarzeniem związać i licznik
+      // pracy liczył oba. ⚠️ Gwarancja z pasa A7 ZOSTAJE nienaruszona:
+      // porażka kalendarza nie blokuje zapisu meczu — daje `idWydarzenia`
+      // równe `null`, wiersz idzie niezwiązany i liczy się normalnie.
+      // ═══════════════════════════════════════════════════════════════
+      const wystapienie = await ustalWystapienieMeczu(wynikGodziny.wartosc);
+      if (wystapienie.blad) {
+        console.error(opisNieudanegoZapisuMeczuDoLogu(
+          wystapienie.blad.startsWith('odczyt') ? 'odczyt'
+            : wystapienie.blad.startsWith('aktualizacja') ? 'aktualizuj' : 'utworz',
+          wystapienie.blad,
+        ));
+      }
 
-      // ⭐ PLAN-D-A7 — ODBICIE W KALENDARZU. Stoi TU, zaraz po udanym zapisie
-      // meczu, a przed bólem i pytaniami segmentowymi, świadomie: tamte kroki
-      // rzucają wyjątkiem przy własnej porażce, więc gdyby kalendarz był pod
-      // nimi, jeden nieudany wpis bólowy zjadałby także kafel meczu.
-      // Wynik NIE jest rzucany — zbieramy go i zamieniamy na zdanie niżej.
-      let bladKalendarza: string | null = null;
-      if (matchContextId) {
-        bladKalendarza = await dopiszMeczDoKalendarza(wynikGodziny.wartosc);
-        if (bladKalendarza) {
-          console.error(opisNieudanegoZapisuMeczuDoLogu(
-            bladKalendarza.startsWith('odczyt') ? 'odczyt'
-              : bladKalendarza.startsWith('aktualizacja') ? 'aktualizuj' : 'utworz',
-            bladKalendarza,
-          ));
+      // ⭐⭐ KROK 2: CZY TEN MECZ JUŻ MA WIERSZ. Dwa źródła, w tej kolejności —
+      // wizyta, potem baza. ⛔ Drugie źródło jest całą różnicą po restarcie.
+      const idZBazy = wystapienie.idWydarzenia === null
+        ? undefined
+        : wierszeMeczuPoWydarzeniu.get(wystapienie.idWydarzenia);
+      const idWiersza = idWierszaMeczuWWizycie ?? idZBazy ?? null;
+      const stan: StanKontekstuMeczu = idWiersza === null
+        ? { rodzaj: 'brak' }
+        : { rodzaj: 'zapisany', id: idWiersza };
+
+      const ocena: OcenaMeczu = {
+        minutyNaBoisku: minutes.trim() === '' ? null : Number(minutes),
+        dlugoscMeczu: dlugoscMeczu.trim() === '' ? null : Number(dlugoscMeczu),
+        rpe: matchRpe === undefined ? null : matchRpe,
+      };
+      const wiecej: WiecejOMeczu = {
+        samoocena: selfRating === undefined ? null : selfRating,
+        stanMentalny: mentalState === undefined ? null : mentalState,
+        // ⚠️ `demandingConditions` jest na tym ekranie `boolean`-em (checkbox),
+        // więc „nie zapytaliśmy" tu nie występuje — pole jest widoczne zawsze.
+        wymagajaceWarunki: demandingConditions,
+        pozycja: playedDifferentPosition ? (positionPlayedToday || null) : null,
+        bramkiMy: ownScore !== '' ? Number(ownScore) : null,
+        bramkiOni: opponentScore !== '' ? Number(opponentScore) : null,
+        notatka: freeNote,
+        // ⭐ M3 — trzy rzeczy, które do 21.08 szły własną drogą tego ekranu.
+        rodzajMeczu: gameType,
+        rola: role,
+        stanCiala: enteredRecoveryState,
+      };
+
+      // ⭐⭐ KROK 3: DECYZJA. ⛔ JEDNO ŹRÓDŁO ROZSTRZYGNIĘCIA DLA OBU EKRANÓW —
+      // ten ekran ją WYKONUJE, nie podejmuje.
+      const decyzja = zdecydujOZapisieMeczu({
+        idZawodnika: currentUser.id,
+        stan,
+        ocena,
+        wiecej,
+        idWydarzenia: wystapienie.idWydarzenia,
+        wydarzeniaZawodnika: wystapienie.wydarzeniaZawodnika,
+      });
+      console.log(`mecz: [PLAN-D-M3] ${opisZapisuMeczuDoLogu(decyzja)}`);
+
+      if (decyzja.rodzaj === 'nie_zapisuj') {
+        // ⛔ ZDANIE ALBO CISZA — nigdy „coś poszło nie tak".
+        if (decyzja.zdanie !== null) setError(decyzja.zdanie);
+        return;
+      }
+
+      let matchContextId: number | null = null;
+      let dolozonoDoIstniejacego = false;
+      if (decyzja.rodzaj === 'aktualizuj') {
+        const { data: zmienione, error: updErr } = await supabase
+          .from('match_contexts')
+          .update(decyzja.zmiany)
+          .eq('id', decyzja.id)
+          .select('id');
+        if (updErr) throw updErr;
+        // ⚠️ O61 — PostgREST przy odmowie RLS na UPDATE nie zwraca błędu, tylko
+        // ZERO zmienionych wierszy. Bez tego „nie mam uprawnień" byłoby
+        // nieodróżnialne od „zapisano".
+        if (!zmienione || zmienione.length === 0) {
+          throw new Error('Nie udało się zapisać meczu: baza nie zmieniła ani jednego wiersza.');
+        }
+        matchContextId = decyzja.id;
+        dolozonoDoIstniejacego = true;
+      } else {
+        const { data: wstawione, error: insErr } = await supabase
+          .from('match_contexts').insert(decyzja.wiersz).select('id');
+        if (insErr) {
+          // ⭐⭐ PLAN-D-D2 §4.3 → M3: UNIKALNY INDEKS CZĘŚCIOWY ZAMIENIA CICHY
+          // DUPLIKAT W BŁĄD, a ekran zamienia ten błąd w ZDANIE.
+          // ⛔ Zawodnikowi nie wolno pokazać `23505`. ⛔ To jest TO SAMO
+          // brzmienie, co na „Dziś" — drugie byłoby drugim słownikiem (O92).
+          if (toJestDrugiWierszNaMecz(insErr)) { setError(MECZ_JUZ_MA_WIERSZ); return; }
+          throw insErr;
+        }
+        const nowe = Array.isArray(wstawione) && wstawione.length > 0 ? Number(wstawione[0].id) : NaN;
+        if (!Number.isFinite(nowe)) {
+          throw new Error('Nie udało się zapisać meczu: baza nie przyjęła tego wiersza.');
+        }
+        matchContextId = nowe;
+      }
+      // ⭐ OD TEJ CHWILI KOLEJNE ZAPISY DOKŁADAJĄ, ZAMIAST WSTAWIAĆ.
+      setIdWierszaMeczuWWizycie(matchContextId);
+
+      // ── BÓL ────────────────────────────────────────────────────────
+      if (hasPain && matchContextId !== null) {
+        // ⭐ M3 — przy DOKŁADANIU sprawdzamy, czy wpis bólowy już jest.
+        // ⛔ Drugi wpis na ten sam mecz byłby drugim zgłoszeniem tego samego
+        // bólu, a `pain_entries` nie ma na to unikatu.
+        const juzBoli = dolozonoDoIstniejacego ? await maJuzWpisBolowy(matchContextId) : false;
+        if (juzBoli === null) {
+          throw new Error('Mecz zapisany, ale nie udało się sprawdzić, czy wpis bólowy już istnieje — '
+            + 'nie dokładam go drugi raz. Spróbuj ponownie za chwilę.');
+        }
+        if (!juzBoli) {
+          const side = NON_LATERAL_LOCATIONS.has(painLocation) ? null : (painSide || null);
+          const { error: painErr } = await supabase.from('pain_entries').insert({
+            match_context_id: matchContextId,
+            user_id: currentUser.id,
+            body_location: painLocation,
+            side,
+            intensity: painIntensity,
+            excludes_from_training: painExcludes,
+          });
+          if (painErr) throw new Error('Mecz zapisany, ale wpis bólowy się nie udał: ' + painErr.message);
         }
       }
 
-      if (hasPain && matchContextId) {
-        const side = NON_LATERAL_LOCATIONS.has(painLocation) ? null : (painSide || null);
-        const { error: painErr } = await supabase.from('pain_entries').insert({
-          match_context_id: matchContextId,
-          user_id: currentUser.id,
-          body_location: painLocation,
-          side,
-          intensity: painIntensity,
-          excludes_from_training: painExcludes,
-        });
-        if (painErr) throw new Error('Mecz zapisany, ale wpis bólowy się nie udał: ' + painErr.message);
-      }
-
-      if (matchContextId) {
+      // ── ODPOWIEDZI SEGMENTOWE ──────────────────────────────────────
+      if (matchContextId !== null && segmentSlots.length > 0) {
+        const juzSa = dolozonoDoIstniejacego
+          ? await segmentyJuzZapisaneDlaMeczu(matchContextId)
+          : new Set<string>();
+        if (juzSa === null) {
+          throw new Error('Mecz zapisany, ale nie udało się sprawdzić, które odpowiedzi już są — '
+            + 'nie dokładam ich drugi raz. Spróbuj ponownie za chwilę.');
+        }
         for (const slot of segmentSlots) {
           // Segment bez żadnej odpowiedzi (użytkownik pominął pytanie) —
           // nie zapisujemy pustego wiersza, poza regeneracją (patrz niżej).
           if (slot.segmentId !== 'regeneracja' && slot.baseAnswerCode === null) continue;
+          // ⛔ M3 — segment, który ma już wiersz, NIE dostaje drugiego.
+          if (juzSa.has(slot.segmentId)) continue;
 
           const responseValue = slot.segmentId === 'regeneracja' ? enteredRecoveryState : slot.baseAnswerCode;
           const { error: ansErr } = await supabase.from('match_context_answers').insert({
@@ -659,12 +893,13 @@ export default function MeczScreen() {
             followup_value: slot.followupAnswerCode,
           });
           if (ansErr) throw new Error('Mecz zapisany, ale nie udało się zapisać odpowiedzi segmentowej (' + slot.segmentId + '): ' + ansErr.message);
+          juzSa.add(slot.segmentId);
         }
       }
 
       // PLAN-D-A7 — porażka kalendarza NIE jest cicha i NIE jest awarią.
       // Mecz jest zapisany; zdanie mówi obie te rzeczy naraz i daje wyjście.
-      setOk(bladKalendarza ? MECZ_ZAPISANY_BEZ_KALENDARZA : 'Mecz zapisany.');
+      setOk(wystapienie.blad ? MECZ_ZAPISANY_BEZ_KALENDARZA : 'Mecz zapisany.');
       // ⭐ M2 — po zapisie zamykamy nakładkę, żeby potwierdzenie („Mecz
       // zapisany.") stało tam, gdzie zawodnik patrzy: na ekranie, a nie pod
       // arkuszem, którego już nie ma po co trzymać otwartego.
@@ -710,7 +945,18 @@ export default function MeczScreen() {
 
   function renderMatchCard(row: MatchRow) {
     const dateLabel = new Date(row.created_at).toLocaleDateString('pl-PL', { day: 'numeric', month: 'short', year: 'numeric' });
-    const typeLabel = GAME_TYPE_LABELS[row.game_type] || row.game_type;
+    // ⭐⭐ PLAN-D-M3 21.08.2026 — ZNALEZISKO §3.2/4, NAPRAWIONE.
+    // ⛔ CO BYŁO ZŁE. Historia meczów pisała „Mecz oficjalny" nad KAŻDYM
+    // wierszem z `game_type = 'official_match'` — także nad tym, którego
+    // rodzaju NIKT ZAWODNIKA NIE ZAPYTAŁ, bo produkt podstawił tę wartość sam
+    // (kolumna jest `NOT NULL`). To jest podanie PRAWDOPODOBNEGO jako PEWNEGO
+    // o cudzym meczu, czyli złamanie Z0 wprost.
+    // ⛔ TYCH DWÓCH STANÓW NIE DA SIĘ W BAZIE ODRÓŻNIĆ — dlatego nad takim
+    // wierszem stoi neutralne „Mecz". Trzy pozostałe rodzaje mogły wziąć się
+    // WYŁĄCZNIE ze wskazania zawodnika, więc te wolno podać jako fakt.
+    // ⛔ Rozstrzyga `napisRodzajuZapisanegoMeczu` z `lib/meczWiecej.ts` —
+    // reguła ma jedno miejsce, a nie kopię w każdym ekranie.
+    const typeLabel = napisRodzajuZapisanegoMeczu(row.game_type);
     const parts: string[] = [];
     if (row.own_score !== null && row.own_score !== undefined && row.opponent_score !== null && row.opponent_score !== undefined) {
       parts.push(`wynik: ${row.own_score}:${row.opponent_score}`);
@@ -918,10 +1164,22 @@ export default function MeczScreen() {
             `game_type` w miejscu `pelna_karta` — czyli tutaj, w karcie meczu.
             ⛔ Zeszedł z pierwszego widoku razem z wynikiem, bo obie rzeczy
             mówią, JAKI to był mecz, a nie ILE zawodnik w nim przepracował. */}
-        <Text style={styles.label}>Rodzaj</Text>
+        {/* ⭐⭐ PLAN-D-M3 21.08.2026 — RODZAJ MECZU. `RZECZY_O_MECZU` stawia
+            `game_type` w miejscu `arkusz_wiecej` — czyli TA SAMA rzecz stoi
+            też w arkuszu spod kafla na „Dziś", jedno dotknięcie od zawodnika.
+            ⛔ ANI JEDNA WARTOŚĆ NIE JEST ZAZNACZONA Z GÓRY (Z6): pierwsza
+            pozycja to „— wybierz —" i odpowiada wartości `null`, tak samo jak
+            przy pozycji zagranej dziś. ⛔ Napisy biorą się z `RODZAJE_MECZU`,
+            a nie z kopii w tym pliku — druga kopia rozjechałaby się z arkuszem
+            na „Dziś" przy pierwszej zmianie (O92). */}
+        <Text style={styles.label}>{POLE_RODZAJ_MECZU}</Text>
         <View style={styles.pickerWrap}>
-          <Picker selectedValue={gameType} onValueChange={setGameType}>
-            {Object.entries(GAME_TYPE_LABELS).map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
+          <Picker
+            selectedValue={gameType ?? ''}
+            onValueChange={(v) => setGameType(v === '' ? null : String(v))}
+          >
+            <Picker.Item label="— wybierz —" value="" />
+            {RODZAJE_MECZU.map((r) => <Picker.Item key={r.wartosc} label={r.napis} value={r.wartosc} />)}
           </Picker>
         </View>
 
@@ -1020,7 +1278,9 @@ export default function MeczScreen() {
     );
   }
 
-  const tytulMeczu = GAME_TYPE_LABELS[gameType] || 'Mecz';
+  // ⭐ PLAN-D-M3 — co zawodnik wskazał W TEJ WIZYCIE. Tu wiemy, więc mówimy;
+  // gdy nie wskazał, stoi neutralne „Mecz".
+  const tytulMeczu = napisRodzajuMeczu(gameType);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

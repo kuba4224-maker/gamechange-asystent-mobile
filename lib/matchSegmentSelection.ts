@@ -88,6 +88,41 @@ export type KontekstMeczuZOdczytem = PlayerMatchSelectionContext & {
   odczyt: StanOdczytuKontekstu;
 };
 
+/**
+ * ⭐⭐ PLAN-D-M3 21.08.2026 — KTÓRE SEGMENTY TEN WIERSZ MECZU JUŻ MA.
+ *
+ * ⛔ PO CO TO ISTNIEJE — DEFEKT, KTÓRY POWSTAŁBY BEZ TEGO. Od pasa M3 pełna
+ * karta meczu przy drugim zapisie DOKŁADA do istniejącego wiersza zamiast
+ * zakładać nowy (inaczej licznik pracy liczy ten sam mecz dwa razy). Ale
+ * `match_context_answers` NIE MA unikatu na parę (mecz, segment), więc drugi
+ * przebieg wstawiłby DRUGI wiersz na ten sam segment — a nikt by tego nie
+ * zgłosił.
+ *
+ * ⛔ DLACZEGO TUTAJ, A NIE W EKRANIE. `lib/matchCascade.selftest.ts` (I2-0)
+ * pilnuje, że `app/(tabs)/mecz.tsx` NIE CZYTA wejść kaskady własnym
+ * zapytaniem — „o co już pytaliśmy" ma jedno źródło, a dwa rozjeżdżają się
+ * po cichu i zawodnik dostaje to samo pytanie drugi raz. ⭐ Ten strażnik ma
+ * rację i NIE JEST tu osłabiany: odczyt stanął w warstwie I/O, czyli
+ * dokładnie tam, gdzie ten strażnik go chce.
+ *
+ * ⛔ `null` = ODCZYT PADŁ. To NIE JEST pusty zbiór (R5): pusty znaczy „ten
+ * mecz nie ma jeszcze ani jednej odpowiedzi", a `null` znaczy „nie wiem" —
+ * i wołający ma prawo na tym stanąć, zamiast zgadywać w którąkolwiek stronę.
+ */
+export async function segmentyJuzZapisaneDlaMeczu(
+  matchContextId: number,
+): Promise<Set<string> | null> {
+  const res = await supabase
+    .from('match_context_answers')
+    .select('segment_id')
+    .eq('match_context_id', matchContextId);
+  const odczyt = zbierzStanOdczytu('matchSegmentSelection.segmentyJuzZapisaneDlaMeczu', [
+    ['match_context_answers', res.error],
+  ]);
+  if (!odczyt.udanySie) return null;
+  return new Set((res.data ?? []).map((r) => String(r.segment_id)));
+}
+
 export async function fetchPlayerMatchSelectionContext(
   userId: string,
   enteredRecoveryState: RecoveryState

@@ -137,3 +137,98 @@ export const OKNO_PORANKA_ZAMKNIETE_ZDANIE = 'Dziś już nie — ankieta mierzy 
 export function powodOdmowyZapisuPoranka(teraz: Date): string | null {
   return czyOknoPorankaOtwarte(teraz) ? null : OKNO_PORANKA_ZAMKNIETE_ZDANIE;
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// 4. ⭐⭐ PAS D3 (21.08.2026) — CZTERY STANY ANKIETY, NIE DWA (R5)
+// ═════════════════════════════════════════════════════════════════════
+// ⭐ ZNALEZISKO PASA T2, §7.4 — ZGŁOSZONE I NIEZROBIONE, JEGO WŁASNYMI SŁOWAMI:
+//
+//     „Nie sprawdziłem, co widzi zawodnik, który wypełnił ankietę rano,
+//      a wraca po 12:00. Historia wpisów pokaże wpis, ale kafel będzie
+//      zaszarzony tak samo jak u kogoś, kto nie wypełnił."
+//
+// ⛔ TO JEST DOKŁADNIE TA JEDNA RZECZ, KTÓREJ ZABRANIA R5. Do 21.08.2026
+// zaszarzony kafel i zdanie „Dziś już nie — ankieta mierzy poranek." widział
+// TAK SAMO zawodnik, który ankietę wypełnił o 7:00, jak ten, któremu przepadła.
+// Produkt mówił mu wtedy o jego własnej pracy coś, czego nie wiedział —
+// bo sam też nie wiedział: ten ekran NIGDY nie czytał dzisiejszego wiersza.
+//
+// ⭐ TRZY WARTOŚCI, NIE DWIE — I DLATEGO CZTERY STANY.
+// Odczyt dzisiejszego wpisu ma trzy wyniki: JEST · NIE MA · NIE WIEM.
+// ⛔ „Nie wiem" NIE JEST „nie ma". Odczyt, który padł (RLS, brak sieci,
+// wygasły dostęp), zamieniony w „nie wypełniłeś" to ta sama cisza, którą
+// pas C3 wyciągał z `?? []` — tyle że wymierzona w zawodnika, który akurat
+// wypełnił.
+//
+// ⛔⛔ CZEGO TU NIE MA I NIE BĘDZIE — TE SAME DWA ZAKAZY CO WYŻEJ:
+//  • ⛔ ZERO LICZENIA. Ani dni z ankietą, ani dni bez niej, ani serii, ani
+//    paska postępu. Stan jest odpowiedzią o DZIŚ i o niczym więcej (N1).
+//    Ta funkcja nie przyjmuje historii — nie ma z czego policzyć serii.
+//  • ⛔ ZERO POCHWAŁY. Zdanie potwierdzenia mówi, ŻE WPIS JEST. Nie mówi,
+//    że zawodnik jest dobry, punktualny ani systematyczny (N1).
+//  • ⛔ ZERO CZERWIENI (Z2) — a wygląd i tak rozstrzyga ekran.
+
+/**
+ * ⭐ WYNIK ODCZYTU DZISIEJSZEGO WPISU PORANNEGO — trzy wartości.
+ *
+ * ⛔ `nieznany` jest wartością POCZĄTKOWĄ, nie awaryjną: dopóki odczyt nie
+ * wrócił, produkt naprawdę nie wie, i ma to powiedzieć zamiast zgadywać.
+ */
+export type OdczytDzisiejszegoWpisu = 'jest' | 'niema' | 'nieznany';
+
+/**
+ * ⭐ CZTERY STANY ANKIETY PORANNEJ — dokładnie tyle, ile wierszy ma tabela
+ * z polecenia D3 §4. ⛔ Ani jeden nie jest zlany z innym.
+ */
+export type StanAnkietyPorannej =
+  /** okno otwarte — formularz, jak dotąd. */
+  | 'okno_otwarte'
+  /** okno zamknięte, wpis z dzisiaj JEST — potwierdzenie, ⛔ nie ta sama szarość. */
+  | 'zamkniete_wpis_jest'
+  /** okno zamknięte, wpisu NIE MA — zdanie pasa T2, bez zmian. */
+  | 'zamkniete_wpisu_nie_ma'
+  /** ⛔ odczyt padł — czwarty stan, nazwany, ⛔ NIE zlewany z „nie ma". */
+  | 'zamkniete_nie_wiemy';
+
+/**
+ * ⭐ JEDYNE MIEJSCE, W KTÓRYM POWSTAJE STAN ANKIETY.
+ *
+ * ⛔ `teraz` i `odczyt` są PARAMETRAMI — bez tego nie dałoby się sprawdzić
+ * asercją ani jednego z czterech stanów inaczej niż przestawianiem zegara
+ * maszyny i psuciem bazy.
+ *
+ * ⛔ Przy OTWARTYM oknie odczyt nie zmienia niczego: formularz stoi tak samo
+ * dla tego, kto już wypełnił (zapis go POPRAWIA — deduplikacja z 10.08.2026),
+ * jak dla tego, kto jeszcze nie. To jest stan pierwszy z tabeli i został
+ * nietknięty.
+ */
+export function stanAnkietyPorannej(
+  teraz: Date, odczyt: OdczytDzisiejszegoWpisu,
+): StanAnkietyPorannej {
+  if (czyOknoPorankaOtwarte(teraz)) return 'okno_otwarte';
+  switch (odczyt) {
+    case 'jest': return 'zamkniete_wpis_jest';
+    case 'niema': return 'zamkniete_wpisu_nie_ma';
+    case 'nieznany': return 'zamkniete_nie_wiemy';
+  }
+}
+
+/**
+ * ⚠️ BRZMIENIE — DO PRZEJRZENIA PRZEZ KUBĘ (PAS D3, 21.08.2026).
+ *
+ * ⛔ MÓWI, ŻE WPIS JEST. Nie chwali, nie ocenia, nie liczy (N1) i nie
+ * zawiera ani jednej cyfry. Zawodnik ma się dowiedzieć JEDNEJ rzeczy:
+ * że jego poranna praca jest zapisana i nic nie przepadło.
+ */
+export const ANKIETA_PORANNA_WYPELNIONA_ZDANIE =
+  'Poranny wpis z dzisiaj jest zapisany.';
+
+/**
+ * ⚠️ BRZMIENIE — DO PRZEJRZENIA PRZEZ KUBĘ (PAS D3, 21.08.2026).
+ *
+ * ⛔ CZWARTY STAN MÓWI, ŻE NIE WIE. Nie udaje „nie wypełniłeś" i nie udaje
+ * „wypełniłeś". ⭐ Podaje też jedyną rzecz, którą zawodnik może z tym zrobić:
+ * pociągnąć ekran w dół (ten ekran ma `RefreshControl` od 27.07.2026).
+ */
+export const ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE =
+  'Nie udało się sprawdzić, czy dzisiejszy wpis jest. Pociągnij ekran w dół.';

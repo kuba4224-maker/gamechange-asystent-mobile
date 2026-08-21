@@ -519,23 +519,178 @@ check('⛔ (B4) ekran NIE RYSUJE zdania z konsoli — `opisObciazeniaDoLogu` nie
   'zdanie diagnostyczne trafiło na ekran zawodnika');
 
 {
-  // B5 — zero porównań (N3). Przypis „czego tu nie ma" jest jedynym wyjątkiem
-  // i sprawdzamy resztę pliku PO JEGO USUNIĘCIU.
+  // ═══════════════════════════════════════════════════════════════════
+  // B5 — PORÓWNANIE Z INNYMI LUDŹMI (N3) · SERIA DNI (N1)
+  //
+  // ⛔⛔ PRZECELOWANE 21.08.2026, PAS Z1 — REGUŁA TA SAMA, ZAKRES INNY.
+  //
+  // Do 21.08 ta asercja nazywała się „zero porównań" i pilnowała czterech
+  // wzorców. DWA Z NICH nie miały w sobie ani słowa o INNYCH LUDZIACH:
+  //     ['procent w porównaniu', /%\s*(cięż|lżej)/i]
+  //     ['średnia z',            /średni[ae]\s+z\b/i]
+  // i zapalały się na zdaniu porównującym zawodnika Z JEGO WŁASNĄ
+  // PRZESZŁOŚCIĄ:
+  //     „ten tydzień jest o 12% cięższy od Twoich czterech ostatnich"
+  //     „to więcej niż Twoja średnia z ostatniego miesiąca"
+  //
+  // ⛔ N3 TEGO NIE ZABRANIA. Cytat z `claude/ZASADY_OBOWIAZUJACE_13_08_2026.md`,
+  // czyli z reguły, którą ten strażnik pilnuje (O101):
+  //   „Ranking u trenera — tak. U zawodnika — nigdy. Trener widzi zestawienie
+  //    swojej drużyny. ZAWODNIK NIGDY NIE WIDZI SWOJEGO MIEJSCA W TABELI —
+  //    ani wobec drużyny, ani wobec innych użytkowników.
+  //    ⭐ Porównanie z normą dla wieku i etapu dojrzewania: DOZWOLONE
+  //    i potrzebne. Norma to nie ranking."
+  //
+  // ⚠️ SKUTEK ZMIERZONY PRZED PRZECELOWANIEM: pas D1 nie zbudował zdania
+  // „ten tydzień jest cięższy od Twoich czterech ostatnich" i napisał wprost,
+  // że blokuje go ta zapadka. Produkt stracił funkcję przez regułę, która
+  // jej nie zabraniała.
+  //
+  // ⭐ O101 (Kuba, 21.08.2026): STRAŻNIK CYTUJE REGUŁĘ, KTÓRĄ PILNUJE.
+  // Jeżeli pilnuje szerzej niż ona — to jest defekt STRAŻNIKA, nie reguły.
+  // Dlatego w nazwach asercji niżej stoi ZAKRES RZECZYWISTY, a nie skrót:
+  // napis „zero porównań" był początkiem tego defektu.
+  //
+  // ⛔ CO ZOSTAJE NIETKNIĘTE I DALEJ ZAPALA:
+  //   • N1 — „z rzędu" i „pod rząd" (osobna asercja B5-N1 niżej);
+  //   • miejsce w tabeli i ranking;
+  //   • porównanie z drużyną, z zespołem, z kolegami i z innymi
+  //     zawodnikami albo użytkownikami.
+  // ⭐ CO JEST OD DZIŚ DOZWOLONE — i bateria B5c tego DOWODZI:
+  //   • porównanie zawodnika z jego własną przeszłością (poprzedni tydzień,
+  //     cztery ostatnie tygodnie, jego własna średnia);
+  //   • norma dla wieku i etapu dojrzewania (N3 mówi wprost: „norma to nie
+  //     ranking"), łącznie ze zdaniem „zawodnicy na tej ścieżce robią X".
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Przypis „czego tu nie ma" jest jedynym wyjątkiem i resztę sprawdzamy
+  // PO JEGO USUNIĘCIU — bo to jedyne miejsce, w którym te słowa mają paść.
   const bezPrzypisu = modulZywy.replace(PRZYPIS_CZEGO_TU_NIE_MA, ' ')
     .replace(/PRZYPIS_CZEGO_TU_NIE_MA/g, ' ');
   const ekranBezPrzypisu = ekranZywy.replace(/PRZYPIS_CZEGO_TU_NIE_MA/g, ' ');
-  const wzorce: [string, RegExp][] = [
-    ['procent w porównaniu', /%\s*(cięż|lżej)/i],
-    ['średnia z', /średni[ae]\s+z\b/i],
-    ['dni z rzędu', /z rzędu|pod rząd/i],
-    ['miejsce w tabeli', /miejsc[ae] w tabeli|ranking/i],
+
+  /**
+   * ⛔ ZWROT, KTÓRY ROBI Z WYMIENIENIA KOGOŚ — PORÓWNANIE.
+   *
+   * Bez tego warunku zapadka świeciłaby na czerwono NA ZDROWYM KODZIE:
+   * w `lib/ekranProfilu.ts` żyją dziś dwa zdania ze słowem „drużyna" i ani
+   * jedno nie jest rankingiem — „co robisz dodatkowo poza treningiem
+   * z drużyną" (`ZDANIE_BEZ_DEKLARACJI`) oraz „kod drużyny"
+   * (`USTAWIENIA_PODPIS`). Strażnik oskarżający poprawny kod zostaje
+   * wyciszony przy pierwszej okazji.
+   */
+  // ⛔ GRANICE SŁOWA SĄ TU OBOWIĄZKOWE, NIE OZDOBNE — i ⛔ NIE WOLNO ICH
+  // PISAĆ JAKO `\b`. Dwa defekty zmierzone uruchomieniem 21.08.2026, PRZED
+  // pierwszym zapisem na dysk Kuby:
+  //   ① wzorzec bez granicy zapalił się na ŻYWYM `USTAWIENIA_PODPIS`
+  //      („dostęp, kOD drużyny…"), bo „od" siedzi w środku słowa „kod";
+  //   ② wzorzec z `\b` NIE ZAPALIŁ SIĘ na „więcej NIŻ reszta zespołu",
+  //      bo `\b` liczy `\w`, czyli `[A-Za-z0-9_]`, a „ż" nie jest dla niego
+  //      literą — po „niż" nie ma więc żadnej granicy do złapania.
+  // Dlatego granicą jest tu JAWNA KLASA LITER POLSKICH w obu kierunkach.
+  const LITERA = String.raw`[a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ]`;
+  const ZWROT_POROWNUJACY =
+    `(?<!${LITERA})`
+    + String.raw`(?:niż|od|na tle|wobec|spośród|pośród|w porównaniu\s+(?:z|do)`
+    + String.raw`|lepsz[a-ząćęłńóśźż]*|gorsz[a-ząćęłńóśźż]*|lepiej|gorzej|wyżej|niżej`
+    + String.raw`|średni[a-ząćęłńóśźż]*\s+(?:dla|w))`
+    + `(?!${LITERA})`;
+  /** Do dwóch słów wypełnienia między zwrotem porównującym a nazwą grupy. */
+  const LUZ = String.raw`(?:\s+` + LITERA + String.raw`+){0,2}\s+`;
+  /** Nazwy GRUP LUDZI, wobec których N3 zabrania stawiać zawodnika. */
+  const GRUPA_LUDZI =
+    String.raw`(?:drużyn[a-ząćęłńóśźż]*|zespoł[a-ząćęłńóśźż]*|zespol[a-ząćęłńóśźż]*|zespół`
+    + String.raw`|koleg[a-ząćęłńóśźż]*|koledz[a-ząćęłńóśźż]*)`;
+
+  /** ⛔ N3 — CZTERY RZECZY, KTÓRYCH ZABRANIA, I TYLKO ONE. */
+  const wzorceInniLudzie: [string, RegExp][] = [
+    ['miejsce w tabeli', /miejsc[a-ząćęłńóśźż]*\s+w\s+tabeli/i],
+    ['ranking', /\brankin[a-ząćęłńóśźż]*/i],
+    ['porównanie z drużyną, zespołem albo kolegami',
+      new RegExp(ZWROT_POROWNUJACY + LUZ + GRUPA_LUDZI, 'i')],
+    // ⛔ RDZEŃ TO `zawodni`, NIE `zawodnik`. Mianownik liczby mnogiej brzmi
+    // „zawodni**cy**", a nie „zawodnik-i" — wzorzec na `zawodnik` przepuszczał
+    // zdanie „Robisz mniej niż inni zawodnicy na Twojej pozycji". To jest ta
+    // sama choroba, którą `lib/zdobyczeRundy.selftest.ts` opisał przy `jednost`.
+    ['porównanie z innymi zawodnikami albo użytkownikami',
+      /\b(?:inn|pozostał|reszt)[a-ząćęłńóśźż]*\s+(?:zawodni|użytkowni|gracz)[a-ząćęłńóśźż]*/i],
+    ['ile robią inni',
+      /\b(?:ile|ilu|jak\s+(?:dużo|wielu))\b(?:\s+[a-ząćęłńóśźż]+){0,3}\s+(?:inn|pozostał)[a-ząćęłńóśźż]*/i],
   ];
-  const zle = wzorce.filter(([, r]) => r.test(bezPrzypisu) || r.test(ekranBezPrzypisu)).map(([n]) => n);
-  check('⭐⛔ (B5/N3) zero porównań z innymi i zero serii dni — poza zdaniem, że ich nie ma',
-    zle.length === 0, zle.join(', '));
+
+  /** ⛔ N1 — NIETKNIĘTE. Licznik dni z rzędu dalej nie ma prawa paść. */
+  const wzorceSerieDni: [string, RegExp][] = [
+    ['dni z rzędu', /z rzędu|pod rząd/i],
+  ];
+
+  const zleInni = wzorceInniLudzie
+    .filter(([, r]) => r.test(bezPrzypisu) || r.test(ekranBezPrzypisu)).map(([n]) => n);
+  check('⭐⛔ (B5/N3) zero porównań Z INNYMI LUDŹMI — z drużyną, z innymi zawodnikami, '
+    + 'z miejscem w tabeli i z rankingiem. ⭐ Porównanie z WŁASNĄ przeszłością jest dozwolone',
+    zleInni.length === 0, zleInni.join(', '));
+
+  const zleSerie = wzorceSerieDni
+    .filter(([, r]) => r.test(bezPrzypisu) || r.test(ekranBezPrzypisu)).map(([n]) => n);
+  check('⭐⛔ (B5/N1) zero serii dni — „z rzędu" i „pod rząd" nie wchodzą na ekran',
+    zleSerie.length === 0, zleSerie.join(', '));
+
   check('⭐ (B5b) …a samo zdanie „czego tu nie ma" NADAL stoi na ekranie',
     ekranZywy.includes('PRZYPIS_CZEGO_TU_NIE_MA') && PRZYPIS_CZEGO_TU_NIE_MA.includes('z rzędu'),
     'przypis zniknął razem ze słowami, których miał zabraniać');
+
+  // ── (B5c) ⭐ BATERIA MUTACJI — DOWÓD, ŻE PRZECELOWANY STRAŻNIK NADAL ŁAPIE
+  //          TO, PO CO POWSTAŁ, I PRZEPUSZCZA TO, CO N3 DOPUSZCZA.
+  //
+  // ⛔ Próbki są SYNTETYCZNE i mutujemy TEKST W PAMIĘCI, nie plik na dysku
+  // (wzorzec pasa M2) — nie ma więc czego przywracać i nic nie zależy od tego,
+  // czy proces dobiegł końca. ⛔ Próbki nie znikną też razem z naprawą kodu:
+  // to jest ta sama ostrożność, co przy „strażniku strażnika" (O71).
+  const zapalaN3 = (t: string): boolean => wzorceInniLudzie.some(([, r]) => r.test(t));
+  const zapalaN1 = (t: string): boolean => wzorceSerieDni.some(([, r]) => r.test(t));
+
+  /** ⛔ MUSI ZAPALIĆ — to jest to, po co ten strażnik powstał. */
+  const MUSI_ZAPALIC: readonly string[] = [
+    'Twój tydzień jest o 12% cięższy od średniej w drużynie.',
+    'To więcej niż reszta zespołu zrobiła w tym tygodniu.',
+    'Jesteś na 4. miejscu w tabeli swojej drużyny.',
+    'Twoje miejsce w rankingu klubu: 7.',
+    'Robisz mniej niż inni zawodnicy na Twojej pozycji.',
+    'Zobacz, ile robią inni użytkownicy aplikacji.',
+    'Wypadasz gorzej niż koledzy z drużyny.',
+    'Trenujesz na tle zespołu poniżej przeciętnej.',
+  ];
+  /** ⭐ MUSI PRZEJŚĆ — N3 tego NIE zabrania, a produkt tego potrzebuje. */
+  const MUSI_PRZEJSC: readonly string[] = [
+    // ⭐ Zdanie, którego pas D1 nie zbudował, bo blokowała go stara zapadka.
+    'Ten tydzień jest o 12% cięższy od Twoich czterech ostatnich.',
+    'To więcej niż Twoja średnia z ostatniego miesiąca.',
+    'W tym tygodniu zrobiłeś 6 jednostek, w poprzednim 4.',
+    'Twoje obciążenie jest niższe niż w zeszłym tygodniu.',
+    // ⭐ N3: „Porównanie z normą dla wieku i etapu dojrzewania: dozwolone."
+    'Norma dla 15-latka to 8–10 godzin snu; śpisz 6,2.',
+    'Zawodnicy na tej ścieżce robią sześć do ośmiu jednostek, Ty robisz cztery.',
+    // ⭐ Zdania, które ŻYJĄ dziś w module i nie mają prawa zapalić.
+    'Nie powiedziałeś jeszcze, co robisz dodatkowo poza treningiem z drużyną.',
+    'dostęp, kod drużyny, logowanie odciskiem, wylogowanie',
+  ];
+
+  const nieZapalily = MUSI_ZAPALIC.filter((t) => !zapalaN3(t));
+  check('⭐⛔ (B5c) MUTACJA — każde zdanie porównujące zawodnika Z INNYMI LUDŹMI zapala',
+    nieZapalily.length === 0,
+    `przeszły, a nie powinny: ${nieZapalily.join(' | ')}`);
+
+  const zapalilyNiepotrzebnie = MUSI_PRZEJSC.filter((t) => zapalaN3(t) || zapalaN1(t));
+  check('⭐⛔ (B5c) MUTACJA ODWROTNA — porównanie z WŁASNĄ przeszłością i norma dla wieku PRZECHODZĄ',
+    zapalilyNiepotrzebnie.length === 0,
+    `zapaliły, a nie powinny: ${zapalilyNiepotrzebnie.join(' | ')}`);
+
+  check('⭐⛔ (B5c) N1 NIETKNIĘTE — „5 dni z rzędu" dalej zapala, „pod rząd" też',
+    zapalaN1('Masz 5 dni z rzędu.') && zapalaN1('Trzeci tydzień pod rząd.'),
+    'zakaz serii przestał działać przy okazji przecelowania N3');
+
+  check('⭐ (B5c) (strażnik strażnika) obie listy próbek są NIEPUSTE',
+    MUSI_ZAPALIC.length >= 8 && MUSI_PRZEJSC.length >= 8,
+    `${MUSI_ZAPALIC.length} / ${MUSI_PRZEJSC.length}`);
 }
 
 console.log('\n══ C. SŁOWO „AU" NIE WCHODZI NA EKRAN ══════════════════════════');

@@ -34,14 +34,18 @@
 // (tytuł/data/notatka, jak każde inne wydarzenie), coś innego niż zakładka
 // Mecz (tam zawodnik loguje WYNIK już rozegranego meczu, osobna tabela
 // match_contexts) — nie miesza się z tamtą logiką.
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
-import Checkbox from 'expo-checkbox';
 import DateTimePicker from '@react-native-community/datetimepicker';
+// ⭐⭐ PAS K1 21.08.2026 — NAKŁADKA. Ten sam komponent, co na ekranie meczu
+// (pas M2) i na „Dziś" (pas A1). ⛔ Stoi POZA `ScrollView`, więc to, co do niej
+// zeszło, kosztuje ekran ZERO dp — a nie „mniej dp".
+import Arkusz from '../../components/Arkusz';
+import { type NaglowekArkusza } from '../../lib/arkusz';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth-context';
 // AUDYT 06.08.2026 — `getCurrentWeekDayList` stracił konsumenta razem z usuniętą
@@ -201,6 +205,21 @@ import {
   AKCJA_ODWOLAJ,
   type WejscieWerdyktow,
 } from '../../lib/wykonanieSesji';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS K1 21.08.2026 — DROGA DODANIA. Decyzje mieszkają w module,
+// ten ekran je WYKONUJE. Ten sam podział, co przy bramce „+".
+// ═══════════════════════════════════════════════════════════════════
+import {
+  czytajWejscieDoKalendarza,
+  wejscieDnia,
+  toDataPoprawna,
+  MINIMALNY_OBSZAR_DOTYKU_DP,
+  DZIEN_DODAJ,
+  WEJSCIE_SZCZEGOLY, WEJSCIE_SZCZEGOLY_PODPIS,
+  WEJSCIE_WPISY, WEJSCIE_WPISY_PODPIS,
+  FORMULARZ_WYBIERZ_DATE,
+  type StanDnia,
+} from '../../lib/drogaDodania';
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   club_training: 'Trening klubowy', own_training: 'Trening własny',
@@ -212,6 +231,21 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
 // Treść niezmieniona co do znaku — `SEG_LABELS` to alias na tę samą mapę,
 // żeby nie ruszać ani jednego miejsca użycia w tym pliku.
 const SEG_LABELS = SEGMENT_LABELS;
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS K1 21.08.2026 — KOLEJNOŚĆ RODZAJÓW W FORMULARZU.
+//
+// ⛔ WYPISANA WPROST, A NIE POLICZONA W MIEJSCU UŻYCIA — i to nie jest
+// wygoda. `zmierzEkran` umie policzyć listę literalną i NIE UMIE policzyć
+// listy, która powstaje z wywołania funkcji; lista, której miara nie umie
+// wyprowadzić, wypada z pomiaru ekranu razem ze swoją wysokością.
+// ⭐ RÓWNOŚĆ Z REGUŁĄ PILNUJE STRAŻNIK `K1-B4`: porównuje tę tablicę
+// z `rodzajeFormularza(Object.keys(EVENT_TYPE_LABELS))` co do elementu
+// i co do kolejności. Rodzaj dopisany do `EVENT_TYPE_LABELS` i zapomniany
+// tutaj zapala czerwień — a nie znika po cichu z formularza.
+// ═══════════════════════════════════════════════════════════════════
+const RODZAJE_FORMULARZA: readonly string[] =
+  ['match', 'club_training', 'own_training', 'micro_session', 'task'];
 
 type Goal = { id: number; segment_id: string; status: string; is_priority: boolean; refinement_note: string | null };
 type CalEvent = {
@@ -250,11 +284,61 @@ const SEGMENTY_WAGI: Record<WagaDnia, number> = {
   pusty: 0, lekki: 1, sredni: 2, ciezki: 3, nie_wiem: 0,
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS K1 21.08.2026 — RODZAJE ARKUSZA TEGO EKRANU.
+//
+// ⚠️ ŻYJĄ TUTAJ, NIE W `lib/arkusz.ts` — ten sam powód, co na ekranie meczu
+// (pas M2, `RodzajArkuszaMeczu`): `lib/arkusz.selftest.ts` trzyma zapadkę na
+// RÓWNOŚĆ sześciu rodzajów wspólnych i wymaga dla każdego wejścia Z EKRANU
+// „DZIŚ". Dopisanie tam trzech rodzajów Kalendarza zapaliłoby CUDZĄ zapadkę.
+// ⛔ Wspólny jest KOMPONENT (`components/Arkusz.tsx`) i wspólna jest reguła:
+// nakładka nie zabiera z ekranu.
+// ═══════════════════════════════════════════════════════════════════
+type RodzajArkuszaKalendarza = 'szczegoly' | 'wpisy';
+
+const RODZAJE_ARKUSZA_KALENDARZA: readonly RodzajArkuszaKalendarza[] =
+  ['szczegoly', 'wpisy'] as const;
+
+function naglowekArkuszaKalendarza(rodzaj: RodzajArkuszaKalendarza): NaglowekArkusza {
+  switch (rodzaj) {
+    case 'szczegoly':
+      return {
+        kicker: 'Kalendarz',
+        tytul: WEJSCIE_SZCZEGOLY,
+        // ⛔ Zdanie mówi, że te pola są DOBROWOLNE — bo w formularzu każde
+        // z nich nosi „(opcjonalnie)" i tak było, zanim tu zeszły.
+        podpis: 'Żadne z tych pól nie jest obowiązkowe. Wydarzenie zapisze się i bez nich.',
+      };
+    case 'wpisy':
+      // ⛔ PODPIS WYMIENIA WSZYSTKIE CZTERY SEKCJE Z NAZWY. To nie jest ozdoba:
+      // wiersz wejścia jest jedynym śladem po tym, co zeszło z ekranu, więc
+      // musi powiedzieć, CO dokładnie za nim stoi (B3 — zero cichych zniknięć).
+      return { kicker: 'Kalendarz', tytul: WEJSCIE_WPISY, podpis: WEJSCIE_WPISY_PODPIS };
+  }
+}
+
 export default function KalendarzScreen() {
   const { currentUser } = useAuth();
   const router = useRouter();
 
-  const [eventType, setEventType] = useState('club_training');
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS K1 21.08.2026 — CO NIESIE TRASA, KTÓRĄ TU PRZYSZEDŁ ZAWODNIK.
+  //
+  // ⛔ CO BYŁO ZEPSUTE: `dzis.tsx` robiło `router.push('/kalendarz')` bez ani
+  // jednego parametru, a ten ekran otwierał się na zakładce „Tydzień", na
+  // której formularza NIE MA. Zawodnik lądował na ekranie, na którym rzeczy,
+  // po którą przyszedł, nie widać — i nic nie mówiło, gdzie ona jest.
+  // ⛔ DECYZJĘ PODEJMUJE CZYSTA FUNKCJA (`czytajWejscieDoKalendarza`), ten
+  // ekran ją WYKONUJE. Ten sam podział, co przy bramce „+".
+  // ═══════════════════════════════════════════════════════════════
+  const parametry = useLocalSearchParams();
+  const wejscie = czytajWejscieDoKalendarza(parametry as Record<string, unknown>);
+  console.log(`kalendarz: [K1] ${wejscie.powod}`);
+
+  // ⭐ PAS K1 — RODZAJ ZAZNACZONY Z GÓRY, GDY TRASA GO NIESIE. ⛔ `useState`
+  // z wartością początkową, a nie `useEffect`: pole ma być gotowe w PIERWSZYM
+  // renderze. Bez parametru zostaje dokładnie ta wartość, co dotąd.
+  const [eventType, setEventType] = useState(wejscie.rodzaj ?? 'club_training');
   /**
    * ⭐ PLAN-D-W2 17.08.2026 — „ile to potrwa".
    * ⛔ `null` = NIE WIEMY i to jest dozwolone (R5). Zawodnik, który pominie
@@ -272,7 +356,13 @@ export default function KalendarzScreen() {
   // tylko wtedy, gdy zawodnik ją podał"), a kolumna `scheduled_time` jest
   // NULL-owalna właśnie po to. Pusty napis = brak godziny i nic się nie psuje.
   const [godzina, setGodzina] = useState('');
-  const [date, setDate] = useState<Date | null>(null);
+  // ⭐⭐ PAS K1 — DZIEŃ PRZENIESIONY (§3.1 wymaganie 3). Produkt przed chwilą
+  // zapytał „już się odbyło czy dopiero będzie" i dostał odpowiedź; kazanie
+  // zawodnikowi wpisać tę samą datę drugi raz było pytaniem o coś, co już
+  // wiemy. ⛔ `null` zostaje `null`, gdy trasa daty nie niesie — nie zmyślamy.
+  const [date, setDate] = useState<Date | null>(
+    wejscie.data === null ? null : new Date(wejscie.data + 'T00:00:00'),
+  );
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
   const [goalId, setGoalId] = useState('');
@@ -289,11 +379,19 @@ export default function KalendarzScreen() {
   // lista twierdziłaby, że sprawdziliśmy i nic nie ma.
   const [werdykty, setWerdykty] = useState<WejscieWerdyktow>(WERDYKTY_NIEPODANE);
   const [zapisWerdyktu, setZapisWerdyktu] = useState<string | null>(null);
-  const [showCancelled, setShowCancelled] = useState(false);
-  const [showPast, setShowPast] = useState(false);
+  // ⭐ PAS K1 21.08.2026 — `showPast` i `showCancelled` USUNIĘTE RAZEM
+  // ZE SKŁADANYMI NAGŁÓWKAMI. ⛔ Nic nie zniknęło: obie sekcje stoją dziś
+  // w arkuszu „Co już minęło", rozwinięte, bo arkusz i tak otwiera się
+  // dotknięciem — składany nagłówek W ŚRODKU nakładki byłby drugim zamkiem
+  // na tych samych drzwiach.
 
   // PLAN-D-C1 — zakładki WT-03. Domyślnie „Tydzień", jak w makiecie.
-  const [zakladka, setZakladka] = useState<'tydzien' | 'listy'>('tydzien');
+  // ⭐ PAS K1 — ale gdy trasa niesie zamiar dodania, otwieramy się TAM,
+  // GDZIE STOI FORMULARZ. `useState` z funkcją, a nie `useEffect`: zakładka
+  // ma być właściwa już w PIERWSZYM renderze, żeby zawodnik nie zobaczył
+  // przez chwilę zakładki, której nie prosił.
+  const [zakladka, setZakladka] = useState<'tydzien' | 'listy'>(wejscie.zakladka);
+  const [arkusz, setArkusz] = useState<RodzajArkuszaKalendarza | null>(null);
   /**
    * ⭐ PAS I2 16.08.2026 — WT-33, decyzja Kuby na pytanie B3: „NIE MA".
    *
@@ -467,6 +565,71 @@ export default function KalendarzScreen() {
     setTitle(''); setNotes(''); setDate(null); setSelectedDays(new Set()); setGoalId('');
     setGodzina('');
   };
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS K1 — PRZEWINIĘCIE DO FORMULARZA (§3.1 wymaganie 2)
+  // ⛔ Otwarcie właściwej zakładki to połowa roboty: zakładka „Listy" pamięta
+  // pozycję przewinięcia z poprzedniej wizyty, więc zawodnik, który był tu
+  // wcześniej przy sekcji „Odwołane", wróciłby dokładnie tam. Przewijamy RAZ,
+  // przy wejściu z zamiarem dodania — nie przy każdym powrocie na ekran.
+  // ═══════════════════════════════════════════════════════════════════
+  // ⚠️ EKRAN ZAKŁADKI NIE ODMONTOWUJE SIĘ MIĘDZY WIZYTAMI, więc wartości
+  // startowe `useState` wyżej wykonują się RAZ, przy pierwszym wejściu.
+  // ⛔ Bez tego efektu DRUGIE dotknięcie „+" trafiłoby na ekran, który stoi
+  // tam, gdzie zawodnik zostawił go poprzednio — czyli na tym samym defekcie,
+  // który ten pas usuwa, tyle że objawiającym się dopiero za drugim razem.
+  // ⭐ Podpis wejścia zamiast obiektu w zależnościach: `useLocalSearchParams`
+  // oddaje NOWY obiekt przy każdym renderze i lista zależności z nim w środku
+  // wykonywałaby się w kółko.
+  const podpisWejscia = `${wejscie.zakladka}|${wejscie.rodzaj ?? ''}|`
+    + `${wejscie.data ?? ''}|${wejscie.przewinDoFormularza}`;
+  const ostatnieWejscie = useRef<string | null>(null);
+  useEffect(() => {
+    if (!wejscie.przewinDoFormularza) return;
+    if (ostatnieWejscie.current === podpisWejscia) return;
+    ostatnieWejscie.current = podpisWejscia;
+    setZakladka(wejscie.zakladka);
+    if (wejscie.rodzaj !== null) setEventType(wejscie.rodzaj);
+    if (wejscie.data !== null) {
+      // ⛔ `chk_recurrence_xor_date`: data i reguła cykliczna nigdy naraz.
+      setFrequency('once');
+      setDate(new Date(wejscie.data + 'T00:00:00'));
+    }
+    listyRef.current?.scrollTo({ y: 0, animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [podpisWejscia]);
+
+  /**
+   * ⛔ TRZY STANY DNIA, NIE DWA (R5). „Nie odczytaliśmy tygodnia" nie jest
+   * pustym dniem — i żaden z tych trzech stanów nie odbiera prawa dopisania.
+   */
+  function stanDnia(d: WierszDnia): StanDnia {
+    if (!tydzien.odczyt.wydarzenia) return 'nieodczytany';
+    return d.pozycje.length > 0 ? 'z_trescia' : 'pusty';
+  }
+
+  /**
+   * ⭐⭐ PAS K1 — DOTKNIĘCIE DNIA OTWIERA FORMULARZ Z TĄ DATĄ (§3.2).
+   *
+   * ⛔ CO BYŁO ZEPSUTE: na zakładce „Tydzień" jedynym wejściem do dodawania
+   * było CTA rysowane WYŁĄCZNIE w gałęzi pustki. Tydzień z treścią nie miał
+   * ani jednego wejścia. Zero. Kuba ma tydzień z treścią — i dlatego nie
+   * znalazł niczego, czego można by nie znaleźć.
+   *
+   * ⛔ `frequency` wraca na „jednorazowe" świadomie: zawodnik wskazał
+   * KONKRETNY DZIEŃ, a `chk_recurrence_xor_date` nie pozwala mieć daty
+   * i reguły cyklicznej naraz. Bez tego dotknięcie wtorku przy włączonym
+   * „Cykliczne" przeniosłoby datę, której formularz i tak by nie wysłał.
+   */
+  function otworzFormularzNaDzien(d: WierszDnia) {
+    const we = wejscieDnia({ data: d.data, stan: stanDnia(d) });
+    console.log(`kalendarz: [K1] ${we.powod}`);
+    if (!we.jest) return;
+    setDate(new Date(we.data + 'T00:00:00'));
+    setFrequency('once');
+    setZakladka('listy');
+    listyRef.current?.scrollTo({ y: 0, animated: true });
+  }
 
   const toggleDay = (code: string) => {
     setSelectedDays((prev) => {
@@ -734,12 +897,25 @@ export default function KalendarzScreen() {
     // pozycji nie ma w planie. ⛔ To nie jest zmiana układu ani miejsca —
     // ten sam wiersz w tym samym miejscu przestaje mówić dwóm ekranom
     // dwie różne rzeczy o jednej pozycji.
-    const przekreslone = p.stanPrzeszly === 'nie_odbylo_sie' || p.obowiazywanie === 'odwolane';
+    // ═════════════════════════════════════════════════════════════════
+    // ⭐⭐ PAS K1 21.08.2026 — PRZEKREŚLENIE ZDJĘTE (§3.4, defekt 1).
+    // ⛔ CO BYŁO NA ZRZUCIE Z TELEFONU: odwołany blok stał na Kalendarzu
+    // PRZEKREŚLONY. Pas W1 zdjął przekreślenia z „Dziś" (T-4) z powodu, który
+    // nie zależy od ekranu: przekreślenie czyta się jako „to miało być,
+    // a nie było" — czyli jako kara. Nieobecność jest WIEDZĄ, nie karą (Z7),
+    // a odwołanie nie jest ani zasługą, ani przewiną zawodnika (D4, D7).
+    // ⛔ ZNACZENIE NIE ZNIKA, ZMIENIA SIĘ NOŚNIK: wiersz nadal jest wyszarzony
+    // (`itNieObowiazuje`) i nadal niesie plakietkę z `plakietkaPozycji(p)` —
+    // czyli słowo, a nie kreskę. ⭐ K4: nośnikiem jest zdanie, nie ozdoba.
+    // ⚠️ Nazwa zmiennej zmieniona razem ze stylem: `przekreslone` opisywało
+    // OZDOBĘ, `nieObowiazuje` opisuje FAKT — i tylko fakt tu został.
+    // ═════════════════════════════════════════════════════════════════
+    const nieObowiazuje = p.stanPrzeszly === 'nie_odbylo_sie' || p.obowiazywanie === 'odwolane';
     const zapisujeTo = zapisWerdyktu === kluczWystapienia(p.id, p.dzien);
     return (
       <View key={`${p.id}-${p.zRegulyCyklicznej ? 'c' : 'j'}`} style={styles.it}>
         <View style={[styles.dot, KOLOR_KROPKI[p.kropka]]} />
-        <Text style={[styles.itText, przekreslone && styles.itDone]} numberOfLines={2}>
+        <Text style={[styles.itText, nieObowiazuje && styles.itNieObowiazuje]} numberOfLines={2}>
           {p.tytul}
         </Text>
         {/* ⚠️ WT-12 / WG-06 — tag godziny WYŁĄCZNIE wtedy, gdy zawodnik ją podał.
@@ -796,7 +972,23 @@ export default function KalendarzScreen() {
     const zapalone = SEGMENTY_WAGI[d.waga];
     return (
       <View key={d.data} style={styles.day}>
-        <View style={styles.dhead}>
+        {/* ═════════════════════════════════════════════════════════════
+            ⭐⭐ PAS K1 21.08.2026 — NAGŁÓWEK DNIA JEST WEJŚCIEM (§3.2).
+            ⛔ CO BYŁO ZEPSUTE: na tej zakładce dotykalne były WYŁĄCZNIE
+            strzałki tygodnia, link do Profilu i CTA rysowane tylko w pustce.
+            Tydzień z treścią nie miał ANI JEDNEGO wejścia do dodawania.
+            ⛔ Wiersz, który wygląda na dotykalny i nie jest, jest gorszy niż
+            wiersz, który na to nie wygląda — dlatego napis „Dodaj do tego
+            dnia →" stoi tu ZAWSZE, w każdym z trzech stanów dnia, a nie
+            tylko wtedy, gdy dzień jest pusty.
+            ⛔ `minHeight` bierze się ze stałej modułu (44 dp), nie z drugiej
+            kopii liczby wpisanej w styl.
+            ═════════════════════════════════════════════════════════════ */}
+        <TouchableOpacity
+          style={styles.dhead}
+          accessibilityRole="button"
+          onPress={() => otworzFormularzNaDzien(d)}
+        >
           {/* WT-07 — dzisiejszy dzień kolorem marki. */}
           <Text style={[styles.dname, d.dzisiaj && styles.dnameToday]}>{d.etykieta}</Text>
           {/* ⛔ WT-10 — PASEK ZAJĘTOŚCI ZE SZKOŁY. To NIE jest siatka godzinowa:
@@ -810,7 +1002,8 @@ export default function KalendarzScreen() {
           {d.pasekZajetosci.podpis ? (
             <Text style={styles.btime}>{d.pasekZajetosci.podpis}</Text>
           ) : null}
-        </View>
+          <Text style={styles.dodajDoDnia}>{DZIEN_DODAJ}</Text>
+        </TouchableOpacity>
 
         {/* WG-07 — krótki opis wagi dnia plus jej obraz. Trzy segmenty, bo
             wag jest trzy ponad zerem; `nie_wiem` nie zapala ani jednego. */}
@@ -928,15 +1121,16 @@ export default function KalendarzScreen() {
     );
   }
 
-  function renderListy() {
-    // ⛔ PLAN-D-C1 — SEKCJE POWSTAJĄ TYLKO Z ODCZYTANYCH DANYCH. Przy `null`
-    // nie budujemy pustych list, tylko mówimy, że odczyt się nie udał.
-    if (events === null) {
-      return <Text style={styles.blad}>{NIE_UDALO_SIE_ODCZYTAC_TYGODNIA}</Text>;
-    }
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ PAS K1 — CZTERY SEKCJE WPISÓW. Reguła podziału jest TA SAMA, co była;
+  // zmienia się WYŁĄCZNIE miejsce, w którym te sekcje stoją (§3.3).
+  // ⛔ Nic nie zniknęło: każda z czterech ma na ekranie wiersz wejścia,
+  // a strażnik `K1-B5` porównuje ZBIÓR arkuszy ze ZBIOREM wejść na RÓWNOŚĆ.
+  // ═══════════════════════════════════════════════════════════════════
+  function sekcjeWpisow(wiersze: CalEvent[]) {
     const byDateAsc = (a: CalEvent, b: CalEvent) =>
       (a.scheduled_date! < b.scheduled_date! ? -1 : a.scheduled_date! > b.scheduled_date! ? 1 : 0);
-    const recurring = events.filter((e) => e.status === 'scheduled' && e.recurrence_rule);
+    const recurring = wiersze.filter((e) => e.status === 'scheduled' && e.recurrence_rule);
     // ⚠️ PLAN-D-A7 08.2026 — DO 14.08.2026 STAŁO TU `e.status === 'scheduled'`.
     // Migracja A1 (wykonana 14.08) dopuściła `status = 'completed'`, a pas A1
     // ustawia go z Dziennika przy zaliczeniu sesji Bloku. Ten ekran filtrował
@@ -944,27 +1138,57 @@ export default function KalendarzScreen() {
     // oznaczone jako wykonane ZNIKNĘŁOBY z kalendarza bez śladu — razem
     // z każdym meczem, który od tej rundy zapisuje ekran Mecz. Zapis by się
     // udał, ekran by milczał: „cichy brak" w czystej postaci.
+    // ⭐ PAS K1 — i razem z każdym meczem, który od 21.08 zakłada ścieżka
+    // „+ → już się odbyło → Mecz" (`status = 'completed'` od pierwszej chwili).
     // Kryterium jest teraz DATA, nie status; status idzie na plakietkę niżej.
-    const scheduledWithDate = events.filter(
+    const scheduledWithDate = wiersze.filter(
       (e) => (e.status === 'scheduled' || e.status === 'completed') && e.scheduled_date,
     );
     const upcoming = scheduledWithDate.filter((e) => e.scheduled_date! >= todayStr).sort(byDateAsc);
     const past = scheduledWithDate.filter((e) => e.scheduled_date! < todayStr).sort((a, b) => -byDateAsc(a, b));
-    const cancelled = events.filter((e) => e.status === 'cancelled');
+    const cancelled = wiersze.filter((e) => e.status === 'cancelled');
+    return { recurring, upcoming, past, cancelled };
+  }
 
+  /**
+   * ⭐ WIERSZ WEJŚCIA — ten sam wzorzec, co na ekranie meczu po pasie M2.
+   * ⛔ MUSI być `TouchableOpacity` z `onPress`: napis ze strzałką bez akcji
+   * to fałszywy przycisk (pilnuje tego `lib/pustkaWCalymRepo.selftest.ts`),
+   * a fałszywy przycisk uczy, że dotykanie nic nie daje.
+   */
+  function wejscieArkusza(rodzaj: RodzajArkuszaKalendarza, napis: string, podpis: string) {
     return (
-      <View>
-        <View style={styles.block}>
-          <Text style={styles.label}>Rodzaj</Text>
-          <View style={styles.pickerWrap}>
-            <Picker selectedValue={eventType} onValueChange={setEventType}>
-              {Object.entries(EVENT_TYPE_LABELS).map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
-            </Picker>
-          </View>
+      <TouchableOpacity
+        style={styles.wejscie}
+        accessibilityRole="button"
+        onPress={() => setArkusz(rodzaj)}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.wejscieNapis}>{napis} →</Text>
+          <Text style={styles.wejsciePodpis}>{podpis}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
 
-          <Text style={styles.label}>Tytuł</Text>
-          <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} value={title} onChangeText={setTitle} placeholder="np. Trening siłowy" />
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS K1 — TREŚĆ NAKŁADKI. ⛔ Rysuje WYŁĄCZNIE ten rodzaj, który jest
+  // otwarty — nie ma stanu, w którym arkusz niesie dwie rzeczy naraz.
+  // ⛔ Wszystkie trzy listy kart stoją TUTAJ, w ciele tej procedury: strażnik
+  // sekcji 13 (`lib/wysokoscEkranu.selftest.ts`) uznaje „w arkuszu" dopiero
+  // wtedy, gdy lista leży w ciele procedury karmiącej `<Arkusz>`, a `<Arkusz>`
+  // stoi POZA `ScrollView`. Bez obu tych rzeczy „przeniosłem to do arkusza"
+  // jest zdaniem, a nie faktem.
+  // ═══════════════════════════════════════════════════════════════════
+  function trescArkusza() {
+    if (arkusz === null) return null;
 
+    // ─── SZCZEGÓŁY WYDARZENIA — cztery pola, każde opisane „(opcjonalnie)"
+    //     już wtedy, gdy stały na ekranie. ⛔ Ani jedno nie zniknęło i ani
+    //     jedno nie zmieniło nazwy.
+    if (arkusz === 'szczegoly') {
+      return (
+        <>
           <Text style={styles.label}>Ile to potrwa (opcjonalnie)</Text>
           <View style={styles.toggle}>
             {MINUTY_DO_WYBORU.map((m) => (
@@ -981,52 +1205,8 @@ export default function KalendarzScreen() {
           <Text style={styles.label}>Notatka (opcjonalnie)</Text>
           <TextInput style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={notes} onChangeText={setNotes} multiline placeholder="Dodatkowe informacje" />
 
-          <View style={styles.toggle}>
-            <TouchableOpacity style={[styles.toggleBtn, frequency === 'once' && styles.toggleBtnActive]} onPress={() => setFrequency('once')}>
-              <Text style={[styles.toggleTxt, frequency === 'once' && styles.toggleTxtActive]}>Jednorazowe</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.toggleBtn, frequency === 'recurring' && styles.toggleBtnActive]} onPress={() => setFrequency('recurring')}>
-              <Text style={[styles.toggleTxt, frequency === 'recurring' && styles.toggleTxtActive]}>Cykliczne</Text>
-            </TouchableOpacity>
-          </View>
-
-          {frequency === 'once' ? (
-            <>
-              <Text style={styles.label}>Data</Text>
-              <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
-                <Text style={{ color: date ? colors.textPrimary : colors.textSecondary }}>
-                  {date ? date.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' }) : 'Wybierz datę'}
-                </Text>
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={date ?? new Date()}
-                  mode="date"
-                  onChange={(_event, selected) => {
-                    setShowDatePicker(false);
-                    if (selected) setDate(selected);
-                  }}
-                />
-              )}
-            </>
-          ) : (
-            <>
-              <Text style={styles.label}>Dni tygodnia</Text>
-              <View style={styles.daysRow}>
-                {DAYS_OF_WEEK.map(([code, label]) => (
-                  <TouchableOpacity key={code} style={styles.dayCheck} onPress={() => toggleDay(code)}>
-                    <Checkbox value={selectedDays.has(code)} onValueChange={() => toggleDay(code)} />
-                    <Text style={styles.dayCheckLabel}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          )}
-
           {/* PLAN-D-A7 08.2026 — GODZINA, KTÓREJ WOLNO NIE BYĆ.
-              Stoi POZA gałęzią „jednorazowe / cykliczne" świadomie: trening
-              klubowy w każdy wtorek o 18:00 ma godzinę tak samo jak pojedynczy
-              mecz. Pole jest tekstowe, a nie zegarkowe — `DateTimePicker` w trybie
+              Pole jest tekstowe, a nie zegarkowe — `DateTimePicker` w trybie
               `time` zawsze JAKĄŚ godzinę pokazuje, więc nie umie wyrazić „nie
               podałem", a to jest tu stan poprawny i najczęstszy. */}
           <Text style={styles.label}>Godzina (opcjonalnie)</Text>
@@ -1052,77 +1232,192 @@ export default function KalendarzScreen() {
               ))}
             </Picker>
           </View>
+        </>
+      );
+    }
+
+    // ⛔ PLAN-D-C1 — SEKCJE POWSTAJĄ TYLKO Z ODCZYTANYCH DANYCH. Przy `null`
+    // nie budujemy pustych list, tylko mówimy, że odczyt się nie udał.
+    if (events === null) {
+      return <Text style={styles.blad}>{NIE_UDALO_SIE_ODCZYTAC_TYGODNIA}</Text>;
+    }
+    const sekcje = sekcjeWpisow(events);
+
+    // ─── WSZYSTKIE CZTERY SEKCJE WPISÓW, W TEJ SAMEJ KOLEJNOŚCI, CO NA
+    //     EKRANIE DO 21.08.2026. ⛔ Ani jedna nie zniknęła i ani jedna nie
+    //     zmieniła nazwy — zmieniło się WYŁĄCZNIE to, że stoją w nakładce.
+    return (
+      <>
+        <Text style={styles.sectionLabel}>Nadchodzące</Text>
+        {sekcje.upcoming.length === 0 && pustkaTygodnia ? (
+          <View>
+            <Text style={styles.empty}>{pustkaTygodnia.tekst}</Text>
+            {/* WT-33 — pustka kończy się DOKŁADNIE JEDNĄ akcją, i to taką,
+                która TĘ pustkę zamyka. „Dodaj trening" ZAMYKA ARKUSZ i wraca
+                do formularza stojącego na ekranie pod spodem; „Wpisz swój
+                plan lekcji" i „Przedłuż dostęp" prowadzą do Profilu.
+                ⚠️ `blad_odczytu` ZOSTAJE NAPISEM (decyzja Kuby, 16.08.2026):
+                jego wyjściem jest `RefreshControl` ekranu, nie dotknięcie. */}
+            {pustkaTygodnia.krokWTekscie ? null
+              : pustkaTygodnia.rodzaj === 'blad_odczytu' ? (
+                <Text style={styles.empty}>{pustkaTygodnia.cta}</Text>
+              ) : (
+                <TouchableOpacity onPress={() => {
+                  if (pustkaTygodnia.rodzaj === 'brak_danych') {
+                    setArkusz(null);
+                    listyRef.current?.scrollTo({ y: 0, animated: true });
+                  } else router.push('/profil');
+                }}>
+                  <Text style={styles.pustkaCta}>{pustkaTygodnia.cta} →</Text>
+                </TouchableOpacity>
+              )}
+          </View>
+        ) : null}
+        {sekcje.upcoming.map(renderEventCard)}
+
+        <Text style={styles.sectionLabel}>Cykliczne</Text>
+        {sekcje.recurring.length === 0 ? <Text style={styles.empty}>Brak cyklicznych wpisów.</Text> : null}
+        {sekcje.recurring.map(renderEventCard)}
+
+        <Text style={styles.sectionLabel}>Minione ({sekcje.past.length})</Text>
+        {sekcje.past.length === 0 ? <Text style={styles.empty}>Brak minionych wpisów.</Text> : null}
+        {sekcje.past.map(renderEventCard)}
+
+        {/* ⭐ PLAN-D-K1 16.08.2026 — nagłówek sekcji bierze TĘ SAMĄ stałą, co
+            plakietka. Sekcja „Anulowane" z kartami opisanymi „Odwołane" byłaby
+            tą samą chorobą dwóch nazw, tylko przesuniętą o element wyżej. */}
+        <Text style={styles.sectionLabel}>{PLAKIETKI_STANU_PRZESZLEGO.odwolane}</Text>
+        {sekcje.cancelled.length === 0 ? <Text style={styles.empty}>Brak odwołanych wpisów.</Text> : null}
+        {sekcje.cancelled.map(renderEventCard)}
+      </>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS K1 — ZAKŁADKA „LISTY" TO OD DZIŚ PRZEDE WSZYSTKIM FORMULARZ.
+  //
+  // ⛔ CO BYŁO ZEPSUTE: formularz stał tu razem z czterema sekcjami kart,
+  // a cała zakładka miała 2 802 dp — trzy i pół ekranu w pionie. Zawodnik,
+  // którego „+" tu przerzuciło, nie widział ani formularza, ani niczego,
+  // co by o nim mówiło.
+  //
+  // ⚠️ FORMULARZ JEST WYJĄTKIEM OD CHUDNIĘCIA (§3.3): ma być ŁATWIEJ
+  // dostępny, nie trudniej. Dlatego na ekranie zostaje CAŁA ścieżka
+  // obowiązkowa — rodzaj, tytuł, częstotliwość, dzień i przycisk zapisu —
+  // a do arkusza schodzą WYŁĄCZNIE cztery pola, które sam formularz nazywał
+  // „(opcjonalnie)", i każde z nich ma na ekranie wiersz wejścia.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderListy() {
+    return (
+      <View>
+        <View style={styles.block}>
+          {/* ═══════════════════════════════════════════════════════════
+              ⭐⭐ PAS K1 — RODZAJ WIDAĆ CAŁY, BEZ OTWIERANIA CZEGOKOLWIEK
+              (§3.1 wymaganie 4). ⛔ CO BYŁO ZEPSUTE: rodzaj wybierało się
+              `Picker`-em, który pokazuje WYŁĄCZNIE wartość zaznaczoną —
+              „Mecz" był piątą pozycją listy, której nie widać, dopóki się
+              jej nie otworzy i nie przewinie. To jest dokładnie to zdanie
+              Kuby: „nie potrafię w żaden sposób dodać meczu".
+              ⛔ ANI JEDEN RODZAJ NIE ZNIKNĄŁ: kolejność daje
+              `rodzajeFormularza`, a strażnik `K1-B4` porównuje jej wynik
+              z `EVENT_TYPE_LABELS` na RÓWNOŚĆ.
+              ═══════════════════════════════════════════════════════════ */}
+          <Text style={styles.label}>Rodzaj</Text>
+          <View style={styles.daysRow}>
+            {RODZAJE_FORMULARZA.map((id) => (
+              <TouchableOpacity
+                key={id}
+                style={[styles.dayChip, eventType === id && styles.dayChipOn]}
+                accessibilityRole="button"
+                onPress={() => setEventType(id)}
+              >
+                <Text style={[styles.dayChipTxt, eventType === id && styles.dayChipTxtOn]}>
+                  {EVENT_TYPE_LABELS[id]}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.label}>Tytuł</Text>
+          <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} value={title} onChangeText={setTitle} placeholder="np. Trening siłowy" />
+
+          <View style={styles.toggle}>
+            <TouchableOpacity style={[styles.toggleBtn, frequency === 'once' && styles.toggleBtnActive]} onPress={() => setFrequency('once')}>
+              <Text style={[styles.toggleTxt, frequency === 'once' && styles.toggleTxtActive]}>Jednorazowe</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.toggleBtn, frequency === 'recurring' && styles.toggleBtnActive]} onPress={() => setFrequency('recurring')}>
+              <Text style={[styles.toggleTxt, frequency === 'recurring' && styles.toggleTxtActive]}>Cykliczne</Text>
+            </TouchableOpacity>
+          </View>
+
+          {frequency === 'once' ? (
+            <>
+              <Text style={styles.label}>Data</Text>
+              <TouchableOpacity style={styles.input} onPress={() => setShowDatePicker(true)}>
+                <Text style={{ color: date ? colors.textPrimary : colors.textSecondary }}>
+                  {date ? date.toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric' }) : FORMULARZ_WYBIERZ_DATE}
+                </Text>
+              </TouchableOpacity>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={date ?? new Date()}
+                  mode="date"
+                  onChange={(_event, selected) => {
+                    setShowDatePicker(false);
+                    if (selected) setDate(selected);
+                  }}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              {/* ⭐ PAS K1 — SIEDEM DNI JAKO CHIPY, NIE JAKO SIEDEM WIERSZY
+                  Z `Checkbox`. ⛔ To nie jest kosmetyka: siedem wierszy pod
+                  sobą kosztowało 840 dp, czyli cały ekran z okładem, i przez
+                  nie formularz nie miał szans zmieścić się nad zgięciem.
+                  Zaznaczenie nadal jest wielokrotne i nadal widać, co jest
+                  zaznaczone — nośnikiem jest wypełnienie chipu i jego napis. */}
+              <Text style={styles.label}>Dni tygodnia</Text>
+              <View style={styles.daysRow}>
+                {DAYS_OF_WEEK.map(([code, label]) => (
+                  <TouchableOpacity
+                    key={code}
+                    style={[styles.dayChip, selectedDays.has(code) && styles.dayChipOn]}
+                    accessibilityRole="button"
+                    onPress={() => toggleDay(code)}
+                  >
+                    <Text style={[styles.dayChipTxt, selectedDays.has(code) && styles.dayChipTxtOn]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* ⭐ WEJŚCIE ZASTĘPCZE DO CZTERECH PÓL, KTÓRE ZESZŁY DO ARKUSZA.
+              ⛔ Stoi TU, w środku formularza, a nie na dole ekranu: pole
+              opcjonalne wypełnia się w trakcie wypełniania formularza,
+              nie po jego zapisaniu. */}
+          {wejscieArkusza('szczegoly', WEJSCIE_SZCZEGOLY, WEJSCIE_SZCZEGOLY_PODPIS)}
 
           <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={createCalendarEvent}>
             <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Dodaj do kalendarza'}</Text>
           </TouchableOpacity>
         </View>
 
-        <View style={{ marginTop: 24 }}>
-          <Text style={styles.sectionLabel}>Cykliczne</Text>
-          {recurring.length === 0 && <Text style={styles.empty}>Brak cyklicznych wpisów.</Text>}
-          {recurring.map(renderEventCard)}
+        {/* ⭐⭐ DWA WEJŚCIA ZASTĘPCZE DO CZTERECH SEKCJI WPISÓW.
+            ⛔ TO JEST WARUNEK „najpierw wejście zastępcze, potem zdjęcie
+            z ekranu": nie istnieje stan tego pliku, w którym sekcja jest już
+            w arkuszu, a wejścia do niej jeszcze nie ma — wejście i treść
+            żyją w JEDNYM stanie (`arkusz`), a `trescArkusza()` rysuje
+            wyłącznie rodzaj, który jest otwarty. */}
+        <View style={styles.wejscia}>
+          {wejscieArkusza('wpisy', WEJSCIE_WPISY, WEJSCIE_WPISY_PODPIS)}
         </View>
 
-        <View style={{ marginTop: 20 }}>
-          <Text style={styles.sectionLabel}>Nadchodzące</Text>
-          {upcoming.length === 0 && pustkaTygodnia ? (
-            <View>
-              <Text style={styles.empty}>{pustkaTygodnia.tekst}</Text>
-              {/* WT-33 — pustka kończy się DOKŁADNIE JEDNĄ akcją, i to taką,
-                  która TĘ pustkę zamyka. „Dodaj trening" przewija do formularza
-                  stojącego wyżej na tym samym ekranie; „Wpisz swój plan lekcji"
-                  i „Przedłuż dostęp" prowadzą do Profilu, bo tam mieszka jedno
-                  i drugie. Do 16.08.2026 stał tu goły `<Text>` ze strzałką —
-                  napis o wyjściu zamiast wyjścia.
-
-                  ⚠️ `blad_odczytu` ZOSTAJE NAPISEM, i to jest decyzja (Kuba,
-                  16.08.2026). Jego CTA brzmi „Pociągnij w dół, żeby sprawdzić
-                  jeszcze raz." — wyjściem jest `RefreshControl` tego ekranu, nie
-                  dotknięcie. Owinięcie instrukcji w `TouchableOpacity` zrobiłoby
-                  z niej drugi rodzaj fałszywego przycisku, a strzałka jest
-                  obietnicą akcji, więc też odpada.
-
-                  `krokWTekscie` znaczy „krok stoi już w zdaniu wyżej" — wtedy
-                  `cta` jest puste i nie rysujemy nic. */}
-              {pustkaTygodnia.krokWTekscie ? null
-                : pustkaTygodnia.rodzaj === 'blad_odczytu' ? (
-                  <Text style={styles.empty}>{pustkaTygodnia.cta}</Text>
-                ) : (
-                  <TouchableOpacity onPress={() => {
-                    if (pustkaTygodnia.rodzaj === 'brak_danych') listyRef.current?.scrollTo({ y: 0, animated: true });
-                    else router.push('/profil');
-                  }}>
-                    <Text style={styles.pustkaCta}>{pustkaTygodnia.cta} →</Text>
-                  </TouchableOpacity>
-                )}
-            </View>
-          ) : null}
-          {upcoming.map(renderEventCard)}
-        </View>
-
-        {past.length > 0 && (
-          <View style={{ marginTop: 20 }}>
-            <TouchableOpacity onPress={() => setShowPast((v) => !v)}>
-              <Text style={styles.sectionLabel}>{showPast ? '▾' : '▸'} Minione ({past.length})</Text>
-            </TouchableOpacity>
-            {showPast && past.map(renderEventCard)}
-          </View>
-        )}
-
-        <View style={{ marginTop: 20 }}>
-          <TouchableOpacity onPress={() => setShowCancelled((v) => !v)}>
-            {/* ⭐ PLAN-D-K1 — nagłówek sekcji bierze TĘ SAMĄ stałą, co plakietka.
-                Sekcja „Anulowane" z kartami opisanymi „Odwołane" byłaby tą samą
-                chorobą dwóch nazw, tylko przesuniętą o jeden element wyżej. */}
-            <Text style={styles.sectionLabel}>{showCancelled ? '▾' : '▸'} {PLAKIETKI_STANU_PRZESZLEGO.odwolane}</Text>
-          </TouchableOpacity>
-          {showCancelled && (
-            cancelled.length === 0
-              ? <Text style={styles.empty}>Brak odwołanych wpisów.</Text>
-              : cancelled.map(renderEventCard)
-          )}
-        </View>
+        {/* ⛔ R5 — NIEUDANY ODCZYT MA WŁASNE ZDANIE I STOI NA EKRANIE, a nie
+            dopiero w arkuszu: zawodnik ma się dowiedzieć, że nie wiemy, co
+            ma w kalendarzu, ZANIM dotknie wiersza wejścia. */}
+        {events === null ? <Text style={styles.blad}>{NIE_UDALO_SIE_ODCZYTAC_TYGODNIA}</Text> : null}
       </View>
     );
   }
@@ -1159,6 +1454,20 @@ export default function KalendarzScreen() {
 
       {zakladka === 'tydzien' ? renderTydzien() : renderListy()}
     </ScrollView>
+
+    {/* ── ARKUSZ ────────────────────────────────────────────────────
+        ⛔ STOI POZA `ScrollView`: to jest NAKŁADKA nad ekranem, a nie kolejna
+        rzecz na nim. `Modal` jest w React Native osobnym drzewem, więc jego
+        treść naprawdę NIE WCHODZI do przewijania ekranu pod spodem — i tylko
+        dlatego wolno powiedzieć, że cztery sekcje wpisów i cztery pola
+        opcjonalne kosztują ten ekran ZERO dp, a nie „mniej dp". */}
+    <Arkusz
+      widoczny={arkusz !== null}
+      naglowek={arkusz === null ? null : naglowekArkuszaKalendarza(arkusz)}
+      naZamkniecie={() => setArkusz(null)}
+    >
+      {arkusz === null ? null : trescArkusza()}
+    </Arkusz>
     </SafeAreaView>
   );
 }
@@ -1166,7 +1475,7 @@ export default function KalendarzScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   title: { ...typography.display, fontSize: 28, marginBottom: spacing.lg, color: colors.textPrimary },
-  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 }, // W1: ink3
+  label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 4, marginTop: 2 }, // W1: ink3
   sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 12, marginTop: 18 }, // W1: ink3
   // PLAN-D-T (T6) — wyjście z pustki. Te same wartości co `cardAction` na
   // „Dziś": to jest ta sama rzecz co „zobacz" na innych kartach.
@@ -1174,15 +1483,40 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 10, fontSize: 14, marginBottom: 8, color: colors.textPrimary, minHeight: minTouchHeight, justifyContent: 'center' },
   textarea: { minHeight: 72, textAlignVertical: 'top' },
   pickerWrap: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, marginBottom: 8 },
-  block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 16, marginBottom: 20 },
+  block: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: 12, marginBottom: 14 },
   toggle: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   toggleBtn: { flex: 1, minHeight: minTouchHeight, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, alignItems: 'center' },
   toggleBtnActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   toggleTxt: { ...typography.bodyMedium, fontSize: 14, color: colors.textPrimary },
   toggleTxtActive: { color: colors.white },
-  daysRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginBottom: 12 },
-  dayCheck: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  dayCheckLabel: { fontSize: 13, color: colors.textPrimary },
+  daysRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  // ⭐ PAS K1 — CHIP WYBORU (rodzaj wydarzenia, dzień tygodnia). `minHeight`
+  // ze stałej modułu: cel dotykowy mniejszy od progu to akcja, której zawodnik
+  // nie trafia. ⛔ Wypełnienie NIE JEST czerwienią (Z2) — `colors.brand` jest
+  // od pasa W1 zielenią marki i znaczy „to jest wybrane", nie „uwaga".
+  dayChip: {
+    minHeight: MINIMALNY_OBSZAR_DOTYKU_DP,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+  },
+  dayChipOn: { backgroundColor: colors.brand, borderColor: colors.brand },
+  dayChipTxt: { ...typography.bodyMedium, fontSize: 13, color: colors.textPrimary },
+  dayChipTxtOn: { color: colors.white },
+  // ⭐ PAS K1 — WIERSZ WEJŚCIA. Ten sam kształt, co na ekranie meczu po M2.
+  wejscia: { marginTop: 2 },
+  wejscie: {
+    minHeight: minTouchHeight,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: 4,
+  },
+  wejscieNapis: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
+  wejsciePodpis: { ...typography.body, fontSize: 11.5, color: colors.textSecondary, marginTop: 2, lineHeight: 16 },
   btn: { minHeight: minTouchHeight, justifyContent: 'center', borderRadius: radii.md, backgroundColor: colors.brand, alignItems: 'center', marginTop: 8 },
   btnDisabled: { opacity: 0.4 },
   btnText: { ...typography.bodySemiBold, color: colors.white, fontSize: 15, letterSpacing: 0.5 },
@@ -1220,7 +1554,12 @@ const styles = StyleSheet.create({
   konfig: { borderWidth: 1, borderColor: colors.border, borderLeftWidth: 3, borderLeftColor: colors.caution, borderRadius: radii.md, padding: 12, marginBottom: 14 },
   konfigTxt: { fontSize: 13, color: colors.textPrimary },
   day: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, paddingBottom: 10 },
-  dhead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  // ⭐ PAS K1 — WIERSZ DNIA JEST CELEM DOTYKU. `minHeight` ze stałej modułu
+  // (`MINIMALNY_OBSZAR_DOTYKU_DP`), nie z drugiej kopii liczby: cel mniejszy
+  // od progu to akcja, której zawodnik nie trafia — a nietrafiona akcja
+  // wygląda dokładnie jak akcja, której nie chciał wykonać.
+  dhead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, minHeight: MINIMALNY_OBSZAR_DOTYKU_DP },
+  dodajDoDnia: { fontSize: 11, color: colors.brand },
   dname: { ...typography.display, fontSize: 16, letterSpacing: 0.6, minWidth: 74, color: colors.textPrimary },
   dnameToday: { color: colors.brand },
   busy: { flex: 1, height: 7, backgroundColor: colors.track, borderRadius: 4, overflow: 'hidden' },
@@ -1233,7 +1572,9 @@ const styles = StyleSheet.create({
   wagaOpis: { fontSize: 11, letterSpacing: 0.5, color: colors.textTertiary },
   it: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 3, paddingLeft: 4 },
   itText: { flex: 1, fontSize: 13, color: colors.textPrimary },
-  itDone: { color: colors.textTertiary, textDecorationLine: 'line-through' },
+  // ⛔ PAS K1 — TEN STYL NIE MA I NIE MOŻE MIEĆ `textDecorationLine`.
+  // Ta sama umowa, co `kartaPozycjaOdwolana` na „Dziś" (T-4, pas W1).
+  itNieObowiazuje: { color: colors.textTertiary },
   dot: { width: 8, height: 8, borderRadius: 4 },
   tag: { fontSize: 10, color: colors.textSecondary, borderWidth: 1, borderColor: colors.border, borderRadius: radii.sm, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden' },
   tagOk: { color: colors.success, borderColor: colors.okSoft, backgroundColor: colors.okSoft },

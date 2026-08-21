@@ -103,7 +103,18 @@ export const RZECZY_O_MECZU: readonly RzeczOMeczu[] = [
     miejsce: 'ocena_z_kafla', stan: 'dziala' },
   { kolumna: '—', napis: 'Czy coś Cię boli',
     miejsce: 'ocena_z_kafla', stan: 'dziala' },
-  // ── arkusz „powiedz więcej o tym meczu" — sześć rzeczy ───────────────
+  // ── arkusz „powiedz więcej o tym meczu" — SIEDEM rzeczy ──────────────
+  // ⭐⭐ PLAN-D-M3 21.08.2026 — RODZAJ MECZU STOI TU, A NIE W PEŁNEJ KARCIE.
+  // ⛔ CO BYŁO ZŁE, zmierzone 21.08: `game_type` stał w miejscu `pelna_karta`,
+  // a ścieżka oceny z kafla wpisywała `RODZAJ_MECZU_Z_KAFLA` NA SZTYWNO. Skutek:
+  // zawodnik, który zagrał SPARING i ocenił go z kafla, miał w bazie „Mecz
+  // oficjalny" — i żeby to poprawić, musiał przejść cztery dotknięcia
+  // (kafel → arkusz → „Otwórz pełną kartę meczu" → arkusz pełnej karty).
+  // ⛔ To jest złamanie Z0: produkt podawał PRAWDOPODOBNE jako PEWNE.
+  // ⭐ Po przeniesieniu rodzaj stoi w arkuszu otwieranym JEDNYM dotknięciem
+  // z kafla. Koszt: 0 dp — arkusz jest `Modal`-em (osobne drzewo nad ekranem).
+  { kolumna: 'game_type', napis: 'Jaki to był mecz',
+    miejsce: 'arkusz_wiecej', stan: 'dziala' },
   { kolumna: 'self_rating', napis: 'Jak sam oceniasz swoją grę',
     miejsce: 'arkusz_wiecej', stan: 'dziala' },
   { kolumna: 'mental_state', napis: 'Z jaką głową w to wszedłeś',
@@ -124,11 +135,28 @@ export const RZECZY_O_MECZU: readonly RzeczOMeczu[] = [
   // ── pełna karta meczu — rzeczy, których decyzja Kuby nie przeniosła ──
   // ⛔ ONE NIE ZNIKNĘŁY. Wejście do nich prowadzi z tego samego arkusza
   // (`MECZ_WIECEJ_WEJSCIE` → `/mecz`) i to jest jedyne wejście, jakie mają.
-  { kolumna: 'game_type', napis: 'Jaki to był mecz',
-    miejsce: 'pelna_karta', stan: 'dziala' },
   { kolumna: 'entered_recovery_state', napis: 'Z jakim ciałem w to wchodziłeś',
     miejsce: 'pelna_karta', stan: 'dziala' },
   { kolumna: 'match_context_answers', napis: 'Pytania dobrane do Twojej pozycji',
+    miejsce: 'pelna_karta', stan: 'dziala' },
+  // ⭐⭐ PLAN-D-M3 21.08.2026 — DWIE RZECZY, KTÓRYCH TA TABELA DO DZIŚ NIE MIAŁA.
+  // ⛔ ZMIERZONE: tabela twierdziła, że karta meczu ma TRZYNAŚCIE rzeczy. Ma
+  // PIĘTNAŚCIE. Obie poniżej stoją dziś w arkuszu „Powiedz więcej o tym meczu"
+  // W PEŁNEJ KARCIE (`app/(tabs)/mecz.tsx`, gałąź `arkusz === 'wiecej'`) —
+  // czyli w `pelna_karta`, nie w arkuszu spod kafla.
+  // ⛔ To jest dokładnie ta milcząca niepełność listy zamkniętej, której
+  // `MiejsceRzeczy` miało zapobiec (B3): rzecz, której tu nie ma, nie ma się
+  // gdzie narysować, a rzecz, która JEST na ekranie i nie ma tu wiersza,
+  // znika z inwentarza po cichu.
+  { kolumna: 'role', napis: 'Twoja rola',
+    miejsce: 'pelna_karta', stan: 'dziala' },
+  // ⚠️ JEDYNA RZECZ W TEJ TABELI, KTÓREJ KOLUMNA NIE LEŻY W `match_contexts`.
+  // `match_contexts` NIE MA pola na czas meczu (zmierzone 14.08.2026: jedyny
+  // czas to `created_at`, czyli moment ZAPISU). Godzina idzie do
+  // `calendar_events.scheduled_time`, żeby kafel w widoku tygodnia mógł mieć
+  // tag godziny. ⛔ Nazwa kolumny jest podana Z TABELĄ właśnie po to, żeby
+  // nikt nie szukał jej w `match_contexts` i nie uznał, że jej nie ma.
+  { kolumna: 'calendar_events.scheduled_time', napis: 'O której zaczynał się mecz',
     miejsce: 'pelna_karta', stan: 'dziala' },
 ];
 
@@ -145,11 +173,37 @@ export function rzeczyMeczu(miejsce: MiejsceRzeczy): RzeczOMeczu[] {
  */
 export const MECZ_WIECEJ_WEJSCIE = 'Otwórz pełną kartę meczu →';
 
-export function podpisArkuszaMeczu(): string {
+/**
+ * ⭐⭐ PLAN-D-M3 21.08.2026 — PODPIS ZALEŻNY OD MIEJSCA WYWOŁANIA.
+ *
+ * ⛔ CO BYŁO ZŁE. Podpis kończył się zawsze zdaniem „Kolejne N zapisujesz
+ * w pełnej karcie meczu". Na „Dziś" to jest WSKAZÓWKA — mówi, dokąd iść.
+ * ⛔ W `app/(tabs)/mecz.tsx`, gdzie ten sam podpis stoi od 19.08 (pas M2),
+ * to jest ODESŁANIE TAM, GDZIE ZAWODNIK JUŻ STOI — czyli ślepy zaułek.
+ *
+ * ⭐ ROZWIĄZANE PARAMETREM, A NIE DRUGIM BRZMIENIEM WPISANYM W EKRAN.
+ * Drugie brzmienie tej samej rzeczy w pliku ekranu byłoby drugim słownikiem
+ * (O92) i rozjechałoby się przy pierwszej zmianie liczby rzeczy.
+ * ⛔ PARAMETR JEST OBOWIĄZKOWY. Wartość domyślna znaczyłaby, że nowy wołający
+ * dostaje wariant „idź do pełnej karty" po cichu — czyli dokładnie ten defekt,
+ * który ten pas usuwa.
+ *
+ * ⚠️ OBIE LICZBY SĄ WYLICZANE Z `RZECZY_O_MECZU`. ⛔ Ani jednej nie wolno
+ * wpisać ręcznie: po przeniesieniu rzeczy między miejscami ręczna liczba
+ * zostałaby stara, a zdanie brzmiałoby dalej wiarygodnie.
+ */
+export function podpisArkuszaMeczu(gdzie: 'ocena_z_kafla' | 'pelna_karta'): string {
   const wArkuszu = rzeczyMeczu('arkusz_wiecej').length;
   const wKarcie = rzeczyMeczu('pelna_karta').length;
-  return `${wArkuszu} rzeczy, których nie ma w ocenie z kafla. Żadna nie jest obowiązkowa. `
-    + `Kolejne ${wKarcie} zapisujesz w pełnej karcie meczu.`;
+  const wstep = `${wArkuszu} rzeczy, których nie ma w ocenie z kafla. `
+    + 'Żadna nie jest obowiązkowa. ';
+  if (gdzie === 'pelna_karta') {
+    // ⛔ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ — widoczne dla zawodnika, nowe
+    // w tym pasie. Mówi, że pozostałe rzeczy są NA TYM EKRANIE, i nie wysyła
+    // nikogo tam, gdzie już jest.
+    return `${wstep}Pozostałe ${wKarcie} masz na tym ekranie.`;
+  }
+  return `${wstep}Kolejne ${wKarcie} zapisujesz w pełnej karcie meczu.`;
 }
 
 /**
@@ -301,6 +355,12 @@ export function wynikMeczu(o: OcenaMeczu): WynikMeczu {
 
 export const SKALA_OCENY: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
+/**
+ * ⭐ PLAN-D-M3 21.08.2026 — ⛔ ZERO NOWYCH SŁÓW. To jest CO DO ZNAKU `napis`
+ * wiersza `game_type` w `RZECZY_O_MECZU`; ta stała istnieje wyłącznie po to,
+ * żeby ekran miał co narysować i żeby strażnik miał czego szukać.
+ */
+export const POLE_RODZAJ_MECZU = 'Jaki to był mecz';
 export const POLE_SAMOOCENA = 'Jak sam oceniasz swoją grę · 1–10';
 export const POLE_STAN_MENTALNY = 'Z jaką głową w to wszedłeś · 1–10';
 export const POLE_WARUNKI = 'Warunki, w jakich graliście';
@@ -346,6 +406,10 @@ export const MECZ_WIECEJ_DOBROWOLNE =
  * jej obecność w pliku ekranu, więc nowy wiersz tutaj wymusza nowe pole tam.
  */
 export const POLA_ARKUSZA: readonly { kolumna: string; stala: string; etykieta: string }[] = [
+  // ⭐⭐ PLAN-D-M3 21.08.2026 — RODZAJ MECZU STOI PIERWSZY, tak jak w pełnej
+  // karcie. ⛔ Kolejność NIE JEST kosmetyką: strażnik porównuje tę listę
+  // z `rzeczyMeczu('arkusz_wiecej')` NA RÓWNOŚĆ, razem z kolejnością.
+  { kolumna: 'game_type', stala: 'POLE_RODZAJ_MECZU', etykieta: POLE_RODZAJ_MECZU },
   { kolumna: 'self_rating', stala: 'POLE_SAMOOCENA', etykieta: POLE_SAMOOCENA },
   { kolumna: 'mental_state', stala: 'POLE_STAN_MENTALNY', etykieta: POLE_STAN_MENTALNY },
   { kolumna: 'demanding_conditions', stala: 'POLE_WARUNKI', etykieta: POLE_WARUNKI },
@@ -360,16 +424,103 @@ export const MECZ_WIECEJ_NIC_DO_ZAPISU =
   'Nic tu jeszcze nie zaznaczyłeś. Nie zapiszemy pustego meczu, żeby nie liczył się jako praca.';
 
 /**
- * ⛔ RODZAJ MECZU PRZY ZAPISIE Z KAFLA. `match_contexts.game_type` jest
- * `NOT NULL` z CHECK-iem na cztery wartości, a kafel na „Dziś" niesie
- * WYŁĄCZNIE `event_type = 'match'` — czyli nie wie, czy to był mecz ligowy,
- * sparing, turniej czy gra treningowa.
- * ⚠️ To jest DECYZJA PRODUKTOWA nazwana z imienia, a nie pomiar (Z0):
- * podstawiamy tę samą wartość, którą od zawsze podstawia `app/(tabs)/mecz.tsx`,
- * a zawodnik może ją poprawić w pełnej karcie meczu.
+ * ⭐⭐ PLAN-D-M3 21.08.2026 — CZTERY RODZAJE MECZU, JEDNO ŹRÓDŁO NAZW.
+ *
+ * ⛔ DECYZJA KUBY Z 21.08.2026, jego słowami: „Skoro jest mecz oficjalny,
+ * to musi być też mecz sparingowy."
+ *
+ * ⛔ DLACZEGO TU, A NIE W EKRANIE. Do 21.08 ta mapa (`GAME_TYPE_LABELS`) żyła
+ * WYŁĄCZNIE w `app/(tabs)/mecz.tsx`. Od tego pasa rodzaj meczu stoi także
+ * w arkuszu spod kafla (`app/(tabs)/dzis.tsx`), więc druga ręczna kopia
+ * czterech napisów rozjechałaby się przy pierwszej zmianie (O92).
+ * ⚠️ Wartości są CO DO ZNAKU te, które stoją w CHECK-u `match_contexts.game_type`
+ * (zmierzone 21.08.2026: `official_match`, `friendly`, `training_game`,
+ * `tournament`), a napisy — te, które stały w `GAME_TYPE_LABELS`.
+ * ⛔ ZERO NOWYCH SŁÓW WIDOCZNYCH DLA ZAWODNIKA.
+ */
+export const RODZAJE_MECZU: readonly { wartosc: string; napis: string }[] = [
+  { wartosc: 'official_match', napis: 'Mecz oficjalny' },
+  { wartosc: 'friendly', napis: 'Sparing' },
+  { wartosc: 'training_game', napis: 'Gierka treningowa' },
+  { wartosc: 'tournament', napis: 'Turniej' },
+];
+
+/**
+ * ⛔⛔ RODZAJ MECZU, GDY ZAWODNIK NIC NIE WSKAZAŁ — PODSTAWIENIE, NIE POMIAR.
+ *
+ * ⚠️ TO JEST WARTOŚĆ ZAPISYWANA, A NIE ODPOWIEDŹ ZAWODNIKA.
+ * `match_contexts.game_type` jest `NOT NULL` z CHECK-iem na cztery wartości,
+ * więc przy zapisie trzeba wpisać COKOLWIEK, także wtedy, gdy nikt o rodzaj
+ * nie zapytał albo zawodnik świadomie nie wskazał (Z6 — ani jedna wartość nie
+ * jest zaznaczona z góry).
+ *
+ * ⭐ GDZIE ZAWODNIK TO POPRAWIA — JEDNYM DOTKNIĘCIEM. W arkuszu „powiedz
+ * więcej o tym meczu", otwieranym prosto z kafla na „Dziś": pozycja
+ * `game_type` stoi w `RZECZY_O_MECZU` w miejscu `arkusz_wiecej` (od 21.08),
+ * a `POLA_ARKUSZA` wiąże ją ze stałą `POLE_RODZAJ_MECZU`, którą rysuje ekran.
+ * Ta sama rzecz stoi też w pełnej karcie meczu (`app/(tabs)/mecz.tsx`).
+ *
+ * ⛔ CO Z TEGO WYNIKA DLA BRZMIEŃ. Wiersz z tą wartością znaczy „oficjalny
+ * ALBO nikt nie zapytał" — tych dwóch stanów NIE DA SIĘ w bazie odróżnić.
+ * Dlatego produktowi NIE WOLNO napisać o takim wierszu „Mecz oficjalny" jako
+ * o fakcie; służy do tego `napisRodzajuZapisanegoMeczu()`.
  */
 export const RODZAJ_MECZU_Z_KAFLA = 'official_match';
 
+/**
+ * ⛔ ZERO NOWYCH SŁÓW: ten napis stał już w `app/(tabs)/mecz.tsx` jako
+ * `GAME_TYPE_LABELS[gameType] || 'Mecz'`. Jest neutralny i prawdziwy w obu
+ * stanach, których nie umiemy rozróżnić.
+ */
+export const MECZ_RODZAJ_BEZ_WSKAZANIA = 'Mecz';
+
+/** Napis rodzaju albo `null`, gdy wartość jest spoza słownika. */
+function napisZeSlownika(wartosc: string | null): string | null {
+  if (typeof wartosc !== 'string') return null;
+  return RODZAJE_MECZU.find((r) => r.wartosc === wartosc)?.napis ?? null;
+}
+
+/**
+ * ⭐ CO ZAWODNIK WSKAZAŁ W TEJ WIZYCIE — tu wiemy, więc mówimy.
+ * `null` = jeszcze nie wskazał → napis neutralny.
+ */
+export function napisRodzajuMeczu(wybor: string | null): string {
+  return napisZeSlownika(wybor) ?? MECZ_RODZAJ_BEZ_WSKAZANIA;
+}
+
+/**
+ * ⛔⛔ CO WOLNO POWIEDZIEĆ O WIERSZU, KTÓRY JUŻ LEŻY W BAZIE (Z0).
+ *
+ * ⛔ `official_match` w bazie NIE ZNACZY „zawodnik powiedział, że to był mecz
+ * oficjalny". Znaczy „albo powiedział, albo nikt go nie zapytał i produkt
+ * podstawił `RODZAJ_MECZU_Z_KAFLA`". Napisanie o takim wierszu „Mecz oficjalny"
+ * jest podaniem PRAWDOPODOBNEGO jako PEWNEGO — czyli tym samym defektem,
+ * który ten pas usuwa u źródła.
+ * ⭐ Trzy pozostałe wartości mogły wziąć się WYŁĄCZNIE ze wskazania zawodnika
+ * (produkt nigdy ich nie podstawia), więc te wolno podać jako fakt.
+ */
+export function napisRodzajuZapisanegoMeczu(gameType: string | null): string {
+  if (gameType === RODZAJ_MECZU_Z_KAFLA) return MECZ_RODZAJ_BEZ_WSKAZANIA;
+  return napisZeSlownika(gameType) ?? MECZ_RODZAJ_BEZ_WSKAZANIA;
+}
+
+/**
+ * ⛔ STANY CIAŁA PRZED MECZEM — te same trzy, które zna `lib/matchCascade.ts`
+ * i CHECK kolumny `match_contexts.entered_recovery_state`. ⛔ Wartość spoza
+ * tej listy nie idzie do bazy: baza odrzuciłaby ją komunikatem, którego
+ * zawodnik nie umie przeczytać.
+ */
+export const STANY_CIALA_PRZED_MECZEM: readonly string[] =
+  ['entered_fatigued', 'entered_fresh', 'uncertain'];
+
+/**
+ * ⭐ WSZYSTKO O MECZU POZA CZTEREMA RZECZAMI ZE ŚCIEŻKI OCENY.
+ * ⚠️ PLAN-D-M3 21.08.2026 — ten typ przestał być „sześcioma polami arkusza"
+ * i jest dziś WEJŚCIEM JEDNEJ DECYZJI O ZAPISIE dla OBU ekranów. Pola, których
+ * dany ekran nie rysuje, przychodzą jako `null` i nie idą do bazy.
+ * ⛔ Nazwanie ich tutaj jest tańsze niż drugi typ i druga funkcja zapisu —
+ * a druga funkcja zapisu znaczyłaby dwa wiersze na jeden mecz.
+ */
 export type WiecejOMeczu = {
   samoocena: number | null;
   stanMentalny: number | null;
@@ -380,11 +531,27 @@ export type WiecejOMeczu = {
   bramkiMy: number | null;
   bramkiOni: number | null;
   notatka: string | null;
+  /**
+   * ⭐⭐ PLAN-D-M3 — RODZAJ MECZU WSKAZANY PRZEZ ZAWODNIKA.
+   * ⛔ `null` = NIE WSKAZAŁ. To NIE JEST `official_match` (R5): przy zapisie
+   * podstawiamy `RODZAJ_MECZU_Z_KAFLA`, bo kolumna jest `NOT NULL`, ale ten
+   * typ trzyma te dwa stany osobno — inaczej produkt nie umiałby powiedzieć,
+   * czy ktokolwiek o rodzaj zapytał.
+   */
+  rodzajMeczu?: string | null;
+  /** ⭐ PLAN-D-M3 — `match_contexts.role`. Wolny tekst, `null` = nie podał. */
+  rola?: string | null;
+  /**
+   * ⭐ PLAN-D-M3 — `match_contexts.entered_recovery_state`.
+   * ⛔ Wartość z `STANY_CIALA_PRZED_MECZEM` albo `null`.
+   */
+  stanCiala?: string | null;
 };
 
 export const PUSTE_WIECEJ_O_MECZU: WiecejOMeczu = {
   samoocena: null, stanMentalny: null, wymagajaceWarunki: null,
   pozycja: null, bramkiMy: null, bramkiOni: null, notatka: null,
+  rodzajMeczu: null, rola: null, stanCiala: null,
 };
 
 /** Wiersz `match_contexts` w kształcie, w jakim idzie do bazy. */
@@ -409,6 +576,15 @@ export type WierszKontekstuMeczu = {
   own_score: number | null;
   opponent_score: number | null;
   free_note: string | null;
+  /**
+   * ⭐⭐ PLAN-D-M3 21.08.2026 — DWIE KOLUMNY, KTÓRE ZAPISYWAŁA WYŁĄCZNIE
+   * PEŁNA KARTA MECZU WŁASNĄ DROGĄ.
+   * ⛔ Bez nich podpięcie `app/(tabs)/mecz.tsx` pod tę funkcję PRZESTAŁOBY
+   * ZAPISYWAĆ dwa pytania, które ten ekran od zawsze zadaje — czyli byłoby
+   * kasowaniem pytań z pełnej karty pod pozorem porządkowania (B3).
+   */
+  role: string | null;
+  entered_recovery_state: string | null;
 };
 
 /** Co ekran wie o wierszu meczu w TEJ wizycie. ⛔ Trzy wartości, nie dwie. */
@@ -420,7 +596,16 @@ export type WierszKontekstuMeczu = {
  */
 export type ZmianyKontekstuMeczu =
   Omit<WierszKontekstuMeczu, 'user_id' | 'game_type' | 'calendar_event_id'>
-  & { calendar_event_id?: number };
+  & { calendar_event_id?: number }
+  /**
+   * ⭐⭐ PLAN-D-M3 21.08.2026 — RODZAJ MECZU DA SIĘ POPRAWIĆ W ISTNIEJĄCYM
+   * WIERSZU. Bez tego zawodnik, który ocenił sparing z kafla, a rodzaj wskazał
+   * dopiero przy drugim dotknięciu, zostawałby z podstawioną wartością na stałe.
+   * ⛔ `string`, nie `string | null`: kolumna jest `NOT NULL`, a dokładanie
+   * NIE MA PRAWA skasować rodzaju, który wiersz już ma — to ten sam zakaz,
+   * co przy `calendar_event_id` (pas D2).
+   */
+  & { game_type?: string };
 
 /**
  * ⭐⭐ PLAN-D-D2 19.08.2026 — CZY WOLNO ZWIĄZAĆ TEN WIERSZ Z TYM WYSTĄPIENIEM.
@@ -504,10 +689,42 @@ function liczbaAlbo(x: number | null, min: number, max: number): number | null {
   return Math.round(x);
 }
 
-function tekstAlbo(x: string | null): string | null {
+function tekstAlbo(x: string | null | undefined): string | null {
   if (typeof x !== 'string') return null;
   const t = x.trim();
   return t === '' ? null : t;
+}
+
+/** ⛔ Wartość spoza słownika nie idzie do bazy — CHECK i tak by ją odrzucił. */
+function zeSlownikaAlbo(x: string | null | undefined, slownik: readonly string[]): string | null {
+  const t = tekstAlbo(x ?? null);
+  return t !== null && slownik.includes(t) ? t : null;
+}
+
+/**
+ * ⭐⭐ PLAN-D-M3 21.08.2026 — CO WPISUJEMY W `game_type` I CZY TO POMIAR.
+ *
+ * ⛔ DWA STANY, KTÓRE MUSZĄ ZOSTAĆ ROZRÓŻNIONE PO DRODZE, choć w bazie
+ * zlewają się w jedną wartość:
+ *   • `wskazany: true`  — zawodnik wskazał rodzaj. To jest ODPOWIEDŹ.
+ *   • `wskazany: false` — nie wskazał (albo wskazał coś spoza słownika).
+ *     Wtedy idzie `RODZAJ_MECZU_Z_KAFLA`, bo kolumna jest `NOT NULL` —
+ *     ⛔ to jest PODSTAWIENIE, nie pomiar, i tylko dzięki temu polu produkt
+ *     wie, że przy DOKŁADANIU nie wolno nadpisać cudzego wskazania.
+ */
+export function ustalRodzajMeczu(wybor: string | null | undefined): {
+  wartosc: string; wskazany: boolean; powod: string;
+} {
+  const wskazanie = zeSlownikaAlbo(wybor, RODZAJE_MECZU.map((r) => r.wartosc));
+  if (wskazanie === null) {
+    return {
+      wartosc: RODZAJ_MECZU_Z_KAFLA,
+      wskazany: false,
+      powod: `⚠️ rodzaju meczu nikt nie wskazał — podstawiam \`${RODZAJ_MECZU_Z_KAFLA}\`, `
+        + 'bo kolumna jest NOT NULL; to jest podstawienie, nie pomiar',
+    };
+  }
+  return { wartosc: wskazanie, wskazany: true, powod: `rodzaj wskazany: ${wskazanie}` };
 }
 
 /**
@@ -557,6 +774,9 @@ export function zdecydujOZapisieMeczu(w: {
     idWydarzenia: w.idWydarzenia ?? null,
     wydarzeniaZawodnika: w.wydarzeniaZawodnika ?? null,
   });
+  // ⭐⭐ PLAN-D-M3 — RODZAJ MECZU LICZY SIĘ TAK SAMO JAK WIĄZANIE: przed
+  // zapisem, jedną regułą, dla obu ekranów.
+  const rodzaj = ustalRodzajMeczu(w.wiecej.rodzajMeczu);
 
   const pola: ZmianyKontekstuMeczu = {
     minutes_played: liczbaAlbo(w.ocena.minutyNaBoisku, 0, 130),
@@ -569,6 +789,10 @@ export function zdecydujOZapisieMeczu(w: {
     own_score: liczbaAlbo(w.wiecej.bramkiMy, 0, 99),
     opponent_score: liczbaAlbo(w.wiecej.bramkiOni, 0, 99),
     free_note: tekstAlbo(w.wiecej.notatka),
+    // ⭐⭐ PLAN-D-M3 — DWA PYTANIA PEŁNEJ KARTY. Ekran, który ich nie zadaje,
+    // podaje `null` i nic tu nie zapisuje.
+    role: tekstAlbo(w.wiecej.rola),
+    entered_recovery_state: zeSlownikaAlbo(w.wiecej.stanCiala, STANY_CIALA_PRZED_MECZEM),
   };
 
   const cokolwiek = Object.values(pola).some((v) => v !== null);
@@ -581,25 +805,37 @@ export function zdecydujOZapisieMeczu(w: {
       rodzaj: 'aktualizuj',
       id: w.stan.id,
       // ⛔ Wiązanie DOKŁADAMY, gdy je mamy, i NIGDY nie kasujemy, gdy go nie mamy.
-      zmiany: wiazanie.rodzaj === 'jest'
-        ? { ...pola, calendar_event_id: wiazanie.idWydarzenia }
-        : pola,
+      // ⛔ Wiązanie DOKŁADAMY, gdy je mamy, i NIGDY nie kasujemy, gdy go nie mamy.
+      // ⛔ TAK SAMO RODZAJ MECZU (M3): idzie do `update` WYŁĄCZNIE wtedy, gdy
+      // zawodnik go wskazał. Wysłanie podstawienia przy każdym dokładaniu
+      // NADPISYWAŁOBY „Sparing" na „official_match" po cichu — czyli produkt
+      // kasowałby odpowiedź, którą sam dostał.
+      zmiany: {
+        ...pola,
+        ...(wiazanie.rodzaj === 'jest' ? { calendar_event_id: wiazanie.idWydarzenia } : {}),
+        ...(rodzaj.wskazany ? { game_type: rodzaj.wartosc } : {}),
+      },
       powod: `dokładam do wiersza ${w.stan.id} — ⛔ drugi wiersz liczyłby ten sam mecz drugi raz`
-        + ` · wiązanie: ${wiazanie.rodzaj === 'jest' ? `wydarzenie ${wiazanie.idWydarzenia}` : wiazanie.powod}`,
+        + ` · wiązanie: ${wiazanie.rodzaj === 'jest' ? `wydarzenie ${wiazanie.idWydarzenia}` : wiazanie.powod}`
+        + ` · ${rodzaj.powod}`,
     };
   }
   return {
     rodzaj: 'wstaw',
     wiersz: {
       user_id: w.idZawodnika,
-      game_type: RODZAJ_MECZU_Z_KAFLA,
+      // ⭐⭐ PLAN-D-M3 21.08.2026 — WSKAZANIE ZAWODNIKA, A DOPIERO POTEM
+      // PODSTAWIENIE. Do 21.08 stała szła tu NA SZTYWNO, więc sparing oceniony
+      // z kafla lądował w bazie jako „Mecz oficjalny".
+      game_type: rodzaj.wartosc,
       // ⭐⭐ PLAN-D-D2 §4.1 — TO JEST TA JEDNA KOLUMNA. Bez niej licznik pracy
       // nie ma czym zestawić wiersza meczu z wydarzeniem i liczy oba.
       calendar_event_id: wiazanie.rodzaj === 'jest' ? wiazanie.idWydarzenia : null,
       ...pola,
     },
     powod: 'pierwszy zapis tego meczu w tej wizycie'
-      + ` · wiązanie: ${wiazanie.rodzaj === 'jest' ? `wydarzenie ${wiazanie.idWydarzenia}` : wiazanie.powod}`,
+      + ` · wiązanie: ${wiazanie.rodzaj === 'jest' ? `wydarzenie ${wiazanie.idWydarzenia}` : wiazanie.powod}`
+      + ` · ${rodzaj.powod}`,
   };
 }
 

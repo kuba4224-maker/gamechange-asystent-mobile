@@ -352,14 +352,43 @@ for (const s of SCREENS) {
 //     (numberOfLines={1}), rząd przycisków 48.
 const PICKER_H = 52;
 const INPUT_H = Math.round(20 + lh(14) + 2);
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS D3 21.08.2026 — TA LISTA PRZESTAJE BYĆ MODELEM Z RĘKI
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ ZNALEZISKO, KTÓRE MUSI TU STAĆ, ZANIM KTOKOLWIEK ZNÓW UWIERZY W TĘ LISTĘ.
+//
+// Nota pasa T2 (§8, 19.08.2026) mówi dosłownie: „miara wysokości powstaje
+// z `tests/measure-heights.ts`, czyli z ręcznie spisanego modelu ekranu,
+// a nie z parsowania `app/(tabs)/dziennik.tsx`".
+//
+// ⚠️ TO JEST PRAWDA O TEJ LIŚCIE I NIEPRAWDA O ZAPADCE. Zapadka
+// „dziennik 3 712 dp" w `lib/wysokoscEkranu.selftest.ts` bierze się
+// z `zmierzEkran(app/(tabs)/dziennik.tsx)`, czyli PARSUJE ten plik — i rusza
+// się od zmiany w JSX. Ręcznym modelem była WYŁĄCZNIE ta lista, i tylko ona
+// nie miała jak drgnąć.
+//
+// ⛔ I ROZJEŻDŻAŁA SIĘ JUŻ PRZED PASEM D3 — obie liczby, bez zamiatania:
+//     • model z ręki (7 pozycji):            306,6 dp do górnej krawędzi pytania
+//     • pomiar z pliku (9 pozycji):          278 dp
+//   Model gubił dwie rzeczy, które NA EKRANIE stoją (baner błędu i baner
+//   potwierdzenia), a przełącznik liczył jako jeden blok zamiast dwóch kafli.
+//   28,6 dp i dwie pozycje różnicy — po cichu, od 08.08.2026.
+//
+// ⭐ CO STOI TU OD DZIŚ. Lista ma DOKŁADNIE tyle pozycji, ile pomiar znajduje
+// w pliku ekranu nad boxem pytania, a jej suma równa się zmierzonej górnej
+// krawędzi tego boxu — jedno i drugie PRZYBITE ASERCJĄ NA RÓWNOŚĆ na końcu
+// tego pliku. ⛔ Rozjazd kończy ten skrypt wyjątkiem, a nie przypisem.
 const DZIENNIK_DO_PYTANIA: [string, number][] = [
-  ['padding górny', 20],
-  ['tytuł „Dziennik zawodnika"', lh(28) + 24],
-  ['przełącznik poranny/potreningowy', 48 + 24],
-  ['etykieta „RODZAJ SESJI"', 4 + lh(11) + 6],
-  ['picker rodzaju sesji', PICKER_H + 8],
-  ['etykieta „CZAS TRWANIA (MINUTY)"', 4 + lh(11) + 6],
-  ['pole czasu trwania', INPUT_H + 8],
+  ['tytuł „Dziennik zawodnika"', 35],
+  ['kafel „Wpis poranny"', 20],
+  ['kafel „Wpis potreningowy"', 19],
+  ['baner błędu', 16],
+  ['baner potwierdzenia', 17],
+  ['etykieta „Rodzaj sesji"', 23],
+  ['picker rodzaju sesji', 54],
+  ['etykieta „Czas trwania (minuty)"', 24],
+  ['pole czasu trwania', 70],
 ];
 const PYTANIE_TOP = DZIENNIK_DO_PYTANIA.reduce((a, [, v]) => a + v, 0);
 
@@ -445,9 +474,11 @@ console.log(`✅ [MODEL RĘCZNY 08.08.2026] Z linią „Nowa porcja w Twoim Blok
 // zajmuje się ZAPADKA NA RÓWNOŚĆ w `lib/wysokoscEkranu.selftest.ts`.
 
 import {
-  zmierzEkran, opiszPozycje, przeciete, WIDOCZNE_NAD_ZGIECIEM_DP, SZEROKOSC_ODNIESIENIA_DP,
+  zmierzEkran, zmierzEkranZTekstu, opiszPozycje, przeciete,
+  WIDOCZNE_NAD_ZGIECIEM_DP, SZEROKOSC_ODNIESIENIA_DP,
   type PomiarEkranu,
 } from '../lib/wysokoscEkranu';
+import { readFileSync as czytajPlik } from 'node:fs';
 
 const kreska = (t: string) => console.log(`\n${'═'.repeat(66)}\n${t}\n${'═'.repeat(66)}`);
 
@@ -513,3 +544,75 @@ if (dzis.wysokoscRazemDp > WIDOCZNE_NAD_ZGIECIEM_DP) {
 
 console.log('\n  Zapadka na równość tych liczb stoi w lib/wysokoscEkranu.selftest.ts '
   + 'i to ona zapala się na czerwono, gdy któraś urośnie.');
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS D3 21.08.2026 — MODEL DZIENNIKA PRZYBITY DO PLIKU EKRANU
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ TO JEST NAPRAWA ZNALEZISKA T2 §8. Do 21.08.2026 lista `DZIENNIK_DO_PYTANIA`
+// wyżej była modelem z ręki: nie czytała `app/(tabs)/dziennik.tsx` i nie miała
+// jak drgnąć, cokolwiek by się w tym pliku zmieniło. „Schudł do 800 dp" było
+// wtedy ZDANIEM, a nie POMIAREM.
+//
+// ⭐ Od dziś ta lista jest sprawdzana NA RÓWNOŚĆ z pomiarem z pliku ekranu —
+// i to w dwóch niezależnych miejscach naraz:
+//   1. LICZBA POZYCJI modelu = liczba rzeczy, które pomiar znajduje w pliku
+//      nad boxem pytania o sesję Bloku,
+//   2. SUMA modelu = zmierzona górna krawędź tego boxu (co do zaokrąglenia).
+// ⛔ Rozjazd kończy ten skrypt WYJĄTKIEM. Suita uruchamia ten plik i wymaga
+// kodu 0 (`lib/wysokoscEkranu.selftest.ts`, sekcja 1), więc rozjazd jest
+// czerwienią całej suity, a nie akapitem, którego nikt nie czyta.
+//
+// ⚠️ Pomiar dotyczy GAŁĘZI POTRENINGOWEJ, bo to jej dotyczy próg pytania
+// o sesję Bloku. Gałąź poranna jest wyższa, więc domyślny pomiar opisuje ją;
+// żeby zmierzyć tę właściwą, gałąź poranna jest wygaszana W TEKŚCIE WCZYTANYM
+// Z DYSKU. ⛔ Plik na dysku nie jest dotykany ani razu.
+{
+  const sciezkaDziennika = joinPath(KORZEN, 'app', '(tabs)', 'dziennik.tsx');
+  const zrodloDziennika = czytajPlik(sciezkaDziennika, 'utf8');
+  const poczatekPoranka = zrodloDziennika.indexOf(") : entryType === 'morning' ? (");
+  const koniecPoranka = zrodloDziennika.indexOf('      ) : (', poczatekPoranka);
+  if (poczatekPoranka < 0 || koniecPoranka < 0) {
+    throw new Error('REGRESJA: nie znajduję gałęzi porannej w app/(tabs)/dziennik.tsx — '
+      + 'model gałęzi potreningowej przestał mieć jak się sprawdzić, a to jest dokładnie '
+      + 'ten stan, w którym „model z ręki" znów zaczyna kłamać po cichu (znalezisko T2 §8).');
+  }
+  const tylkoPotreningowy = zrodloDziennika.slice(0, poczatekPoranka)
+    + ") : entryType === 'morning' ? (\n        <></>\n"
+    + zrodloDziennika.slice(koniecPoranka);
+
+  const pomiarPotreningowy = zmierzEkranZTekstu(
+    'dziennik-potreningowy', tylkoPotreningowy, joinPath(KORZEN, 'app', '(tabs)'));
+  const iPytania = pomiarPotreningowy.pozycje.findIndex((p) => /blockPrompt/i.test(p.nazwa));
+  if (iPytania < 0) {
+    throw new Error('REGRESJA: box pytania o sesję Bloku zniknął z gałęzi potreningowej '
+      + 'app/(tabs)/dziennik.tsx — to jest sedno rundy 7, a nie szczegół układu.');
+  }
+  const nadPytaniem = pomiarPotreningowy.pozycje.slice(0, iPytania);
+  const goraPytania = pomiarPotreningowy.pozycje[iPytania].goraDp;
+
+  kreska('⭐⭐ MODEL DZIENNIKA KONTRA PLIK EKRANU — RÓWNOŚĆ, NIE PODOBIEŃSTWO (D3)');
+  console.log(`  model  DZIENNIK_DO_PYTANIA:  ${DZIENNIK_DO_PYTANIA.length} pozycji · `
+    + `${Math.round(PYTANIE_TOP)} dp`);
+  console.log(`  pomiar app/(tabs)/dziennik.tsx: ${nadPytaniem.length} pozycji · `
+    + `${Math.round(goraPytania)} dp`);
+  for (let i = 0; i < Math.max(DZIENNIK_DO_PYTANIA.length, nadPytaniem.length); i++) {
+    const m = DZIENNIK_DO_PYTANIA[i];
+    const r = nadPytaniem[i];
+    console.log(`    ${String(i + 1).padStart(2)}.  model: ${(m ? `${m[1]} dp  ${m[0]}` : '⛔ BRAK').padEnd(46)}`
+      + `pomiar: ${r ? `${Math.round(r.wysokoscDp)} dp  ${r.nazwa}` : '⛔ BRAK'}`);
+  }
+
+  if (DZIENNIK_DO_PYTANIA.length !== nadPytaniem.length) {
+    throw new Error(`REGRESJA: model „dziennik" ma ${DZIENNIK_DO_PYTANIA.length} pozycji, `
+      + `a w app/(tabs)/dziennik.tsx stoi ich nad boxem pytania ${nadPytaniem.length}. `
+      + 'Model, który rozjeżdża się z plikiem, jest zdaniem o ekranie sprzed rozjazdu — '
+      + 'popraw listę DZIENNIK_DO_PYTANIA, nie tę asercję.');
+  }
+  if (Math.round(PYTANIE_TOP) !== Math.round(goraPytania)) {
+    throw new Error(`REGRESJA: model „dziennik" sumuje się do ${Math.round(PYTANIE_TOP)} dp, `
+      + `a pomiar z pliku daje ${Math.round(goraPytania)} dp. Różnica ${Math.round(goraPytania - PYTANIE_TOP)} dp — `
+      + 'popraw liczby w DZIENNIK_DO_PYTANIA, nie próg.');
+  }
+  console.log(`\n  ✅ MODEL ZGADZA SIĘ Z PLIKIEM CO DO POZYCJI I CO DO dp `
+    + `(${DZIENNIK_DO_PYTANIA.length} pozycji · ${Math.round(PYTANIE_TOP)} dp).`);
+}

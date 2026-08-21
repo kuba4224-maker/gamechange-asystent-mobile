@@ -322,10 +322,26 @@ const ZAPADKI_POZOSTALE = [
       + 'zdanie o oknie odniesienia 28 dni, jako goły fakt bez procentu i bez '
       + 'przymiotnika; 598 → 629 dp (+31), zero rzeczy pod zgięciem, zero przeciętych, '
       + 'liczba pozycji ekranu BEZ ZMIANY' },
-  { ekran: 'dziennik', pozycji: 21, widocznych: 14, przecietych: 1, wysokoscDp: 3712,
-    ustawiona: '17.08.2026',
-    powod: 'pas M2 — historia wpisów rysuje do 20 wierszy (`.limit(20)` w tym ekranie), '
-      + 'a liczyła się jako jeden; 1 570 → 3 712 dp' },
+  // ⭐⭐ PRZESTAWIONA 21.08.2026 (PAS D3) — 3 712 → 743 dp, czyli −2 969 dp,
+  // i 21 → 16 rzeczy. ⛔ To jest TRZECIE przestawienie zapadki W DÓŁ w tym
+  // projekcie (pierwsze: pas A1 na „Dziś", drugie: pas M2 na meczu).
+  // JEDNYM ZDANIEM, CO GO ZDJĘŁO: sześć rzeczy zeszło z ekranu do arkuszy
+  // (`components/Arkusz.tsx` jest `Modal`-em, więc kosztuje 0 dp) — nastrój
+  // / motywacja, notatka, powiązanie z wydarzeniem kalendarza, zmęczenie po
+  // treningu, ból i historia wpisów — a każda z nich dostała NA EKRANIE
+  // wiersz wejścia ze strzałką „→" z DOKŁADNIE tą etykietą, która nad nią
+  // stała.
+  // ⛔ NIC NIE ZNIKNĘŁO: równości arkusz↔wejście pilnuje strażnik `D3-B1`
+  // w sekcji 15, a tabela „co gdzie wylądowało" stoi w nocie
+  // `claude/PRZEKAZANIE_PAS_D3_21_08_2026.md`.
+  // ⭐ 743 < 808: ekran mieści się nad zgięciem W CAŁOŚCI, `przecietych`
+  // spadło z 1 na 0, a `widocznych` zrównało się z `pozycji` (16 z 16).
+  { ekran: 'dziennik', pozycji: 16, widocznych: 16, przecietych: 0, wysokoscDp: 743,
+    ustawiona: '21.08.2026',
+    powod: 'pas D3 — dziennik chudnie do makiety: nastrój/motywacja, notatka, '
+      + 'powiązanie z wydarzeniem, zmęczenie po treningu, ból i historia wpisów zeszły '
+      + 'z ekranu do arkuszy (0 dp), a na ekranie stanęły cztery wiersze wejścia; '
+      + '3 712 → 743 dp, zero rzeczy pod zgięciem, zero przeciętych' },
   // ⭐⭐ PRZESTAWIONA 19.08.2026 (PAS M2) — 5 863 → 785 dp, czyli −5 078 dp,
   // i 20 → 10 rzeczy. ⛔ To jest DRUGIE przestawienie zapadki W DÓŁ w tym
   // projekcie (pierwsze zrobił pas A1 na „Dziś") i jedyne zdanie, jakie tu
@@ -347,11 +363,40 @@ const ZAPADKI_POZOSTALE = [
       + 'historia meczów i lista trybu kontuzji zeszły z ekranu do arkusza (0 dp), '
       + 'a minuty na boisku i długość meczu stanęły w jednym wierszu; 5 863 → 785 dp, '
       + 'zero rzeczy pod zgięciem, zero przeciętych' },
-  { ekran: 'kalendarz', pozycji: 16, widocznych: 4, przecietych: 1, wysokoscDp: 2802,
-    ustawiona: '17.08.2026',
-    powod: 'pas M2 — ekran, od którego ten pas się zaczął: 536 → 2 650 dp. Mierzona jest '
-      + 'zakładka „Listy" (najgorszy przypadek); zakładka „Tydzień" ma 1 466 dp i pilnuje jej '
-      + 'osobna asercja o siedmiu wierszach dni' },
+  // ⭐⭐ PRZESTAWIONA 21.08.2026 (PAS K1) — 2 802 → 767 dp, 16 → 7 rzeczy,
+  // 4 → 7 widocznych bez przewijania, 1 → 0 przeciętych zgięciem.
+  // ⚠️⚠️ TO JEST JEDYNA ZAPADKA, KTÓRĄ PAS K1 RUSZYŁ W TYM PLIKU — reszta
+  // (w tym `ZAPADKA_TYDZIEN` niżej: 1 466 dp / 15 / 12) stoi NIETKNIĘTA,
+  // sprawdzone uruchomieniem. ⛔ Heads-up dla pasa D3, który trzyma ten plik
+  // w tej fali: jeżeli scalasz swoją wersję, ta jedna pozycja jest moja.
+  //
+  // JEDNYM ZDANIEM, CO GO ZDJĘŁO: ⛔ właściciel produktu nie umiał dodać meczu
+  // we własnej aplikacji, bo „+" zostawiało go na zakładce „Tydzień", a
+  // formularz stał pod zakładką „Listy" wśród czterech sekcji kart o łącznej
+  // wysokości 1 058 dp. Cztery sekcje wpisów (nadchodzące · cykliczne ·
+  // minione · odwołane) i cztery pola formularza opisane „(opcjonalnie)"
+  // (długość · notatka · godzina · wąskie gardło) zeszły z ekranu do arkuszy
+  // (`components/Arkusz.tsx` jest `Modal`-em, więc kosztuje 0 dp), a siedem
+  // wierszy `Checkbox` z dniami tygodnia stanęło chipami w jednym rzędzie
+  // zamiast jeden pod drugim (840 → 18 dp).
+  // ⛔ NIC NIE ZNIKNĘŁO: każdy z dwóch arkuszy ma NA EKRANIE wiersz wejścia,
+  // a strażnik `K1-B5` (`lib/drogaDodania.selftest.ts`) porównuje ZBIÓR
+  // rodzajów arkusza ze ZBIOREM wierszy wejścia NA RÓWNOŚĆ — arkusz bez
+  // wejścia i wejście bez arkusza zapalają czerwień tak samo.
+  // ⭐ 767 < 808: zakładka „Listy" — ta, na której od 21.08 ląduje „+" —
+  // mieści się nad zgięciem W CAŁOŚCI.
+  // ⚠️ MIERZONA JEST NADAL ZAKŁADKA „Listy", a „Tydzień" nadal jest gałęzią
+  // pominiętą (asercja niżej) — pas K1 NIE zmienił, której zakładki ta liczba
+  // dotyczy. Zakładki „Tydzień" ten pas świadomie NIE odchudzał: 863 z jej
+  // 1 466 dp to siedem wierszy dni, a tydzień, który kurczy się do dni
+  // z treścią, przestaje być tygodniem (WT-06, WG-02).
+  { ekran: 'kalendarz', pozycji: 7, widocznych: 7, przecietych: 0, wysokoscDp: 767,
+    ustawiona: '21.08.2026',
+    powod: 'pas K1 — droga dodania rzeczy: cztery sekcje wpisów i cztery pola opcjonalne '
+      + 'zeszły do arkuszy (0 dp), dni tygodnia z siedmiu wierszy Checkbox na chipy '
+      + 'w jednym rzędzie, rodzaj wydarzenia z Pickera na pięć widocznych chipów; '
+      + '2 802 → 767 dp, zero rzeczy pod zgięciem, zero przeciętych. ⛔ Nic nie zniknęło — '
+      + 'strażnik K1-B5 porównuje arkusze z wejściami na RÓWNOŚĆ' },
 ];
 {
   const d = zmierzEkran(EKRAN_DZIS);
@@ -662,14 +707,54 @@ const ZAPADKA_NIEWYPROWADZALNE = {
   // więc miara ekranu ich już nie widzi — bo i zawodnik nie widzi ich na ekranie.
   // ⛔ Te cztery konstrukcje NIE ZNIKNĘŁY z produktu: pilnuje ich osobna
   // zapadka „listy w arkuszu" w sekcji 13 tego pliku.
-  ile: 10,
-  ustawiona: '19.08.2026',
-  powod: 'pas M2 — 13 → 10: `Checkbox` i trzy listy odpowiedzi na pytania segmentowe '
-    + 'zeszły z ekranu meczu do arkusza (Modal, poza przewijaniem ekranu), więc miara '
-    + 'ekranu ich nie widzi. ⛔ Nie zniknęły z produktu — stoją w zapadce „listy '
-    + 'w arkuszu" w sekcji 13. Wszystkie 10 pozostałych pozycji to listy o długości '
-    + 'zależnej od danych zawodnika albo klocki spoza repozytorium',
+  // ⭐ PRZESTAWIONA 21.08.2026 (pas D3): 10 → 9. ⚠️ I TU JEST RZECZ, KTÓREJ NIE
+  // WOLNO PRZEMILCZEĆ: liczba spadła, bo `lista pains.map(…) — ile wierszy`
+  // zeszła z ekranu DZIENNIKA do arkusza „Historia wpisów", czyli poza
+  // `ScrollView`. ⛔ Sama ta zapadka nie odróżnia „przeniesione" od
+  // „SKASOWANE" — obie rzeczy dają dokładnie ten sam spadek o jeden.
+  // ⭐ Dlatego niżej stoi DRUGA zapadka, na RÓWNOŚĆ, która mierzy, CO
+  // dokładnie arkusz dziennika zdejmuje z pomiaru — przez wsunięcie treści
+  // arkusza z powrotem na ekran i porównanie obu list.
+  // ⛔ `Checkbox` NIE ZNIKNĄŁ z listy: zszedł z dziennika, ale nadal stoi
+  // na innym ekranie zakładek.
+  // ⭐ PRZESTAWIONA 21.08.2026 (pas K1): 9 → 8. Liczba SPADŁA O JEDEN i to jest
+  // dobra wiadomość. JEDNYM ZDANIEM, CO JĄ ZMIENIŁO: `Checkbox` zniknął
+  // z OSTATNIEGO ekranu, na którym stał — siedem wierszy `Checkbox` z dniami
+  // tygodnia na Kalendarzu (840 dp!) stanęło chipami w jednym rzędzie (18 dp).
+  // ⛔ TO NIE JEST „przeniesione do arkusza" ani „skasowane": pole „Dni
+  // tygodnia" stoi dokładnie tam, gdzie stało, robi dokładnie to samo
+  // (zaznaczenie wielokrotne) i nadal jest w pomiarze — zmienił się WYŁĄCZNIE
+  // komponent, którym jest narysowane, a ten nowy miara umie policzyć.
+  // ⚠️⚠️ HEADS-UP DLA PASA D3, który trzyma ten plik: to jest DRUGA i OSTATNIA
+  // rzecz, którą pas K1 tu ruszył (pierwsza to zapadka `kalendarz` wyżej).
+  ile: 8,
+  ustawiona: '21.08.2026',
+  powod: 'pas D3 — 10 → 9: `lista pains.map(…) — ile wierszy` zeszła z ekranu dziennika '
+    + 'do arkusza „Historia wpisów" (Modal, poza przewijaniem ekranu), więc miara ekranu '
+    + 'jej nie widzi — bo i zawodnik nie widzi jej na ekranie. ⛔ Nie zniknęła z produktu: '
+    + 'pilnuje tego zapadka „co arkusz dziennika zdejmuje z pomiaru" kilka linii niżej '
+    + 'oraz strażnik D3-B6 w sekcji 15. Wszystkie 9 pozostałych pozycji to listy '
+    + 'o długości zależnej od danych zawodnika albo klocki spoza repozytorium',
 };
+
+/**
+ * ⭐⭐ PAS D3 21.08.2026 — CO DOKŁADNIE ARKUSZ DZIENNIKA ZDEJMUJE Z POMIARU.
+ *
+ * ⛔ ZAPADKA NA RÓWNOŚĆ, MIERZONA, A NIE DEKLAROWANA. Powstaje przez
+ * wsunięcie treści arkusza Z POWROTEM na ekran (mutacja tekstu w pamięci)
+ * i porównanie listy „nie da się wyprowadzić" przed i po. Różnica to
+ * dokładnie to, czego pomiar ekranu nie widzi Z POWODU arkusza.
+ *
+ * ⛔ Po co osobno od zapadki wyżej: liczba, która spadła o jeden, wygląda
+ * identycznie po PRZENIESIENIU rzeczy do arkusza i po jej SKASOWANIU.
+ * Ta zapadka odróżnia jedno od drugiego, bo wymienia rzeczy Z NAZWY i pyta
+ * o RÓWNOŚĆ zbiorów — kto przeniesie do arkusza rzecz siódmą, zobaczy
+ * czerwień i dopisze ją tu świadomie, z datą i powodem.
+ */
+const POZA_POMIAREM_W_ARKUSZU_DZIENNIKA_21_08_2026 = [
+  'Checkbox',
+  'lista pains.map(…) — ile wierszy',
+].sort();
 {
   const ramka = (srodek: string) => `
 import { View, Text, StyleSheet } from 'react-native';
@@ -738,6 +823,50 @@ const styles = StyleSheet.create({
     `jest ${wszystkie.size}, zapadka ${ZAPADKA_NIEWYPROWADZALNE.ile} (${ZAPADKA_NIEWYPROWADZALNE.ustawiona}). `
     + `Lista: ${[...wszystkie].sort().join(' · ')}. Jeżeli dołożyłeś ekranowi konstrukcję, `
     + 'której miara nie zna — naucz jej miarę albo przestaw zapadkę z datą i powodem.');
+
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS D3 21.08.2026 — ZAPADKA NA RÓWNOŚĆ: CO ARKUSZ DZIENNIKA ZDEJMUJE
+  // ═════════════════════════════════════════════════════════════════
+  {
+    const katEkranow = join(root, 'app', '(tabs)');
+    const dziennikPrawdziwy = readFileSync(join(katEkranow, 'dziennik.tsx'), 'utf8');
+    // ⛔ MUTUJEMY TEKST WCZYTANY Z DYSKU, NIE PLIK NA DYSKU (wzorzec pasa M2):
+    // przerwanie procesu w dowolnym momencie nie ma czego zepsuć.
+    const zTrescioArkuszaNaEkranie = dziennikPrawdziwy.replace(
+      '    </ScrollView>\n', '      {trescArkusza()}\n    </ScrollView>\n');
+    check('⭐ (D3, O70) mutacja „treść arkusza wraca na ekran" NAPRAWDĘ zmienia tekst',
+      zTrescioArkuszaNaEkranie !== dziennikPrawdziwy,
+      'wzorzec podmiany nie trafił — zapadka niżej badałaby nic');
+
+    const bezArkusza = zmierzEkranZTekstu('dziennik', dziennikPrawdziwy, katEkranow);
+    const zArkuszem = zmierzEkranZTekstu('dziennik+arkusz', zTrescioArkuszaNaEkranie, katEkranow);
+    const zdjete = [...zArkuszem.niewyprowadzalne]
+      .filter((n) => !bezArkusza.niewyprowadzalne.includes(n)).sort();
+
+    console.log(`   co arkusz dziennika zdejmuje z pomiaru: ${zdjete.length}`);
+    for (const n of zdjete) console.log(`   • ${n}`);
+
+    check('⛔⛔ (D3, O73) ZAPADKA NA RÓWNOŚĆ: arkusz dziennika zdejmuje z pomiaru DOKŁADNIE to, '
+      + 'co 21.08.2026 — nie „co najwyżej tyle"',
+      zdjete.length === POZA_POMIAREM_W_ARKUSZU_DZIENNIKA_21_08_2026.length
+      && zdjete.every((n, i) => n === POZA_POMIAREM_W_ARKUSZU_DZIENNIKA_21_08_2026[i]),
+      `jest [${zdjete.join(' · ') || '—'}], zapadka `
+      + `[${POZA_POMIAREM_W_ARKUSZU_DZIENNIKA_21_08_2026.join(' · ')}] — doszło: ktoś wyprowadził `
+      + 'kolejną rzecz z pomiaru przez arkusz, dopisz ją tu z powodem; ubyło: rzecz wróciła '
+      + 'na ekran albo ZNIKŁA z produktu — sprawdź KTÓRE, bo to są dwie różne rzeczy');
+
+    // ⛔ STRAŻNIK STRAŻNIKA: „w arkuszu" ma znaczyć „POZA `ScrollView`".
+    check('⛔ (D3) arkusz dziennika stoi POZA `ScrollView` — inaczej nic nie zdejmuje',
+      dziennikPrawdziwy.indexOf('</ScrollView>') < dziennikPrawdziwy.indexOf('<Arkusz')
+      && dziennikPrawdziwy.indexOf('<Arkusz') > 0,
+      'arkusz wpięty do przewijania ekranu — wtedy „przeniesione do arkusza" jest nieprawdą');
+
+    // ⛔ …i wsunięcie treści arkusza na ekran MA podnieść wysokość. Bez tego
+    // mutacja wyżej mogłaby nic nie zdejmować, a zapadka i tak by przeszła.
+    check('⭐ (D3, O70) treść arkusza wsunięta na ekran PODNOSI zmierzoną wysokość dziennika',
+      zArkuszem.wysokoscRazemDp > bezArkusza.wysokoscRazemDp + 1000,
+      `${bezArkusza.wysokoscRazemDp} → ${zArkuszem.wysokoscRazemDp}`);
+  }
 
   check('(M2-10, D2) zapadka listy nieznanych ma datę i powód',
     /^\d{2}\.\d{2}\.\d{4}$/.test(ZAPADKA_NIEWYPROWADZALNE.ustawiona)
@@ -1141,8 +1270,40 @@ const styles = StyleSheet.create({
       },
     },
     {
+      // ═══════════════════════════════════════════════════════════════
+      // ⚠️ PRZECELOWANE PRZEZ PAS M3 21.08.2026 — ⛔ NIE OSŁABIONE.
+      //
+      // ⛔ CO SIĘ ZMIENIŁO W MIERZONYM PLIKU. Do 21.08 `app/(tabs)/mecz.tsx`
+      // budował wiersz `match_contexts` WŁASNĄ RĘKĄ i miał w nim linię
+      // `match_length_minutes: dlugoscMeczu.trim() !== '' ? … : null`.
+      // Pas M3 podpiął ten ekran pod `zdecydujOZapisieMeczu` (jedno źródło
+      // decyzji o zapisie meczu dla obu ekranów), więc długość jedzie dziś
+      // przez `ocena.dlugoscMeczu`, a nazwa kolumny powstaje w regule.
+      // ⛔ TAMTEGO NAPISU W PLIKU JUŻ NIE MA I NIGDY NIE WRÓCI — asercja
+      // na niego świeciłaby na czerwono ZA NAPRAWĘ, nie za defekt (O73).
+      //
+      // ⭐ WARUNEK ZAPALENIA JEST TEN SAM: „długość całego meczu ma dojechać
+      // do `match_contexts.match_length_minutes`". Zmieniła się DROGA, którą
+      // ta asercja go sprawdza — czyta dziś, czy ekran podaje długość regule
+      // (a nie zeruje jej po cichu) I czy w ogóle woła tę regułę.
+      // ⭐ SIŁA NIE SPADŁA: to, że reguła mapuje `dlugoscMeczu` na kolumnę,
+      // jest sprawdzone URUCHOMIENIEM w `lib/meczWiecej.selftest.ts`
+      // (`M3-B27`, `M3-B28` i mutacja `M3-M1`) — czyli mocniej niż napisem.
+      // ═══════════════════════════════════════════════════════════════
       nazwa: 'M2-B2 ⛔ długość całego meczu idzie do `match_contexts.match_length_minutes` (znalezisko D8)',
-      sprawdz: (src) => /match_length_minutes:\s*dlugoscMeczu\.trim\(\) !== ''/.test(bezKomentarzy(src)),
+      sprawdz: (src) => {
+        const z = bezKomentarzy(src);
+        // ⛔ WYCINEK, NIE CAŁY PLIK. `dlugoscMeczu.trim()` pada w tym ekranie
+        // w TRZECH miejscach (sprzeczność minut, kalendarz, ocena meczu).
+        // Pytanie „czy napis pada gdziekolwiek" przeszłoby także wtedy, gdy
+        // z drogi do `match_contexts` znika — a wtedy mutacja gaśnie po cichu.
+        const i = z.indexOf('const ocena: OcenaMeczu = {');
+        const j = i < 0 ? -1 : z.indexOf('};', i);
+        const ocena = i < 0 || j < 0 ? '' : z.slice(i, j);
+        return ocena.length > 60
+          && /dlugoscMeczu: dlugoscMeczu\.trim\(\) === '' \? null : Number\(dlugoscMeczu\)/.test(ocena)
+          && /zdecydujOZapisieMeczu\(\{/.test(z);
+      },
     },
     {
       // ⛔ „Przed zapisem", a nie „gdziekolwiek": bramka postawiona PO
@@ -1236,8 +1397,14 @@ const styles = StyleSheet.create({
       nazwa: 'M2-M2 ⛔⛔ długość meczu PRZESTAJE SIĘ ZAPISYWAĆ do `match_contexts`',
       coPsuje: 'znalezisko D8 — mecz U13 na 60 minut liczy się jak 90, więc zawodnik '
         + 'dostaje 3 punkty zamiast 4: karę za to, że jego mecz jest krótszy',
+      // ⚠️ PRZECELOWANE PRZEZ PAS M3 21.08.2026 razem z `M2-B2` (patrz komentarz
+      // przy tamtym predykacie). ⛔ Mutacja robi DOKŁADNIE to samo co wcześniej —
+      // zdejmuje długość meczu z drogi do bazy — tyle że w miejscu, w którym ta
+      // droga dziś przebiega. Stara podmiana nie trafiłaby w nic i mutacja
+      // ZGASŁABY PO CICHU, choć strażnik działa.
       zastosuj: (src) => src.replace(
-        "        match_length_minutes: dlugoscMeczu.trim() !== '' ? Number(dlugoscMeczu) : null,\n", ''),
+        "        dlugoscMeczu: dlugoscMeczu.trim() === '' ? null : Number(dlugoscMeczu),\n",
+        "        dlugoscMeczu: null,\n"),
     },
     {
       nazwa: 'M2-M3 ⛔⛔ SPRZECZNOŚĆ MINUT PRZEPUSZCZONA DO BAZY',
@@ -1307,6 +1474,329 @@ const styles = StyleSheet.create({
   // na mutację na dysku. Wtedy przestaje być zbędna w tej samej sekundzie.
   check('⛔ (M2-14) po całej baterii plik na dysku jest CO DO ZNAKU taki sam',
     readFileSync(join(KAT_EKRANOW, 'mecz.tsx'), 'utf8') === meczPrawdziwy,
+    'bateria zostawiła po sobie zmieniony plik produktu');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ 15. PLAN-D-D3 21.08.2026 — BATERIA MUTACJI EKRANU DZIENNIKA
+// ═══════════════════════════════════════════════════════════════════
+// ⛔ PO CO TA SEKCJA ISTNIEJE. Ten pas zdjął z ekranu dziennika 2 969 dp —
+// i to jest dokładnie ten rodzaj zmiany, którą najłatwiej zrobić ŹLE i pokazać
+// jako sukces: wystarczy SKASOWAĆ pytania zamiast je przenieść, a zapadka
+// wysokości zaświeci TYM MOCNIEJ. Liczba spadła, obietnica zginęła (B3).
+//
+// ⭐ KOLEJNOŚĆ JEST ODWROTNA NIŻ INTUICYJNA: najpierw ASERCJA ODWROTNA (na
+// prawdziwych plikach bateria ma dać ZERO zapaleń), dopiero potem mutacje.
+// Bateria, która na zdrowym kodzie cokolwiek zapala, mierzy własny błąd.
+//
+// ⭐ MUTUJEMY TEKST WCZYTANY Z DYSKU, NIE PLIK NA DYSKU (wzorzec pasa M2).
+// Przerwanie procesu w dowolnym momencie NIE MA CZEGO zepsuć: nie ma stanu
+// do przywrócenia, więc nie ma przywracania, które mogłoby się nie udać.
+{
+  const KAT_EKRANOW = join(root, 'app', '(tabs)');
+  const dziennikPrawdziwy = readFileSync(join(KAT_EKRANOW, 'dziennik.tsx'), 'utf8');
+  const narzedziePrawdziwe = readFileSync(join(root, NARZEDZIE), 'utf8');
+
+  /** ⛔ Stan badany to PARA: ekran i narzędzie pomiaru. Model wysokości mieszka w drugim. */
+  type StanD3 = { dziennik: string; narzedzie: string };
+  const PRAWDA_D3: StanD3 = { dziennik: dziennikPrawdziwy, narzedzie: narzedziePrawdziwe };
+
+  /** Wycinek ciała `ScrollView` — czyli to, co NAPRAWDĘ stoi na ekranie. */
+  const cialoEkranuD3 = (src: string): string => {
+    const a = src.indexOf('<ScrollView');
+    const b = src.indexOf('</ScrollView>');
+    return a >= 0 && b > a ? src.slice(a, b) : '';
+  };
+
+  /** Rodzaje arkusza wymienione w typie — czyli WSZYSTKO, co zeszło z ekranu. */
+  const rodzajeZTypuD3 = (src: string): string[] => {
+    const m = /type RodzajArkuszaDziennika =([^;]*);/.exec(src);
+    return m === null ? [] : [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]).sort();
+  };
+
+  /** Rodzaje, do których NA EKRANIE stoi wiersz wejścia ze strzałką. */
+  const rodzajeZWejsciemD3 = (src: string): string[] =>
+    [...new Set([...cialoEkranuD3(src).matchAll(/wejscieArkusza\('([a-z]+)'\)/g)].map((x) => x[1]))].sort();
+
+  /** Rodzaje, które mają napis w jedynej tablicy brzmień tego ekranu. */
+  const rodzajeZNapisemD3 = (src: string): string[] => {
+    const m = /const NAPIS_ARKUSZA: Record<RodzajArkuszaDziennika, string> = \{([\s\S]*?)\n\};/.exec(src);
+    return m === null ? [] : [...m[1].matchAll(/^\s{2}([a-z]+):/gm)].map((x) => x[1]).sort();
+  };
+
+  /** Ciało procedury rysującej treść arkusza — czyli to, co zeszło z ekranu, ale ŻYJE. */
+  const trescArkuszaD3 = (src: string): string => {
+    const a = src.indexOf('function trescArkusza()');
+    const b = src.indexOf('function wejscieArkusza(', a);
+    return a >= 0 && b > a ? src.slice(a, b) : '';
+  };
+
+  /** Model wysokości dziennika, wyjęty Z TEKSTU narzędzia: nazwy i liczby dp. */
+  const modelDziennika = (narz: string): [string, number][] => {
+    const m = /const DZIENNIK_DO_PYTANIA: \[string, number\]\[\] = \[([\s\S]*?)\n\];/.exec(narz);
+    if (m === null) return [];
+    return [...m[1].matchAll(/\[\s*'([^']*)',\s*([0-9.]+)\s*\]/g)]
+      .map((x) => [x[1], Number(x[2])] as [string, number]);
+  };
+
+  /**
+   * ⭐ POMIAR GAŁĘZI POTRENINGOWEJ — tej, której dotyczy próg pytania o sesję
+   * Bloku. Gałąź poranna jest wyższa, więc pomiar domyślny opisuje ją; tutaj
+   * jest wygaszana W TEKŚCIE, nigdy na dysku.
+   */
+  const nadPytaniemD3 = (src: string): { ile: number; goraDp: number } | null => {
+    const a = src.indexOf(") : entryType === 'morning' ? (");
+    const b = src.indexOf('      ) : (', a);
+    if (a < 0 || b < 0) return null;
+    const tylkoPotreningowy = src.slice(0, a) + ") : entryType === 'morning' ? (\n        <></>\n" + src.slice(b);
+    const r = zmierzEkranZTekstu('dziennik-potreningowy', tylkoPotreningowy, KAT_EKRANOW);
+    const i = r.pozycje.findIndex((x) => /blockPrompt/i.test(x.nazwa));
+    return i < 0 ? null : { ile: i, goraDp: r.pozycje[i].goraDp };
+  };
+
+  type PredykatD3 = { nazwa: string; sprawdz: (s: StanD3) => boolean };
+
+  const BATERIA_D3: PredykatD3[] = [
+    {
+      // ⭐⭐ TO JEST WARUNEK 4 POLECENIA (i warunki 2 i 3 naraz). Zbiór rodzajów
+      // arkusza, zbiór wierszy wejścia NA EKRANIE i zbiór brzmień muszą być
+      // IDENTYCZNE. ⛔ Nie „co najmniej tyle": arkusz bez wejścia to pytanie,
+      // którego zawodnik nigdy nie zobaczy, a wejście bez arkusza to przycisk
+      // donikąd. ⛔ OBIE STRONY ZAPALAJĄ CZERWIEŃ.
+      nazwa: 'D3-B1 ⛔⛔ KAŻDY arkusz dziennika ma wejście NA EKRANIE i brzmienie — RÓWNOŚĆ trzech zbiorów',
+      sprawdz: (s) => {
+        const t = rodzajeZTypuD3(s.dziennik);
+        const w = rodzajeZWejsciemD3(s.dziennik);
+        const n = rodzajeZNapisemD3(s.dziennik);
+        return t.length > 0
+          && t.length === w.length && t.every((r, i) => r === w[i])
+          && t.length === n.length && t.every((r, i) => r === n[i]);
+      },
+    },
+    {
+      nazwa: 'D3-B2 ⭐⭐ ekran dziennika MIEŚCI SIĘ nad zgięciem w całości',
+      sprawdz: (s) =>
+        zmierzEkranZTekstu('dziennik.tsx', s.dziennik, KAT_EKRANOW).wysokoscRazemDp
+          <= WIDOCZNE_NAD_ZGIECIEM_DP,
+    },
+    {
+      nazwa: 'D3-B3 ⛔ arkusz stoi POZA `ScrollView` — inaczej nie zdejmuje ani jednego dp',
+      sprawdz: (s) => {
+        const a = s.dziennik.indexOf('<Arkusz');
+        const b = s.dziennik.indexOf('</ScrollView>');
+        return a > 0 && b > 0 && b < a
+          && !/\{\s*trescArkusza\(\)\s*\}/.test(cialoEkranuD3(s.dziennik));
+      },
+    },
+    {
+      // ⛔ Napis wiersza i tytuł arkusza z DWÓCH miejsc rozjadą się przy
+      // pierwszej poprawce — i wtedy zawodnik dotyka wiersza „Notatka",
+      // a trafia do arkusza o innej nazwie (O92).
+      nazwa: 'D3-B4 ⛔ napis wiersza wejścia i tytuł arkusza pochodzą z JEDNEGO miejsca',
+      sprawdz: (s) => /\{NAPIS_ARKUSZA\[rodzaj\]\} →/.test(s.dziennik)
+        && /tytul: NAPIS_ARKUSZA\[rodzaj\]/.test(bezKomentarzy(s.dziennik)),
+    },
+    {
+      // ⛔ ZAPADKI NA SKASOWANIE. Bez nich wszystkie predykaty wyżej spełnia
+      // także ekran, z którego pytania po prostu USUNIĘTO — a wtedy „schudł
+      // o 2 969 dp" jest prawdą i katastrofą naraz.
+      nazwa: 'D3-B5 ⛔ ból jest PRZENIESIONY do arkusza, a nie skasowany',
+      sprawdz: (s) => {
+        const t = bezKomentarzy(trescArkuszaD3(s.dziennik));
+        return /<Checkbox value=\{hasPain\}/.test(t) && /setPainIntensity/.test(t)
+          && /setPainExcludes/.test(t) && /BODY_LOCATIONS\.map/.test(t);
+      },
+    },
+    {
+      nazwa: 'D3-B6 ⛔ historia wpisów jest PRZENIESIONA do arkusza, a nie skasowana',
+      sprawdz: (s) => {
+        const t = bezKomentarzy(trescArkuszaD3(s.dziennik));
+        return /history\.map\(/.test(t) && /pustkaHistorii/.test(t) && /pains\.map\(/.test(t);
+      },
+    },
+    {
+      nazwa: 'D3-B7 ⛔ nastrój, notatka, powiązanie i zmęczenie są PRZENIESIONE, a nie skasowane',
+      sprawdz: (s) => {
+        const t = bezKomentarzy(trescArkuszaD3(s.dziennik));
+        return /setMoodMotivation/.test(t) && /setFreeNote/.test(t)
+          && /calendarLinkOptions\.map/.test(t) && /setPostFatigue/.test(t);
+      },
+    },
+    {
+      // ⛔ Z2 — czerwień należy w tym produkcie WYŁĄCZNIE do bólu i stanu
+      // ochronnego. Ani „wpis jest", ani „nie udało się sprawdzić" nie są
+      // ostrzeżeniem o ciele.
+      nazwa: 'D3-B8 ⛔ zdania o stanie ankiety NIE SĄ czerwone (Z2)',
+      sprawdz: (s) => {
+        // ⛔ Wycinek DWÓCH konkretnych stylów, a nie zakresu „od–do" w arkuszu
+        // stylów. Pierwsza wersja tego predykatu brała wszystko od
+        // `stanAnkietyBox` do `painTag` — a między nimi stoi styl `error`,
+        // który `colors.error` ma z definicji. Predykat zapalał się na zdrowym
+        // pliku, czyli mierzył własny błąd; złapała to asercja odwrotna 15.1
+        // i po to ona stoi PRZED mutacjami.
+        const kod = bezKomentarzy(s.dziennik);
+        const styl = (nazwa: string): string => {
+          const i = kod.indexOf(`${nazwa}: {`);
+          if (i < 0) return '';
+          const j = kod.indexOf('}', i);
+          return j < 0 ? kod.slice(i) : kod.slice(i, j);
+        };
+        const box = styl('stanAnkietyBox');
+        const txt = styl('stanAnkietyTxt');
+        return box.length > 0 && txt.length > 0
+          && !/colors\.error/.test(box) && !/colors\.error/.test(txt);
+      },
+    },
+    {
+      // ⭐⭐ TO JEST SEDNO ZADANIA §4. Szarość kafla ma znaczyć DOKŁADNIE JEDNO:
+      // „okno zamknięte i wpisu z dzisiaj nie ma". Warunek na samym
+      // `!oknoPorankaOtwarte` zlewa wypełnioną ankietę z przepadniętą — i to
+      // jest dokładnie ten stan, który pas T2 zostawił i zgłosił (§7.4).
+      nazwa: 'D3-B9 ⛔⛔ kafel szarzeje TYLKO przy „okno zamknięte i wpisu nie ma"',
+      sprawdz: (s) => {
+        const kod = bezKomentarzy(s.dziennik);
+        return /stanAnkiety === 'zamkniete_wpisu_nie_ma' && styles\.toggleBtnPoOknie/.test(kod)
+          && !/!oknoPorankaOtwarte && styles\.toggleBtnPoOknie/.test(kod);
+      },
+    },
+    {
+      // ⛔ Strzałka „→" jest afordancją dotknięcia. Napis ze strzałką bez
+      // `onPress` to fałszywy przycisk, a nie wejście zastępcze.
+      nazwa: 'D3-B10 ⛔ wiersz wejścia jest DOTYKALNY, a nie samym napisem ze strzałką',
+      sprawdz: (s) => /function wejscieArkusza\([\s\S]{0,400}?<TouchableOpacity[\s\S]{0,300}?onPress=\{\(\) => setArkusz\(rodzaj\)\}/
+        .test(s.dziennik),
+    },
+    {
+      // ⭐⭐ TO JEST NAPRAWA ZNALEZISKA T2 §8 — sprawdzana, a nie opisana.
+      // Model wysokości w `tests/measure-heights.ts` ma mieć DOKŁADNIE tyle
+      // pozycji i DOKŁADNIE tyle dp, co pomiar z pliku ekranu.
+      nazwa: 'D3-B11 ⛔⛔ model wysokości dziennika ZGADZA SIĘ z plikiem ekranu — pozycje i dp, na RÓWNOŚĆ',
+      sprawdz: (s) => {
+        const model = modelDziennika(s.narzedzie);
+        const pomiar = nadPytaniemD3(s.dziennik);
+        if (model.length === 0 || pomiar === null) return false;
+        const suma = model.reduce((a, [, v]) => a + v, 0);
+        return model.length === pomiar.ile && Math.round(suma) === Math.round(pomiar.goraDp);
+      },
+    },
+  ];
+
+  // ── 15.1 ⭐⭐ ASERCJA ODWROTNA — NAJPIERW, NIE NA KOŃCU ─────────────
+  console.log('\n15.1 ⭐⭐ ASERCJA ODWROTNA — bateria D3 na PRAWDZIWYCH plikach (musi dać 0 zapaleń)');
+  const zapaloneNaPrawdzieD3: string[] = [];
+  for (const p of BATERIA_D3) {
+    const ok = p.sprawdz(PRAWDA_D3);
+    check(p.nazwa, ok, 'predykat zapala się na NIEZMUTOWANYCH plikach — bateria mierzy własny błąd');
+    if (!ok) zapaloneNaPrawdzieD3.push(p.nazwa);
+  }
+  check('⭐⭐ (D3-15) ASERCJA ODWROTNA: na prawdziwych plikach bateria D3 ma ZERO zapaleń',
+    zapaloneNaPrawdzieD3.length === 0, zapaloneNaPrawdzieD3.join(' · '));
+
+  // ── 15.2 ⭐⭐ MUTACJE ───────────────────────────────────────────────
+  type MutacjaD3 = { nazwa: string; coPsuje: string; zastosuj: (s: StanD3) => StanD3 };
+  const MUTACJE_D3: MutacjaD3[] = [
+    {
+      nazwa: 'D3-M1 ⛔⛔ pole ZNIKA Z EKRANU BEZ WEJŚCIA ZASTĘPCZEGO',
+      coPsuje: 'B3 / warunek 3 polecenia — ból zostaje w kodzie arkusza, ale nie ma go '
+        + 'jak otworzyć: zawodnik nie zobaczy pytania o ból już nigdy',
+      zastosuj: (s) => ({ ...s, dziennik: s.dziennik.replace("        {wejscieArkusza('bol')}\n", '') }),
+    },
+    {
+      nazwa: 'D3-M2 ⛔⛔ historia wpisów SKASOWANA zamiast przeniesionej',
+      coPsuje: 'B3 — najtańsze „ekran schudł": zapadka wysokości świeci mocniej niż '
+        + 'przy poprawnej naprawie, a zawodnik traci jedyne miejsce, w którym widzi '
+        + 'swoje wpisy z ostatnich dni',
+      zastosuj: (s) => ({ ...s, dziennik: s.dziennik.replace('{history.map((row) => {', '{[].map((row: any) => {') }),
+    },
+    {
+      nazwa: 'D3-M3 ⛔ arkusz wpięty DO `ScrollView` — czyli nie zdejmuje ani jednego dp',
+      coPsuje: 'cała teza tego pasa: nakładka zdejmuje wysokość WYŁĄCZNIE dlatego, '
+        + 'że stoi poza przewijaniem ekranu',
+      zastosuj: (s) => ({
+        ...s,
+        dziennik: s.dziennik.replace('    </ScrollView>\n', '')
+          .replace('    </Arkusz>\n', '    </Arkusz>\n    </ScrollView>\n'),
+      }),
+    },
+    {
+      nazwa: 'D3-M4 ⛔⛔ WYPEŁNIONA I NIEWYPEŁNIONA ANKIETA ZLEWAJĄ SIĘ W JEDEN STAN',
+      coPsuje: '§4 / R5 — zawodnik, który wypełnił ankietę o 7:00, dostaje po 12:00 '
+        + 'dokładnie tę samą szarość, co ten, któremu przepadła. To jest stan sprzed '
+        + 'tego pasa, zgłoszony przez T2 (§7.4) i przez niego niezrobiony',
+      zastosuj: (s) => ({
+        ...s,
+        dziennik: s.dziennik.replace(
+          "            stanAnkiety === 'zamkniete_wpisu_nie_ma' && styles.toggleBtnPoOknie,",
+          '            !oknoPorankaOtwarte && styles.toggleBtnPoOknie,'),
+      }),
+    },
+    {
+      nazwa: 'D3-M5 ⛔ rzecz WRACA NA EKRAN zamiast stać w arkuszu',
+      coPsuje: 'wysokość — treść arkusza wsunięta w miejsce wiersza wejścia podnosi '
+        + 'ekran ponad linię zgięcia i naraz odbiera bólowi jego wejście; '
+        + '⭐ to jest mutacja na WRAŻLIWOŚĆ samej miary, nie na treść',
+      zastosuj: (s) => ({
+        ...s,
+        dziennik: s.dziennik.replace("        {wejscieArkusza('bol')}\n", '        {trescArkusza()}\n'),
+      }),
+    },
+    {
+      nazwa: 'D3-M6 ⛔ napis wiersza rozjeżdża się z tytułem arkusza',
+      coPsuje: 'O92 — dwa miejsca na to samo brzmienie; zawodnik dotyka wiersza '
+        + 'o jednej nazwie i trafia do arkusza o innej',
+      zastosuj: (s) => ({
+        ...s,
+        dziennik: s.dziennik.replace('{NAPIS_ARKUSZA[rodzaj]} →', "{'Więcej'} →"),
+      }),
+    },
+    {
+      nazwa: 'D3-M7 ⛔⛔ MODEL WYSOKOŚCI ROZJEŻDŻA SIĘ Z PLIKIEM EKRANU',
+      coPsuje: 'znalezisko T2 §8 — model, który nie zgadza się z plikiem, mówi '
+        + 'o ekranie sprzed rozjazdu; „schudł do 800 dp" staje się wtedy zdaniem, '
+        + 'a nie pomiarem',
+      zastosuj: (s) => ({
+        ...s,
+        narzedzie: s.narzedzie.replace("  ['baner potwierdzenia', 17],\n", ''),
+      }),
+    },
+    {
+      nazwa: 'D3-M8 ⛔ zdanie o stanie ankiety dostaje CZERWIEŃ (Z2)',
+      coPsuje: 'Z2 — czerwień przestaje znaczyć „ból albo stan ochronny" i zaczyna '
+        + 'znaczyć „coś jest nie tak z Twoją ankietą"; ⭐ K4: kolor i tak nie niesie '
+        + 'nic dla jednego chłopca na dwunastu, więc jedyne, co ta zmiana robi, '
+        + 'to psuje alfabet',
+      zastosuj: (s) => ({
+        ...s,
+        dziennik: s.dziennik.replace(
+          'stanAnkietyTxt: { ...typography.body, fontSize: 14, lineHeight: 19, color: colors.textPrimary }',
+          'stanAnkietyTxt: { ...typography.body, fontSize: 14, lineHeight: 19, color: colors.error }'),
+      }),
+    },
+  ];
+
+  console.log('\n15.2 ⭐⭐ BATERIA MUTACJI — osiem mutacji na prawdziwym `app/(tabs)/dziennik.tsx`');
+  let niemeD3 = 0;
+  for (const m of MUTACJE_D3) {
+    const zmutowany = m.zastosuj(PRAWDA_D3);
+    const zmienil = zmutowany.dziennik !== PRAWDA_D3.dziennik
+      || zmutowany.narzedzie !== PRAWDA_D3.narzedzie;
+    const zapalone = BATERIA_D3.filter((p) => !p.sprawdz(zmutowany)).map((p) => p.nazwa);
+    console.log(`\n   ${m.nazwa}\n   co psuje: ${m.coPsuje}`);
+    console.log(`   zapalone predykaty: ${zapalone.length} / ${BATERIA_D3.length}`);
+    zapalone.forEach((n) => console.log(`      ↳ ${n}`));
+    check(`⭐ (D3-15) mutacja „${m.nazwa}" NAPRAWDĘ zmienia plik (inaczej bateria bada nic)`,
+      zmienil, 'wzorzec podmiany nie trafił — mutacja jest atrapą');
+    check(`⭐ (D3-15) mutacja „${m.nazwa}" ZAPALA strażnika imiennie`,
+      zapalone.length > 0, 'mutacja przeszła niezauważona — strażnika na tę regułę NIE MA');
+    if (zapalone.length === 0) niemeD3++;
+  }
+  check('⭐⭐ (D3-15) ANI JEDNA z ośmiu mutacji nie przeszła niezauważona',
+    niemeD3 === 0, `nieme mutacje: ${niemeD3}`);
+
+  // ── 15.3 ⛔ …I PRAWDZIWE ŹRÓDŁA SĄ PO BATERII NIETKNIĘTE ────────────
+  check('⛔ (D3-15) po całej baterii oba pliki na dysku są CO DO ZNAKU takie same',
+    readFileSync(join(KAT_EKRANOW, 'dziennik.tsx'), 'utf8') === dziennikPrawdziwy
+    && readFileSync(join(root, NARZEDZIE), 'utf8') === narzedziePrawdziwe,
     'bateria zostawiła po sobie zmieniony plik produktu');
 }
 

@@ -363,6 +363,13 @@ import {
   toJestDrugiWierszNaMecz, MECZ_JUZ_MA_WIERSZ,
   SKALA_OCENY, POLE_SAMOOCENA, POLE_STAN_MENTALNY, POLE_WARUNKI,
   POLE_POZYCJA, POLE_WYNIK, POLE_NOTATKA,
+  // ⭐⭐ PLAN-D-M3 21.08.2026 — RODZAJ MECZU ZSZEDŁ Z PEŁNEJ KARTY DO TEGO
+  // ARKUSZA. ⛔ To jest ZMIANA W CUDZYM PLIKU, wymuszona i nazwana w nocie
+  // `claude/PRZEKAZANIE_PAS_M3_21_08_2026.md` §8: `POLA_ARKUSZA` wiąże tabelę
+  // `RZECZY_O_MECZU` z polami TEGO ekranu na RÓWNOŚĆ, a decyzja Kuby z 21.08
+  // („skoro jest mecz oficjalny, to musi być też sparingowy") wymaga, żeby
+  // zawodnik oceniający z kafla wskazał rodzaj JEDNYM dotknięciem.
+  POLE_RODZAJ_MECZU, RODZAJE_MECZU,
   WARUNKI_TAK, WARUNKI_NIE, WYNIK_MY, WYNIK_ONI,
   MECZ_WIECEJ_DOBROWOLNE, MECZ_WIECEJ_ZAPISZ, MECZ_WIECEJ_ZAPISANO,
   PUSTE_WIECEJ_O_MECZU, POZYCJE_DO_WYBORU,
@@ -374,6 +381,33 @@ import {
   KOLIZJA_PRZYPIS, KOLIZJA_NIC_NIE_STALO, KOLIZJA_NIE_ODCZYTANE,
   type PozycjaBezOceny, type OdpowiedzNaKolizje,
 } from '../../lib/dodanieWstecz';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS K1 21.08.2026 — DROGA DODANIA. Decyzje w module, ekran je WYKONUJE.
+// ═══════════════════════════════════════════════════════════════════
+import {
+  dataStartowa,
+  trasaDodania,
+  czyWolnoZalozycWydarzenie,
+  decyzjaZalozeniaWydarzenia,
+  opisZalozeniaDoLogu,
+  przesunDzien,
+  toDataPoprawna,
+  RODZAJ_MECZ,
+  SKAD_PLUS,
+  PLUS_TO_BYL_MECZ, PLUS_TO_BYL_MECZ_PODPIS,
+  PLUS_COS_INNEGO, PLUS_COS_INNEGO_PODPIS,
+  MECZ_BEZ_PLANU_TYTUL,
+  MECZ_BEZ_PLANU_PODPIS,
+  MECZ_BEZ_PLANU_ZAPISZ,
+  MECZ_BEZ_PLANU_ZAPISANY,
+  MECZ_BEZ_PLANU_BEZ_DNIA,
+  MECZ_BEZ_PLANU_NIE_ZALOZYLEM,
+  MECZ_BEZ_PLANU_OCENA_NIE_WESZLA,
+  MECZ_BEZ_PLANU_KTORY_DZIEN,
+  MECZ_BEZ_PLANU_INNY_DZIEN,
+  MECZ_DZIEN_DZIS, MECZ_DZIEN_WCZORAJ,
+  type PowodDodania,
+} from '../../lib/drogaDodania';
 // ═══════════════════════════════════════════════════════════════════
 // ⭐ PLAN-D-B4 08.2026 (14.08.2026), zadanie B4.2 — WGLĄDY WCHODZĄ NA EKRAN.
 //
@@ -1137,7 +1171,15 @@ const DZIEN_MINELO_OCENIONE = 'minęło · ocenione';
 const DZIEN_MINELO_PUSTO = 'minęło · nic tu nie stało';
 const DZIEN_DZIS = 'dziś';
 const DZIEN_JESZCZE_NIE_BYLO = 'jeszcze nie było';
-const DZIEN_NIE_ODCZYTANY = 'nie odczytane';
+// ⭐⭐ PAS K1 21.08.2026 (§3.4, defekt 2) — TO ZDANIE STAŁO JAKO TYTUŁ DNIA.
+// ⛔ CO WIDAĆ BYŁO NA ZRZUCIE Z TELEFONU: w widoku „Tydzień" pierwsza linia
+// wiersza dnia — miejsce, w którym stoi NAZWA tego, co się dzieje („Sesja +
+// klub") — pokazywała napis `nie odczytane`. To jest nazwa STANU WEWNĘTRZNEGO
+// postawiona w miejscu nazwy rzeczy: zawodnik czyta ją jak nazwę swojego dnia.
+// ⛔ Stan zostaje (R5: „nie wiem" ma mieć własny, jawny stan i to jest dobre),
+// zmienia się WYŁĄCZNIE jego brzmienie — na zdanie o produkcie, a nie etykietę
+// o dniu zawodnika. Ten sam idiom, co `NIE_UDALO_SIE_ODCZYTAC_TYGODNIA`.
+const DZIEN_NIE_ODCZYTANY = 'nie udało się odczytać tego dnia';
 
 /**
  * ⛔⛔ T-7 — PRZYPIS Z DEFINICJĄ SKALI NIE WCHODZI NA EKRAN W TYM PASIE.
@@ -1177,6 +1219,13 @@ const PLUS_JUZ_SIE_ODBYLO = 'Już się odbyło';
 const PLUS_JUZ_SIE_ODBYLO_PODPIS =
   'wczorajszy trening, którego nie było w planie — wpadnie do kalendarza wstecz';
 const PLUS_DODAJ_NOWE = 'Dodaj nowe wydarzenie →';
+/**
+ * ⭐ PAS K1 21.08.2026 — KLUCZ WIZYTY DLA MECZU, KTÓRY NIE MA WYSTĄPIENIA.
+ * ⛔ `kontekstyMeczu` jest mapą „klucz wystąpienia → id wiersza meczu";
+ * mecz bez planu wystąpienia jeszcze nie ma, więc dostaje własny, stały klucz.
+ * Jeden klucz, bo jeden taki draft naraz — arkusz otwiera się na jeden mecz.
+ */
+const KLUCZ_MECZU_BEZ_PLANU = 'mecz-bez-planu';
 
 /**
  * ⭐ CO WŁAŚNIE STOI NAD EKRANEM. ⛔ `null` znaczy „nic" — arkusz nie ma
@@ -1193,7 +1242,17 @@ type StanArkusza =
   // bez niego arkusz nie ma czym związać wiersza `match_contexts`
   // z wystąpieniem, więc mecz liczyłby się DWA RAZY (raz jako wydarzenie,
   // raz jako wiersz) — 7 punktów zamiast 4.
-  | { rodzaj: 'meczWiecej'; tytul: string; klucz: string; idWydarzenia: number }
+  /**
+   * ⭐⭐ PAS K1 21.08.2026 — `idWydarzenia: null` ZNACZY „MECZ, KTÓREGO NIE
+   * BYŁO W PLANIE" (§3.5, decyzja Kuby). ⛔ To nie jest brak danych, tylko
+   * osobny, nazwany stan: wydarzenia jeszcze NIE MA i nie powstanie, dopóki
+   * zawodnik nie dotknie „Zapisz". `dzien` niesie dzień, który zawodnik
+   * wybrał w arkuszu — ⛔ z wyboru, nie ze zgadywania (Z0).
+   * ⚠️ NIE DODAŁEM SIÓDMEGO RODZAJU ARKUSZA: `lib/arkusz.ts` trzyma zapadkę
+   * na RÓWNOŚĆ sześciu i nie jest plikiem tego pasa. To jest kontrakt dla
+   * pasa, który ten plik trzyma — opisany w nocie K1.
+   */
+  | { rodzaj: 'meczWiecej'; tytul: string; klucz: string; idWydarzenia: number | null; dzien: string | null }
   | { rodzaj: 'plus' }
   | { rodzaj: 'kolizja' }
   // ⭐ PAS W1 (D-1 + decyzja D-B Kuby): cały materiał jednej odpowiedzi.
@@ -1328,6 +1387,16 @@ export default function DzisScreen() {
   /** ⛔ Osobny od `bladWerdyktu`: zapis meczu może się nie udać przy udanej ocenie. */
   const [bladMeczu, setBladMeczu] = useState<string | null>(null);
   const [zapisanoMecz, setZapisanoMecz] = useState<string | null>(null);
+  /**
+   * ⭐⭐ PAS K1 21.08.2026 — WYDARZENIE ZAŁOŻONE PRZEZ ŚCIEŻKĘ „MECZ BEZ PLANU"
+   * W TEJ WIZYCIE. ⛔ `null` znaczy „JESZCZE NIC NIE POWSTAŁO" i to jest stan
+   * startowy KAŻDEGO otwarcia arkusza — wyjście z niego w połowie zostawia
+   * bazę dokładnie w stanie sprzed dotknięcia „+".
+   * ⛔ PO CO TO PAMIĘTAMY: żeby ponowne dotknięcie „Zapisz" po nieudanym
+   * zapisie oceny NIE założyło drugiego wydarzenia. Zawodnik, któremu raz
+   * padła sieć, miałby w tygodniu dwa mecze i podwójne punkty.
+   */
+  const [wydarzenieBezPlanu, setWydarzenieBezPlanu] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   // WIEDZA B4 08.08.2026 — podpowiedź z materiału. Osobny stan, bo zapytanie
@@ -2482,7 +2551,7 @@ export default function DzisScreen() {
    * `ustalWiazanieMeczu` NIE WIĄŻE. Pusty zbiór znaczyłby „sprawdziłem
    * i nie ma nic" — dwa różne fakty, dwa różne stany (R5).
    */
-  const wydarzeniaZawodnika: ReadonlySet<number> | null = useMemo(() => {
+  const wydarzeniaNaEkranie: ReadonlySet<number> | null = useMemo(() => {
     const surowe = dane === null ? null : dane.wydarzeniaTygodnia;
     if (surowe === null) return null;
     const zbior = new Set<number>();
@@ -2718,9 +2787,31 @@ export default function DzisScreen() {
   // NIC nie zapisał (pusty formularz nie jest awarią). Porażką jest wyłącznie
   // odrzucony zapis, i tylko ona ustawia `bladMeczu`.
   // ═══════════════════════════════════════════════════════════════════
-  async function zapiszKontekstMeczu(klucz: string, idWydarzenia: number): Promise<boolean> {
+  async function zapiszKontekstMeczu(
+    klucz: string,
+    idWydarzenia: number,
+    /**
+     * ⭐⭐ PAS K1 21.08.2026 — WYDARZENIE ZAŁOŻONE PRZED CHWILĄ PRZEZ TEN EKRAN.
+     * ⛔ PO CO TO ISTNIEJE. `wydarzeniaNaEkranie` powstaje z odczytu tygodnia,
+     * więc wydarzenie założone sekundę temu ścieżką „+ → już się odbyło → Mecz"
+     * NIE JEST w tym zbiorze — a wtedy `ustalWiazanieMeczu` słusznie odmawia
+     * wiązania i wiersz meczu leci z `calendar_event_id = null`. Skutek byłby
+     * dokładnie ten, którego zakazuje §3.5 wymaganie 5: licznik pracy policzyłby
+     * ten mecz DWA RAZY — raz jako wydarzenie, raz jako wiersz meczu.
+     * ⛔ To NIE JEST poluzowanie granicy właściciela: ten ekran sam wstawił to
+     * wydarzenie z `user_id = currentUser.id` i dostał jego `id` z powrotem,
+     * więc wie o jego właścicielu tyle samo, co o pozostałych.
+     */
+    swiezoZalozone: number | null = null,
+  ): Promise<boolean> {
     if (!currentUser) return false;
     const ocena: OcenaMeczu = { minutyNaBoisku, dlugoscMeczu, rpe: rpeWybrane };
+    // ⛔ `null` NADAL ZNACZY „NIE ZNAM LISTY" i nadal NIE WIĄŻE. Świeżo
+    // założone wydarzenie tworzy zbiór jednoelementowy — bo o nim wiemy.
+    const wydarzeniaZawodnika: ReadonlySet<number> | null =
+      swiezoZalozone === null
+        ? wydarzeniaNaEkranie
+        : new Set<number>([...(wydarzeniaNaEkranie ?? []), swiezoZalozone]);
     // ⭐⭐ PLAN-D-D2 19.08.2026 (§4.3) — DWA ŹRÓDŁA STANU, W TEJ KOLEJNOŚCI.
     //   1. `kontekstyMeczu` — wiersz założony W TEJ WIZYCIE, po kluczu wystąpienia.
     //   2. `wierszeMeczuPoWydarzeniu` — wiersz założony KIEDYKOLWIEK, odczytany
@@ -3548,6 +3639,59 @@ export default function DzisScreen() {
    * ⛔ KROKI 2–4 NIE MAJĄ WŁASNEGO PRZYCISKU „ZAPISZ WSZYSTKO". Werdykt jest
    * już w bazie; te kroki DOKŁADAJĄ do niego, a nie warunkują go.
    */
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PAS K1 21.08.2026 — DWA BLOKI OCENY MECZU, KAŻDY W JEDNYM MIEJSCU.
+  //
+  // ⛔ PO CO TA WYPROWADZKA. Ścieżka „+ → już się odbyło → Mecz" (§3.5,
+  // decyzja Kuby 21.08) potrzebuje DOKŁADNIE tych samych dwóch bloków, co
+  // ocena z kafla: dwóch liczb minut i ciężkości. Druga kopia tego JSX
+  // rozjechałaby się z pierwszą przy pierwszej poprawce, a oba ekrany
+  // wyglądałyby poprawnie — dokładnie ta choroba, którą pas M2 nazwał
+  // „jedna rzecz, jedno słowo, jedna lista" (O92).
+  // ⭐ Strażnik `K1-B7` sprawdza, że `MINUTY_NA_BOISKU` i `RPE_WARTOSCI`
+  // pojawiają się w tym pliku DOKŁADNIE RAZ każde.
+  // ═══════════════════════════════════════════════════════════════════
+  function renderBlokMinutMeczu(leci: boolean) {
+    const wynik = wynikMeczu({ minutyNaBoisku, dlugoscMeczu, rpe: rpeWybrane });
+    return (
+      <View style={styles.meczBlok}>
+        <Text style={styles.licznikPodpis}>{POLE_MINUTY_NA_BOISKU}</Text>
+        <View style={styles.pytanieOdpowiedzi}>
+          {MINUTY_NA_BOISKU.map((m) => (
+            <TouchableOpacity
+              key={`min-${m}`}
+              disabled={leci}
+              style={[styles.pytanieBtn, minutyNaBoisku === m && styles.pytanieBtnWybrany]}
+              onPress={() => setMinutyNaBoisku(minutyNaBoisku === m ? null : m)}
+            >
+              <Text style={[styles.pytanieBtnTxt, minutyNaBoisku === m && styles.pytanieBtnTxtWybrany]}>{String(m)}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.licznikPodpis}>{POLE_DLUGOSC_MECZU}</Text>
+        <View style={styles.pytanieOdpowiedzi}>
+          {DLUGOSCI_MECZU.map((m) => (
+            <TouchableOpacity
+              key={`dl-${m}`}
+              disabled={leci}
+              style={[styles.pytanieBtn, dlugoscMeczu === m && styles.pytanieBtnWybrany]}
+              onPress={() => setDlugoscMeczu(dlugoscMeczu === m ? null : m)}
+            >
+              <Text style={[styles.pytanieBtnTxt, dlugoscMeczu === m && styles.pytanieBtnTxtWybrany]}>{`${m} min`}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {/* ⭐ TRZECIA LINIA TEGO SAMEGO BLOKU. ⛔ Zero minut ma
+            WŁASNY stan i własne zdanie — nie jest brakiem odpowiedzi
+            i nie kasuje meczu z historii. */}
+        {wynik.rodzaj === 'zero_minut'
+          ? <Text style={styles.meczZeroMinut}>{wynik.zdanie}</Text>
+          : <Text style={styles.licznikPodpis}>{wynik.zdanie}</Text>}
+      </View>
+    );
+  }
+
+
   function renderKrokiOceny(p: Pytanie) {
     if (p.stan.rodzaj !== 'odpowiedziane') return null;
     const rodzaj = rozpoznajRodzajPozycji(faktyPozycji(p.idWydarzenia));
@@ -3569,7 +3713,6 @@ export default function DzisScreen() {
     // Osobny krok znaczyłby, że ścieżka meczu i ścieżka treningu mogą się
     // po cichu rozjechać w kolejności i w zapisie.
     const toMecz = faktyPozycji(p.idWydarzenia).eventType === 'match';
-    const wynik = wynikMeczu({ minutyNaBoisku, dlugoscMeczu, rpe: rpeWybrane });
     return (
       <View style={styles.ocenaKroki}>
         {krokiOceny(p.stan.werdykt).filter((k) => k.widoczny && !k.obowiazkowy).map((k) => (
@@ -3589,42 +3732,7 @@ export default function DzisScreen() {
                     pierwszej i zignorowania drugiej.
                     ⛔ ŻADNA WARTOŚĆ NIE JEST ZAZNACZONA Z GÓRY (Z6).
                     ═══════════════════════════════════════════════════════ */}
-                {toMecz ? (
-                  <View style={styles.meczBlok}>
-                    <Text style={styles.licznikPodpis}>{POLE_MINUTY_NA_BOISKU}</Text>
-                    <View style={styles.pytanieOdpowiedzi}>
-                      {MINUTY_NA_BOISKU.map((m) => (
-                        <TouchableOpacity
-                          key={`min-${m}`}
-                          disabled={leci}
-                          style={[styles.pytanieBtn, minutyNaBoisku === m && styles.pytanieBtnWybrany]}
-                          onPress={() => setMinutyNaBoisku(minutyNaBoisku === m ? null : m)}
-                        >
-                          <Text style={[styles.pytanieBtnTxt, minutyNaBoisku === m && styles.pytanieBtnTxtWybrany]}>{String(m)}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <Text style={styles.licznikPodpis}>{POLE_DLUGOSC_MECZU}</Text>
-                    <View style={styles.pytanieOdpowiedzi}>
-                      {DLUGOSCI_MECZU.map((m) => (
-                        <TouchableOpacity
-                          key={`dl-${m}`}
-                          disabled={leci}
-                          style={[styles.pytanieBtn, dlugoscMeczu === m && styles.pytanieBtnWybrany]}
-                          onPress={() => setDlugoscMeczu(dlugoscMeczu === m ? null : m)}
-                        >
-                          <Text style={[styles.pytanieBtnTxt, dlugoscMeczu === m && styles.pytanieBtnTxtWybrany]}>{`${m} min`}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    {/* ⭐ TRZECIA LINIA TEGO SAMEGO BLOKU. ⛔ Zero minut ma
-                        WŁASNY stan i własne zdanie — nie jest brakiem odpowiedzi
-                        i nie kasuje meczu z historii. */}
-                    {wynik.rodzaj === 'zero_minut'
-                      ? <Text style={styles.meczZeroMinut}>{wynik.zdanie}</Text>
-                      : <Text style={styles.licznikPodpis}>{wynik.zdanie}</Text>}
-                  </View>
-                ) : (
+                {toMecz ? renderBlokMinutMeczu(leci) : (
                   <>
                     <Text style={styles.licznikPodpis}>{POLE_CZAS}</Text>
                     <View style={styles.pytanieOdpowiedzi}>
@@ -3647,7 +3755,15 @@ export default function DzisScreen() {
                     ZAZNACZONY. Zaznaczenie bierze się WYŁĄCZNIE z `rpeWybrane`,
                     które startuje z `rpePoczatkowe()`, czyli z pustki. ⛔ Nie ma
                     tu suwaka i nie będzie: suwak ma uchwyt, uchwyt gdzieś stoi,
-                    a to „gdzieś" jest podpowiedzią, choćby nikt jej tak nie nazwał. */}
+                    a to „gdzieś" jest podpowiedzią, choćby nikt jej tak nie nazwał.
+                    ⚠️ PAS K1 21.08.2026 — TEN BLOK MA DRUGĄ KOPIĘ w arkuszu meczu
+                    bez planu (`renderPolaMeczuBezPlanu`). ⛔ NIE WYPROWADZIŁEM GO
+                    do wspólnej procedury świadomie: `lib/pytanieOWystapienie.selftest.ts`
+                    (pas D3 w tej fali) sprawdza `RPE_WARTOSCI.map(` i `POLE_RPE`
+                    W CIELE `renderKrokiOceny` — wyprowadzka zapala CUDZĄ asercję.
+                    ⭐ Obie kopie pilnuje strażnik `K1-B7`: obie muszą brać wartości
+                    z `RPE_WARTOSCI` i w żadnej nie wolno podstawić wartości z góry.
+                    ⛔ To jest KONTRAKT DLA PASA D3, wypisany w nocie K1. */}
                 <View style={styles.pytanieOdpowiedzi}>
                   {RPE_WARTOSCI.map((r) => (
                     <TouchableOpacity
@@ -3840,7 +3956,7 @@ export default function DzisScreen() {
                 <TouchableOpacity
                   style={styles.inlineLink}
                   onPress={() => setArkusz({
-                    rodzaj: 'meczWiecej', tytul: p.tytul, klucz: p.klucz, idWydarzenia: p.idWydarzenia,
+                    rodzaj: 'meczWiecej', tytul: p.tytul, klucz: p.klucz, idWydarzenia: p.idWydarzenia, dzien: null,
                   })}
                 >
                   <Text style={styles.cardAction}>{MECZ_WIECEJ_OTWORZ}</Text>
@@ -3908,12 +4024,145 @@ export default function DzisScreen() {
    * pada zdanie „wolno utworzyć nowe wydarzenie". ⛔ Bramka jest wołana
    * ZAWSZE, także w gałęzi „nie wiemy" — inaczej byłaby ozdobą.
    */
-  function przejdzDoDodania(odpowiedz: OdpowiedzNaKolizje) {
+  function przejdzDoDodania(odpowiedz: OdpowiedzNaKolizje, powod: PowodDodania) {
     const brama = wolnoUtworzycWydarzenie(stanDodania, odpowiedz);
     console.log(`dzis: [A5] wolno utworzyć = ${brama.wolno} — ${brama.powod}`);
     if (!brama.wolno) return;
+    // ⭐⭐ PAS K1 21.08.2026 — TRASA NIESIE ODPOWIEDŹ, KTÓRĄ ZAWODNIK WŁAŚNIE DAŁ.
+    // ⛔ CO BYŁO ZEPSUTE: stało tu czyste `router.push('/kalendarz')`. Produkt
+    // przed sekundą zapytał „już się odbyło czy dopiero będzie", dostał
+    // odpowiedź — i wyrzucał zawodnika na zakładkę „Tydzień", na której nie
+    // ma formularza, każąc mu wpisać tę samą datę ręcznie.
+    const start = dataStartowa({
+      powod,
+      dzienPytania: stanDodania.rodzaj === 'pytamy' ? stanDodania.data : null,
+      dzis: dzisNapis ?? '',
+    });
+    console.log(`dzis: [K1] data startowa — ${start.powod}`);
+    const trasa = trasaDodania({ data: start.data === '' ? null : start.data, skad: SKAD_PLUS });
     setArkusz(null);
-    router.push('/kalendarz');
+    router.push({ pathname: trasa.pathname as '/kalendarz', params: trasa.params });
+  }
+
+  /**
+   * ⭐⭐ PAS K1 21.08.2026 (§3.5) — „MECZ — JUŻ GO ZAGRAŁEM".
+   *
+   * ⛔ TO JEST TA JEDNA DECYZJA KUBY Z 21.08. Zmierzone: JEDYNE wejście do
+   * pełnej karty meczu prowadzi Z KAFLA, a kafel bierze się z wydarzenia —
+   * więc meczu, którego zawodnik nie zaplanował, NIE DAŁO SIĘ zapisać inaczej
+   * niż zakładając mu najpierw wydarzenie w kalendarzu. Zawodnik po meczu ma
+   * w głowie „grałem 60 minut, było ciężko", nie „muszę utworzyć wydarzenie".
+   *
+   * ⛔⛔ TA FUNKCJA NIE DOTYKA BAZY I NIE MA PRAWA JEJ DOTKNĄĆ. Otwiera arkusz
+   * i nic więcej. Wydarzenie powstaje DOPIERO w `zapiszMeczBezPlanu`, przy
+   * dotknięciu „Zapisz" — bo wydarzenie założone i porzucone jest meczem,
+   * którego nie było, a liczy się jako zobowiązanie (3 punkty; Z0 i N1 naraz).
+   */
+  function otworzMeczBezPlanu() {
+    const brama = wolnoUtworzycWydarzenie(stanDodania, { rodzaj: 'inna_rzecz' });
+    console.log(`dzis: [A5] wolno utworzyć = ${brama.wolno} — ${brama.powod}`);
+    if (!brama.wolno) return;
+    const start = dataStartowa({
+      powod: 'juz_sie_odbylo',
+      dzienPytania: stanDodania.rodzaj === 'pytamy' ? stanDodania.data : null,
+      dzis: dzisNapis ?? '',
+    });
+    console.log(`dzis: [K1] mecz bez planu — ${start.powod}`);
+    // ⛔ NOWY DRAFT ZNACZY NOWY DRAFT: żadnego wydarzenia z poprzedniego
+    // podejścia, żadnych minut z poprzedniej oceny.
+    setWydarzenieBezPlanu(null);
+    setBladMeczu(null);
+    setZapisanoMecz(null);
+    setMinutyNaBoisku(null);
+    setDlugoscMeczu(null);
+    setRpeWybrane(rpePoczatkowe());
+    setWiecejOMeczu(PUSTE_WIECEJ_O_MECZU);
+    setArkusz({
+      rodzaj: 'meczWiecej',
+      tytul: MECZ_BEZ_PLANU_TYTUL,
+      klucz: KLUCZ_MECZU_BEZ_PLANU,
+      idWydarzenia: null,
+      dzien: start.data === '' ? null : start.data,
+    });
+  }
+
+  /**
+   * ⭐⭐ PAS K1 21.08.2026 (§3.5 wymagania 2, 5 i 6) — JEDEN ZAPIS, DWA WIERSZE,
+   * W TEJ KOLEJNOŚCI I DOPIERO TERAZ.
+   *
+   * ⛔ CO POWSTAJE W BAZIE I KIEDY — dokładnie, bo to jest najważniejsze
+   * zdanie tej ścieżki:
+   *   • do chwili dotknięcia „Zapisz": ⛔ NIC. Zero wierszy, zero punktów.
+   *     Wyjście z arkusza w połowie zostawia bazę w stanie sprzed „+".
+   *   • przy dotknięciu „Zapisz": najpierw JEDEN wiersz `calendar_events`
+   *     (`event_type='match'`, `source='player'`, `status='completed'`,
+   *     `title='Mecz'`, `scheduled_date` = dzień z WYBORU zawodnika),
+   *     zaraz po nim JEDEN wiersz `match_contexts` związany z tamtym przez
+   *     `calendar_event_id`.
+   *   • przy PONOWNYM dotknięciu po nieudanym zapisie oceny: ⛔ wydarzenie
+   *     NIE powstaje drugi raz (`czyWolnoZalozycWydarzenie` je pamięta),
+   *     dokładamy wyłącznie ocenę.
+   *
+   * ⛔ KOLEJNOŚĆ JEST WYMUSZONA, NIE WYBRANA: `match_contexts.calendar_event_id`
+   * potrzebuje `id`, którego przed wstawieniem wydarzenia po prostu nie ma.
+   * ⛔ NIEUDANE ZAŁOŻENIE WYDARZENIA MA WŁASNE ZDANIE i NIE UDAJE, że ocena
+   * się zapisała — to jest wymaganie 6, wprost.
+   */
+  async function zapiszMeczBezPlanu(dzien: string | null): Promise<void> {
+    if (!currentUser) return;
+    setBladMeczu(null);
+    if (!toDataPoprawna(dzien)) { setBladMeczu(MECZ_BEZ_PLANU_BEZ_DNIA); return; }
+
+    let idWydarzenia = wydarzenieBezPlanu;
+    const brama = czyWolnoZalozycWydarzenie({
+      chwila: 'dotkniecie_zapisu', maJuzWydarzenie: wydarzenieBezPlanu,
+    });
+    console.log(`dzis: [K1] ${brama.powod}`);
+    if (brama.wolno) {
+      const decyzja = decyzjaZalozeniaWydarzenia({ idZawodnika: currentUser.id, data: dzien });
+      console.log(`dzis: [K1] ${opisZalozeniaDoLogu(decyzja)}`);
+      if (decyzja.rodzaj === 'nie_zakladaj') { setBladMeczu(decyzja.zdanie); return; }
+      const { data: wstawione, error: bladW } = await supabase
+        .from('calendar_events').insert(decyzja.wiersz).select('id');
+      if (bladW) {
+        setBladMeczu(toJestBrakDostepu(bladW)
+          ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU : MECZ_BEZ_PLANU_NIE_ZALOZYLEM);
+        return;
+      }
+      // ⚠️ O61 — ZERO WIERSZY BEZ BŁĘDU TO PORAŻKA. Zapis odrzucony przez RLS
+      // wraca jako sukces z pustą listą i wygląda dokładnie jak zapisany wiersz.
+      const nowe = Array.isArray(wstawione) && wstawione.length > 0 ? Number(wstawione[0].id) : null;
+      if (nowe === null || !Number.isFinite(nowe)) {
+        setBladMeczu(MECZ_BEZ_PLANU_NIE_ZALOZYLEM);
+        console.warn('[PLAN-D-K1] insert calendar_events dotknął ZERO wierszy — najpewniej RLS.');
+        return;
+      }
+      idWydarzenia = nowe;
+      setWydarzenieBezPlanu(nowe);
+    }
+    if (idWydarzenia === null) { setBladMeczu(MECZ_BEZ_PLANU_NIE_ZALOZYLEM); return; }
+
+    // ⭐ OCENA IDZIE TĄ SAMĄ DROGĄ, CO Z KAFLA. ⛔ Druga droga zapisu meczu
+    // znaczyłaby drugą regułę „wstaw czy dołóż" — a licznik pracy liczyłby
+    // ten sam mecz tyle razy, ile dróg do niego prowadzi.
+    const udalo = await zapiszKontekstMeczu(KLUCZ_MECZU_BEZ_PLANU, idWydarzenia, idWydarzenia);
+    if (!udalo) {
+      // ⛔ WYDARZENIE JUŻ STOI, OCENA NIE WESZŁA — i zawodnik ma to usłyszeć
+      // wprost, zamiast zobaczyć „zapisano" nad pustym wierszem (R5).
+      // ⚠️ `zapiszKontekstMeczu` mogło już ustawić własne, dokładniejsze zdanie
+      // (np. o braku dostępu) — wtedy go nie nadpisujemy.
+      setBladMeczu((poprzednie) => poprzednie ?? MECZ_BEZ_PLANU_OCENA_NIE_WESZLA);
+      return;
+    }
+    // ⭐ §3.5 wymaganie 4 — ZAWODNIK DOWIADUJE SIĘ, CO SIĘ STAŁO. Jedno zdanie,
+    // zero oceny meczu, zero liczenia dni z rzędu (N1, N3).
+    // ⚠️ BRZMIENIE DO PRZEJRZENIA PRZEZ KUBĘ (B3) — stoi w `lib/drogaDodania.ts`.
+    // ⛔ ZDANIE STOI W ARKUSZU, NIE NA EKRANIE — i to nie jest wygoda: banerek
+    // na ekranie „Dziś" byłby ósmą rzeczą w pomiarze i przestawiłby zapadkę
+    // ekranu, którego ten pas nie odchudza (791 dp). Arkusz kosztuje 0 dp,
+    // a zawodnik i tak w nim stoi w chwili, w której to zdanie ma przeczytać.
+    // (`zapisanoMecz` ustawia `zapiszKontekstMeczu`; arkusz to czyta niżej.)
+    await load();
   }
 
   function trescArkusza() {
@@ -3988,12 +4237,22 @@ export default function DzisScreen() {
     }
 
     if (arkusz.rodzaj === 'meczWiecej') {
-      // ⭐⭐ PLAN-D-D8 18.08.2026 — SZEŚĆ PÓL, KTÓRE NAPRAWDĘ ZAPISUJĄ.
+      // ⭐⭐ PLAN-D-D8 18.08.2026 — POLA, KTÓRE NAPRAWDĘ ZAPISUJĄ.
+      // ⚠️ PLAN-D-M3 21.08.2026: było ich sześć, jest SIEDEM (doszedł rodzaj
+      // meczu). ⛔ Liczba NIE JEST tu wpisana: pilnuje jej strażnik
+      // `lib/meczWiecej.selftest.ts`, porównując `POLA_ARKUSZA`
+      // z `rzeczyMeczu('arkusz_wiecej')` na RÓWNOŚĆ, razem z kolejnością.
       // ⛔ Do dziś ten arkusz wypisywał sześć NAPISÓW i odsyłał do pełnej karty
       // meczu. Napis, który nic nie zapisuje, jest obietnicą, nie funkcją (R1).
       const klaczM = arkusz.klucz;
       // ⭐⭐ PLAN-D-D2 — wystąpienie, z którego ten arkusz został otwarty.
+      // ⭐⭐ PAS K1 21.08.2026 — `null` znaczy „MECZ, KTÓREGO NIE BYŁO W PLANIE":
+      // wystąpienia jeszcze NIE MA i nie powstanie przed dotknięciem „Zapisz".
       const wydarzenieM = arkusz.idWydarzenia;
+      const bezPlanu = wydarzenieM === null;
+      const dzienM = arkusz.dzien;
+      const dzisM = dzisNapis ?? '';
+      const wczorajM = dzisM === '' ? null : przesunDzien(dzisM, -1);
       const ustaw = (zmiana: Partial<WiecejOMeczu>) =>
         setWiecejOMeczu((poprzednie) => ({ ...poprzednie, ...zmiana }));
       const liczbaZPola = (t: string): number | null => {
@@ -4005,10 +4264,105 @@ export default function DzisScreen() {
       };
       return (
         <>
-          <Text style={styles.cardBody}>{podpisArkuszaMeczu()}</Text>
+          {/* ═══════════════════════════════════════════════════════════
+              ⭐⭐ PAS K1 21.08.2026 (§3.5) — DWA WEJŚCIA, JEDEN ARKUSZ.
+              ⛔ Z KAFLA (`bezPlanu === false`) arkusz jest tym, czym był:
+              pytaniami, których nie ma w ocenie. Ze ścieżki
+              „+ → już się odbyło → Mecz" (`bezPlanu === true`) niesie
+              dodatkowo to, czego z kafla nie trzeba pytać, bo kafel to wie:
+              KTÓREGO DNIA był mecz i ILE go było.
+              ⛔ Podpis mówi WPROST, że wydarzenia jeszcze nie ma — zawodnik
+              ma wiedzieć, że nic się nie stanie bez jego dotknięcia (B3).
+              ═══════════════════════════════════════════════════════════ */}
+          {bezPlanu ? (
+            <>
+              <Text style={styles.cardBody}>{MECZ_BEZ_PLANU_PODPIS}</Text>
+
+              {/* ⛔ DZIEŃ Z WYBORU ZAWODNIKA, NIE ZE ZGADYWANIA (§3.5 wym. 7).
+                  Dwa dni to okno, którym produkt już pyta o wystąpienia
+                  (`lib/pytanieOWystapienie.ts`: „wczoraj i dziś") — ⛔ nie
+                  wymyślam tu trzeciego zakresu. Mecz sprzed tygodnia ma
+                  uczciwe wyjście: wiersz niżej, prowadzący do Kalendarza. */}
+              <Text style={styles.licznikPodpis}>{MECZ_BEZ_PLANU_KTORY_DZIEN}</Text>
+              <View style={styles.pytanieOdpowiedzi}>
+                {[[MECZ_DZIEN_WCZORAJ, wczorajM] as const, [MECZ_DZIEN_DZIS, dzisM] as const]
+                  .filter(([, d]) => toDataPoprawna(d))
+                  .map(([napis, d]) => (
+                    <TouchableOpacity
+                      key={napis}
+                      style={[styles.pytanieBtn, dzienM === d && styles.pytanieBtnWybrany]}
+                      onPress={() => setArkusz({
+                        rodzaj: 'meczWiecej', tytul: MECZ_BEZ_PLANU_TYTUL,
+                        klucz: KLUCZ_MECZU_BEZ_PLANU, idWydarzenia: null, dzien: d,
+                      })}
+                    >
+                      <Text style={[styles.pytanieBtnTxt, dzienM === d && styles.pytanieBtnTxtWybrany]}>{napis}</Text>
+                    </TouchableOpacity>
+                  ))}
+              </View>
+              <TouchableOpacity
+                style={styles.inlineLink}
+                onPress={() => {
+                  const trasa = trasaDodania({ rodzaj: RODZAJ_MECZ, data: dzienM, skad: SKAD_PLUS });
+                  setArkusz(null);
+                  router.push({ pathname: trasa.pathname as '/kalendarz', params: trasa.params });
+                }}
+              >
+                <Text style={styles.cardAction}>{MECZ_BEZ_PLANU_INNY_DZIEN}</Text>
+              </TouchableOpacity>
+
+              {/* ⭐ TE SAME DWA BLOKI, CO W OCENIE Z KAFLA — jedna procedura,
+                  nie druga kopia (`renderBlokMinutMeczu`). */}
+              {renderBlokMinutMeczu(false)}
+
+              <Text style={styles.licznikPodpis}>{POLE_RPE}</Text>
+              {/* ⚠️ DRUGA KOPIA BLOKU RPE — świadoma i wypisana. Wyprowadzenie
+                  go do wspólnej procedury zapala asercję w
+                  `lib/pytanieOWystapienie.selftest.ts`, która wymaga
+                  `RPE_WARTOSCI.map(` i `POLE_RPE` W CIELE `renderKrokiOceny`,
+                  a to nie jest plik tego pasa. ⭐ Obie kopie pilnuje strażnik
+                  `K1-B7`. ⛔ KONTRAKT DLA PASA D3 — opisany w nocie K1.
+                  ⛔ I tu też ANI JEDNA wartość nie jest zaznaczona z góry (Z6). */}
+              <View style={styles.pytanieOdpowiedzi}>
+                {RPE_WARTOSCI.map((r) => (
+                  <TouchableOpacity
+                    key={`bp-${r}`}
+                    style={[styles.pytanieBtn, rpeWybrane === r && styles.pytanieBtnWybrany]}
+                    onPress={() => setRpeWybrane(r)}
+                  >
+                    <Text style={[styles.pytanieBtnTxt, rpeWybrane === r && styles.pytanieBtnTxtWybrany]}>{String(r)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : (
+            <Text style={styles.cardBody}>{podpisArkuszaMeczu('ocena_z_kafla')}</Text>
+          )}
           <Text style={styles.licznikPodpis}>{MECZ_WIECEJ_DOBROWOLNE}</Text>
 
-          {/* 1. SAMOOCENA — ⛔ bez wartości zaznaczonej z góry. */}
+          {/* ⭐⭐ 1. RODZAJ MECZU — PLAN-D-M3 21.08.2026.
+              ⛔ CO BYŁO ZŁE: ścieżka oceny z kafla wpisywała
+              `RODZAJ_MECZU_Z_KAFLA = 'official_match'` NA SZTYWNO, więc
+              zawodnik, który zagrał sparing, miał w bazie „Mecz oficjalny",
+              a nikt go o rodzaj nie zapytał (złamanie Z0). Poprawienie tego
+              kosztowało go CZTERY dotknięcia; od dziś kosztuje JEDNO.
+              ⛔ ANI JEDNA WARTOŚĆ NIE JEST ZAZNACZONA Z GÓRY (Z6) — dotknięcie
+              wybranej wartości drugi raz ODZNACZA ją, tak jak przy samoocenie.
+              ⚠️ Koszt na ekranie: 0 dp — arkusz jest `Modal`-em. */}
+          <Text style={styles.licznikPodpis}>{POLE_RODZAJ_MECZU}</Text>
+          <View style={styles.pytanieOdpowiedzi}>
+            {RODZAJE_MECZU.map((r) => (
+              <TouchableOpacity
+                key={`gt-${r.wartosc}`}
+                style={[styles.pytanieBtn, wiecejOMeczu.rodzajMeczu === r.wartosc && styles.pytanieBtnWybrany]}
+                onPress={() => ustaw({ rodzajMeczu: wiecejOMeczu.rodzajMeczu === r.wartosc ? null : r.wartosc })}
+              >
+                <Text style={[styles.pytanieBtnTxt, wiecejOMeczu.rodzajMeczu === r.wartosc && styles.pytanieBtnTxtWybrany]}>{r.napis}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 2. SAMOOCENA — ⛔ bez wartości zaznaczonej z góry. */}
           <Text style={styles.licznikPodpis}>{POLE_SAMOOCENA}</Text>
           <View style={styles.pytanieOdpowiedzi}>
             {SKALA_OCENY.map((n) => (
@@ -4022,7 +4376,7 @@ export default function DzisScreen() {
             ))}
           </View>
 
-          {/* 2. STAN MENTALNY */}
+          {/* 3. STAN MENTALNY */}
           <Text style={styles.licznikPodpis}>{POLE_STAN_MENTALNY}</Text>
           <View style={styles.pytanieOdpowiedzi}>
             {SKALA_OCENY.map((n) => (
@@ -4036,7 +4390,7 @@ export default function DzisScreen() {
             ))}
           </View>
 
-          {/* 3. WARUNKI — ⛔ trzy wartości, nie dwie: `null` znaczy „nie zapytaliśmy". */}
+          {/* 4. WARUNKI — ⛔ trzy wartości, nie dwie: `null` znaczy „nie zapytaliśmy". */}
           <Text style={styles.licznikPodpis}>{POLE_WARUNKI}</Text>
           <View style={styles.pytanieOdpowiedzi}>
             {[[WARUNKI_NIE, false] as const, [WARUNKI_TAK, true] as const].map(([napis, wartosc]) => (
@@ -4050,7 +4404,7 @@ export default function DzisScreen() {
             ))}
           </View>
 
-          {/* 4. POZYCJA — ⛔ etykiety wyprowadzone z `positions.id`, nie przepisane. */}
+          {/* 5. POZYCJA — ⛔ etykiety wyprowadzone z `positions.id`, nie przepisane. */}
           <Text style={styles.licznikPodpis}>{POLE_POZYCJA}</Text>
           <View style={styles.pytanieOdpowiedzi}>
             {POZYCJE_DO_WYBORU.map((poz) => (
@@ -4064,7 +4418,7 @@ export default function DzisScreen() {
             ))}
           </View>
 
-          {/* 5. WYNIK — dwie kolumny, nie jedna: `own_score` i `opponent_score`. */}
+          {/* 6. WYNIK — dwie kolumny, nie jedna: `own_score` i `opponent_score`. */}
           <Text style={styles.licznikPodpis}>{POLE_WYNIK}</Text>
           <View style={styles.pytanieOdpowiedzi}>
             <TextInput
@@ -4085,7 +4439,7 @@ export default function DzisScreen() {
             />
           </View>
 
-          {/* 6. NOTATKA */}
+          {/* 7. NOTATKA */}
           <Text style={styles.licznikPodpis}>{POLE_NOTATKA}</Text>
           <TextInput
             style={styles.meczNotatka}
@@ -4096,12 +4450,25 @@ export default function DzisScreen() {
             onChangeText={(t) => ustaw({ notatka: t })}
           />
 
-          <TouchableOpacity style={styles.pytanieBtn} onPress={() => zapiszKontekstMeczu(klaczM, wydarzenieM)}>
-            <Text style={styles.pytanieBtnTxt}>{MECZ_WIECEJ_ZAPISZ}</Text>
+          {/* ⛔⛔ TO JEST JEDYNE MIEJSCE, W KTÓRYM POWSTAJE WYDARZENIE MECZU
+              BEZ PLANU. Otwarcie arkusza nie zapisuje NIC; wyjście w połowie
+              zostawia bazę w stanie sprzed „+". Strażniki `K1-B8` i `K1-B9`
+              pilnują obu połów tego zdania. */}
+          <TouchableOpacity
+            style={styles.pytanieBtn}
+            onPress={() => (bezPlanu
+              ? zapiszMeczBezPlanu(dzienM)
+              : zapiszKontekstMeczu(klaczM, wydarzenieM))}
+          >
+            <Text style={styles.pytanieBtnTxt}>{bezPlanu ? MECZ_BEZ_PLANU_ZAPISZ : MECZ_WIECEJ_ZAPISZ}</Text>
           </TouchableOpacity>
           {bladMeczu !== null ? <Text style={styles.pytanieBlad}>{bladMeczu}</Text> : null}
           {bladMeczu === null && zapisanoMecz === klaczM
-            ? <Text style={styles.licznikPodpis}>{MECZ_WIECEJ_ZAPISANO}</Text>
+            ? (
+              <Text style={styles.licznikPodpis}>
+                {bezPlanu ? MECZ_BEZ_PLANU_ZAPISANY : MECZ_WIECEJ_ZAPISANO}
+              </Text>
+            )
             : null}
           {/* ⛔ CZEGO PRODUKT NIE UMIE ZAPISAĆ — imiennie, na ekranie.
               `match_contexts.match_length_minutes` NIE ISTNIEJE (zmierzone
@@ -4112,12 +4479,19 @@ export default function DzisScreen() {
               {MECZ_CZEKA_NA_KOLUMNE(r.napis)}
             </Text>
           ))}
-          <TouchableOpacity
-            style={styles.inlineLink}
-            onPress={() => { setArkusz(null); router.push('/mecz'); }}
-          >
-            <Text style={styles.cardAction}>{MECZ_WIECEJ_WEJSCIE}</Text>
-          </TouchableOpacity>
+          {/* ⛔ WEJŚCIE DO PEŁNEJ KARTY MECZU TYLKO PRZY MECZU Z PLANU.
+              Pełna karta (`app/(tabs)/mecz.tsx`) opisuje mecz, który JUŻ MA
+              wystąpienie; przy meczu bez planu wystąpienia jeszcze nie ma,
+              więc ten wiersz prowadziłby donikąd — a wyjście donikąd jest
+              napisem o wyjściu, nie wyjściem (WT-33). */}
+          {bezPlanu ? null : (
+            <TouchableOpacity
+              style={styles.inlineLink}
+              onPress={() => { setArkusz(null); router.push('/mecz'); }}
+            >
+              <Text style={styles.cardAction}>{MECZ_WIECEJ_WEJSCIE}</Text>
+            </TouchableOpacity>
+          )}
         </>
       );
     }
@@ -4125,7 +4499,10 @@ export default function DzisScreen() {
     if (arkusz.rodzaj === 'plus') {
       return (
         <>
-          <TouchableOpacity style={styles.arkuszWybor} onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' })}>
+          <TouchableOpacity
+            style={styles.arkuszWybor}
+            onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' }, 'dopiero_bedzie')}
+          >
             <Text style={styles.cardLabel}>{PLUS_W_PRZYSZLOSCI}</Text>
             <Text style={styles.licznikPodpis}>{PLUS_W_PRZYSZLOSCI_PODPIS}</Text>
           </TouchableOpacity>
@@ -4167,8 +4544,26 @@ export default function DzisScreen() {
               </TouchableOpacity>
             );
           })}
-          <TouchableOpacity style={styles.inlineLink} onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' })}>
-            <Text style={styles.cardAction}>{KOLIZJA_INNA_RZECZ}</Text>
+          {/* ═══════════════════════════════════════════════════════════
+              ⭐⭐ PAS K1 21.08.2026 (§3.5) — „NIE, TO BYŁA INNA RZECZ"
+              ROZDZIELONE NA DWA WYJŚCIA. ⛔ Do 21.08 była tu JEDNA droga
+              i prowadziła do formularza kalendarza — czyli mecz, którego
+              zawodnik nie zaplanował, dało się zapisać wyłącznie zakładając
+              mu najpierw wydarzenie. Mecz dostaje własne wyjście i kończy
+              na arkuszu oceny; wszystko inne idzie tam, gdzie szło.
+              ⛔ ANI JEDNO Z NICH NIC NIE ZAPISUJE — bramka `wolnoUtworzyc-
+              Wydarzenie` jest wołana w obu, tak jak dotąd.
+              ═══════════════════════════════════════════════════════════ */}
+          <TouchableOpacity style={styles.arkuszWybor} onPress={() => otworzMeczBezPlanu()}>
+            <Text style={styles.cardLabel}>{PLUS_TO_BYL_MECZ}</Text>
+            <Text style={styles.licznikPodpis}>{PLUS_TO_BYL_MECZ_PODPIS}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.arkuszWybor}
+            onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' }, 'juz_sie_odbylo')}
+          >
+            <Text style={styles.cardLabel}>{PLUS_COS_INNEGO}</Text>
+            <Text style={styles.licznikPodpis}>{PLUS_COS_INNEGO_PODPIS}</Text>
           </TouchableOpacity>
           <Text style={styles.licznikPodpis}>{KOLIZJA_PRZYPIS}</Text>
         </>
@@ -4179,8 +4574,20 @@ export default function DzisScreen() {
         <Text style={styles.cardBody}>
           {stanDodania.rodzaj === 'nie_wiemy' ? KOLIZJA_NIE_ODCZYTANE : KOLIZJA_NIC_NIE_STALO}
         </Text>
-        <TouchableOpacity style={styles.inlineLink} onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' })}>
-          <Text style={styles.cardAction}>{PLUS_DODAJ_NOWE}</Text>
+        {/* ⭐ PAS K1 — TE SAME DWA WYJŚCIA, CO W GAŁĘZI Z PYTANIEM.
+            ⛔ Jedno wyjście tutaj i dwa tam znaczyłoby, że zawodnik, którego
+            plan akurat był pusty, NIE MA jak zapisać meczu — a to jest
+            dokładnie ten przypadek, w którym najczęściej go nie ma w planie. */}
+        <TouchableOpacity style={styles.arkuszWybor} onPress={() => otworzMeczBezPlanu()}>
+          <Text style={styles.cardLabel}>{PLUS_TO_BYL_MECZ}</Text>
+          <Text style={styles.licznikPodpis}>{PLUS_TO_BYL_MECZ_PODPIS}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.arkuszWybor}
+          onPress={() => przejdzDoDodania({ rodzaj: 'inna_rzecz' }, 'juz_sie_odbylo')}
+        >
+          <Text style={styles.cardLabel}>{PLUS_DODAJ_NOWE}</Text>
+          <Text style={styles.licznikPodpis}>{PLUS_COS_INNEGO_PODPIS}</Text>
         </TouchableOpacity>
       </>
     );

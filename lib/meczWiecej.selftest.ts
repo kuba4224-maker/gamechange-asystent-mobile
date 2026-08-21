@@ -29,6 +29,10 @@ import {
   // ⭐⭐ PLAN-D-D2 19.08.2026
   ustalWiazanieMeczu, toJestDrugiWierszNaMecz,
   INDEKS_JEDEN_WIERSZ_NA_WYDARZENIE, MECZ_JUZ_MA_WIERSZ,
+  // ⭐⭐ PLAN-D-M3 21.08.2026
+  RODZAJE_MECZU, MECZ_RODZAJ_BEZ_WSKAZANIA, POLE_RODZAJ_MECZU,
+  STANY_CIALA_PRZED_MECZEM, ustalRodzajMeczu,
+  napisRodzajuMeczu, napisRodzajuZapisanegoMeczu,
   type RzeczOMeczu, type OcenaMeczu, type WiecejOMeczu, type WynikMeczu,
   type StanKontekstuMeczu, type DecyzjaZapisuMeczu,
 } from './meczWiecej';
@@ -60,15 +64,39 @@ const wArkuszu = rzeczyMeczu('arkusz_wiecej');
 const wKarcie = rzeczyMeczu('pelna_karta');
 check('⭐ (M1 §3) ścieżka oceny CHUDNIE do czterech rzeczy — tak rysuje makieta v3',
   naWierzchu.length === 4, `${naWierzchu.length}: ${naWierzchu.map((r) => r.napis).join(' · ')}`);
-check('⭐ (M1 §3) arkusz „powiedz więcej" niesie SZEŚĆ rzeczy',
-  wArkuszu.length === 6, `${wArkuszu.length}`);
+// ⚠️ PLAN-D-M3 21.08.2026 — BYŁO SZEŚĆ, JEST SIEDEM: `game_type` zszedł tu
+// z `pelna_karta`, żeby zawodnik oceniający mecz z kafla mógł wskazać rodzaj
+// JEDNYM dotknięciem, zamiast czterema (§3.2 polecenia M3).
+check('⭐ (M1 §3 → M3 §3.2) arkusz „powiedz więcej" niesie SIEDEM rzeczy',
+  wArkuszu.length === 7, `${wArkuszu.length}`);
 // ⛔ TRZECIE MIEJSCE JEST NOWE I MA POWÓD. Bez niego tabela twierdziłaby, że
 // „cała karta meczu" to dziesięć rzeczy — a karta ma ich więcej i te dodatkowe
 // nadal są jedynym miejscem, w którym da się je podać (B3).
-check('⭐ (D8, B3) rzeczy, których decyzja Kuby NIE przeniosła, są wymienione '
+// ⚠️ PLAN-D-M3 21.08.2026 — BYŁY TRZY, SĄ CZTERY. ⛔ `game_type` STĄD ZSZEDŁ
+// (do arkusza), ale doszły DWIE rzeczy, których ta tabela NIGDY nie miała:
+// `role` i godzina rozpoczęcia. Zmierzone 21.08: tabela twierdziła, że karta
+// meczu ma 13 rzeczy — ma 15. To jest ta milcząca niepełność, której
+// `MiejsceRzeczy` miało zapobiec (B3).
+check('⭐ (D8, B3 → M3 §3.3) rzeczy, których decyzja Kuby NIE przeniosła, są wymienione '
   + 'z nazwy w trzecim miejscu — a nie przemilczane',
-  wKarcie.length === 3 && wKarcie.every((r) => r.stan === 'dziala'),
+  wKarcie.length === 4 && wKarcie.every((r) => r.stan === 'dziala'),
   wKarcie.map((r) => r.kolumna).join(','));
+check('⭐⭐ (M3 §3.3) CAŁA KARTA MECZU MA PIĘTNAŚCIE RZECZY — tyle, ile naprawdę '
+  + 'da się w niej podać. ⛔ Do 21.08 ta tabela twierdziła, że trzynaście',
+  RZECZY_O_MECZU.length === 15, `${RZECZY_O_MECZU.length}`);
+check('⭐ (M3 §3.3) DWIE DOPISANE RZECZY MAJĄ PRAWDZIWE MIEJSCE I PRAWDZIWĄ KOLUMNĘ — '
+  + 'rola w `match_contexts.role`, godzina w `calendar_events.scheduled_time`',
+  (() => {
+    const rola = RZECZY_O_MECZU.find((r) => r.kolumna === 'role');
+    const godzina = RZECZY_O_MECZU.find((r) => r.kolumna === 'calendar_events.scheduled_time');
+    return rola !== undefined && rola.miejsce === 'pelna_karta' && rola.stan === 'dziala'
+      && godzina !== undefined && godzina.miejsce === 'pelna_karta' && godzina.stan === 'dziala';
+  })(),
+  wKarcie.map((r) => `${r.kolumna}=${r.miejsce}`).join(' · '));
+check('⛔ (M3 §3.3) godzina jest JEDYNĄ rzeczą spoza `match_contexts` i mówi to NAZWĄ '
+  + 'TABELI — żeby nikt nie szukał jej tam, gdzie jej nie ma',
+  RZECZY_O_MECZU.filter((r) => r.kolumna.includes('.')).map((r) => r.kolumna).join(',')
+    === 'calendar_events.scheduled_time');
 check('⛔ każda rzecz stoi DOKŁADNIE w jednym miejscu — suma się zgadza',
   naWierzchu.length + wArkuszu.length + wKarcie.length === RZECZY_O_MECZU.length);
 
@@ -80,10 +108,12 @@ check('⭐ (M1 §3) na wierzchu stoi DOKŁADNIE to, co wymienił Kuba: minuty na
 
 // ⚠️ NAZWY POPRAWIONE 18.08.2026: `result` i `notes` NIE ISTNIEJĄ w bazie.
 // Wynik to DWIE kolumny (`own_score`, `opponent_score`), notatka to `free_note`.
-const W_ARKUSZU_KUBY = ['self_rating', 'mental_state', 'demanding_conditions',
+// ⚠️ M3: `game_type` PIERWSZY — tak samo jak w pełnej karcie meczu, i tak samo
+// jak w `POLA_ARKUSZA`, które strażnik niżej porównuje z tą listą NA RÓWNOŚĆ.
+const W_ARKUSZU_KUBY = ['game_type', 'self_rating', 'mental_state', 'demanding_conditions',
   'position_played_today', 'own_score+opponent_score', 'free_note'];
-check('⭐ (M1 §3) w arkuszu stoi DOKŁADNIE reszta: samoocena · stan mentalny · '
-  + 'warunki · rola · wynik · notatka — pod PRAWDZIWYMI nazwami kolumn',
+check('⭐ (M1 §3 → M3) w arkuszu stoi DOKŁADNIE reszta: rodzaj · samoocena · stan mentalny · '
+  + 'warunki · pozycja · wynik · notatka — pod PRAWDZIWYMI nazwami kolumn',
   wArkuszu.map((r) => r.kolumna).join(',') === W_ARKUSZU_KUBY.join(','),
   wArkuszu.map((r) => r.kolumna).join(','));
 
@@ -110,11 +140,34 @@ check('⛔ (R5) stany są TRZY, nie dwa — i liczymy je z listy, nie z użycia'
   STANY_RZECZY.join(', '));
 check('⛔ każda rzecz ma stan Z LISTY — nie ma stanu spoza słownika',
   RZECZY_O_MECZU.every((r) => STANY_RZECZY.includes(r.stan)));
+// ⛔ LICZBY W TEJ ASERCJI SĄ WYLICZANE Z `RZECZY_O_MECZU`, a nie wpisane.
+// Wpisana liczba przeżyłaby przeniesienie rzeczy między miejscami i zdanie
+// brzmiałoby dalej wiarygodnie — a byłoby nieprawdziwe.
+const PODPIS_Z_KAFLA = podpisArkuszaMeczu('ocena_z_kafla');
+const PODPIS_Z_KARTY = podpisArkuszaMeczu('pelna_karta');
 check('⭐ podpis arkusza mówi PRAWDĘ: ile rzeczy tu, ile w pełnej karcie',
-  podpisArkuszaMeczu().includes('6 rzeczy')
-  && podpisArkuszaMeczu().includes('Kolejne 3')
-  && !/jeszcze nie przeniosła/.test(podpisArkuszaMeczu()),
-  podpisArkuszaMeczu());
+  PODPIS_Z_KAFLA.includes(`${wArkuszu.length} rzeczy`)
+  && PODPIS_Z_KAFLA.includes(`Kolejne ${wKarcie.length}`)
+  && !/jeszcze nie przeniosła/.test(PODPIS_Z_KAFLA),
+  PODPIS_Z_KAFLA);
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ PLAN-D-M3 §3.4 — PODPIS NIE ODSYŁA TAM, GDZIE ZAWODNIK JUŻ STOI
+// ⛔ Do 21.08 `podpisArkuszaMeczu()` kończył się zawsze zdaniem „Kolejne N
+// zapisujesz w pełnej karcie meczu". Na „Dziś" to jest wskazówka; w
+// `app/(tabs)/mecz.tsx`, gdzie ten sam podpis stoi od 19.08, to jest ŚLEPY
+// ZAUŁEK — odesłanie do ekranu, na którym zawodnik właśnie jest.
+// ═════════════════════════════════════════════════════════════════════
+check('⭐⭐ (M3 §3.4) podpis WOŁANY Z PEŁNEJ KARTY nie odsyła do pełnej karty',
+  !/pełnej karcie meczu/.test(PODPIS_Z_KARTY) && !/Kolejne/.test(PODPIS_Z_KARTY),
+  PODPIS_Z_KARTY);
+check('⭐ (M3 §3.4) …a mimo to NADAL MÓWI, ile rzeczy jest gdzie — liczby wyliczone '
+  + 'z `RZECZY_O_MECZU`, nie wpisane ręcznie',
+  PODPIS_Z_KARTY.includes(`${wArkuszu.length} rzeczy`)
+  && PODPIS_Z_KARTY.includes(`${wKarcie.length}`),
+  PODPIS_Z_KARTY);
+check('⛔ (M3 §3.4) DWA MIEJSCA — DWA RÓŻNE ZDANIA. Gdyby były identyczne, parametr '
+  + 'byłby ozdobnikiem, a zaułek zostałby',
+  PODPIS_Z_KARTY !== PODPIS_Z_KAFLA);
 
 // ═════════════════════════════════════════════════════════════════════
 // 3. ⭐⭐ ODCZYT DŁUGOŚCI MECZU — SPRAWDZONY WYKONANIEM, NIE LEKTURĄ
@@ -276,7 +329,9 @@ const zrodloNagrody = readFileSync(join(root, 'lib', 'nagrodaZaPrace.ts'), 'utf8
 const NOWE_BRZMIENIA = [
   MECZ_ZERO_MINUT, MECZ_BEZ_ZAZNACZENIA, MECZ_MINUTY_PONAD_DLUGOSC,
   MECZ_WIECEJ_NIC_DO_ZAPISU, POLE_MINUTY_NA_BOISKU, POLE_DLUGOSC_MECZU,
-  podpisArkuszaMeczu(), w(45, 90).zdanie,
+  PODPIS_Z_KAFLA, PODPIS_Z_KARTY, POLE_RODZAJ_MECZU,
+  MECZ_RODZAJ_BEZ_WSKAZANIA, ...RODZAJE_MECZU.map((r) => r.napis),
+  w(45, 90).zdanie,
 ];
 // ⛔ N1 — zero słów o serii, passie i dniach z rzędu. ⛔ N3 — zero porównań.
 const ZAKAZANE = /passa|seri[ae]|z rzędu|codziennie|nie przerwij|inni zawodnicy|lepszy niż|gorszy niż|średnia innych/i;
@@ -519,6 +574,9 @@ const MUTACJE: [string, () => Predykat[]][] = [
         minutes_played: a.ocena.minutyNaBoisku, match_length_minutes: a.ocena.dlugoscMeczu,
         match_rpe: null, self_rating: null, mental_state: null, demanding_conditions: null,
         position_played_today: null, own_score: null, opponent_score: null, free_note: null,
+        // ⭐ PLAN-D-M3 21.08.2026 — mutacja M5 dotyczy sprzeczności minut, nie
+        // pytań pełnej karty; pola dołożone, żeby kształt wiersza zgadzał się z typem.
+        role: null, entered_recovery_state: null,
         // ⭐ PLAN-D-D2 19.08.2026 — mutacja M5 dotyczy sprzeczności minut, nie
         // wiązania; pole dołożone, żeby kształt wiersza zgadzał się z typem.
         calendar_event_id: null },
@@ -664,6 +722,353 @@ function zdecydujOZabisieMeczuZastepczy(
   check('⛔ (D2 §4.3) ekran zamienia drugi wiersz na ZDANIE, a nie na kod bazy',
     /toJestDrugiWierszNaMecz\(bladW\)/.test(wycinek) && /MECZ_JUZ_MA_WIERSZ/.test(wycinek));
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐⭐ PLAN-D-M3 21.08.2026 — DOMKNIĘCIE MECZU
+//
+// ⛔ CZEGO TE ASERCJE NIE DOWODZĄ, i mówię to pierwszym zdaniem: ani jedna
+// nie dotyka bazy. Dowodzą ROZSTRZYGNIĘĆ czystych funkcji i KSZTAŁTU dwóch
+// plików ekranów odczytanych z dysku. „Zapis przechodzi w Supabase" jest
+// twierdzeniem o RLS i jego dowód leży w kliknięciu na żywej appce (Z0).
+//
+// ⛔ WSZYSTKIE ASERCJE TEKSTOWE IDĄ NA WYCINKACH, nie na całym pliku, i każdy
+// wycinek ma OSOBNĄ asercję, że nie jest pusty (§0.8 polecenia). Pytanie „czy
+// napis pada gdziekolwiek w pliku" przeszłoby na kodzie, w którym napis stoi
+// w komentarzu albo w zupełnie innej funkcji.
+// ═════════════════════════════════════════════════════════════════════
+const meczSurowy = readFileSync(join(root, 'app', '(tabs)', 'mecz.tsx'), 'utf8');
+const meczZrodlo = bezKomentarzy(meczSurowy);
+
+/** ⛔ Wycinek między dwoma kotwicami kodu. Pusty napis = kotwica nie znaleziona. */
+function wycinek(tekst: string, od: string, do_: string): string {
+  const i = tekst.indexOf(od);
+  if (i < 0) return '';
+  const j = tekst.indexOf(do_, i + od.length);
+  return j < 0 ? tekst.slice(i) : tekst.slice(i, j);
+}
+
+type PredykatM3 = { nazwa: string; ok: () => boolean };
+type Podpisywacz = typeof podpisArkuszaMeczu;
+type Napisywacz = typeof napisRodzajuZapisanegoMeczu;
+type PolaArkusza = readonly { kolumna: string; stala: string; etykieta: string }[];
+
+const MOJE_WYDARZENIA = new Set<number>([501, 502]);
+const OCENA_M3: OcenaMeczu = { minutyNaBoisku: 45, dlugoscMeczu: 90, rpe: 7 };
+/** ⭐ Wejście PEŁNEJ KARTY: wszystko, co ten ekran umie podać. */
+const WIECEJ_PELNA_KARTA: WiecejOMeczu = {
+  ...PELNE_WIECEJ, rodzajMeczu: 'friendly', rola: '  w podstawowym składzie  ',
+  stanCiala: 'entered_fresh',
+};
+
+function bateriaM3(
+  zm: Zapisywacz,
+  rzeczy: readonly RzeczOMeczu[],
+  pola: PolaArkusza,
+  podpis: Podpisywacz,
+  napisZBazy: Napisywacz,
+  mecz: string,
+  dzis: string,
+): PredykatM3[] {
+  const wZapisie = wycinek(mecz, 'async function submitMatchContext', 'function renderRoutingBlock');
+  const wWystapieniu = wycinek(mecz, 'async function ustalWystapienieMeczu', 'async function maJuzWpisBolowy');
+  const wHistorii = wycinek(mecz, 'function renderMatchCard', 'function renderSegmentSlot');
+  const wStanie = wycinek(mecz, 'const [gameType, setGameType]', 'const [ownScore');
+  const wArkuszuDzis = wycinek(dzis, "arkusz.rodzaj === 'meczWiecej'", "arkusz.rodzaj === 'plus'");
+  const wArkuszu7 = rzeczy.filter((r) => r.miejsce === 'arkusz_wiecej');
+  const wKarcie4 = rzeczy.filter((r) => r.miejsce === 'pelna_karta');
+
+  const zapisz = (
+    stan: StanKontekstuMeczu, wiecej: WiecejOMeczu,
+    idWydarzenia: number | null = 501,
+    wydarzenia: ReadonlySet<number> | null = MOJE_WYDARZENIA,
+  ): DecyzjaZapisuMeczu =>
+    zm({ idZawodnika: 'u-1', stan, ocena: OCENA_M3, wiecej, idWydarzenia, wydarzeniaZawodnika: wydarzenia });
+
+  return [
+    // ── STRAŻNIK STRAŻNIKA — bez tego każde „nie zawiera" niżej byłoby prawdą
+    //    o pustym napisie, czyli asercją, która nic nie mierzy.
+    { nazwa: 'M3-B0 wszystkie pięć wycinków ISTNIEJE i nie jest puste',
+      ok: () => wZapisie.length > 800 && wWystapieniu.length > 800
+        && wHistorii.length > 200 && wStanie.length > 20 && wArkuszuDzis.length > 800 },
+
+    // ── §3.1 — PEŁNA KARTA IDZIE PRZEZ JEDNĄ REGUŁĘ ────────────────────
+    { nazwa: 'M3-B1 pełna karta ZAPISUJE PRZEZ `zdecydujOZapisieMeczu`, a nie własną drogą',
+      ok: () => /zdecydujOZapisieMeczu\(\{/.test(wZapisie) && /decyzja\.wiersz/.test(wZapisie)
+        && !/game_type:/.test(wZapisie) },
+    { nazwa: 'M3-B2 pełna karta PODAJE `idWydarzenia` i listę wydarzeń zawodnika',
+      ok: () => /idWydarzenia: wystapienie\.idWydarzenia/.test(wZapisie)
+        && /wydarzeniaZawodnika: wystapienie\.wydarzeniaZawodnika/.test(wZapisie) },
+    { nazwa: 'M3-B3 pełna karta szuka wiersza NAJPIERW w wizycie, POTEM w bazie',
+      ok: () => /idWierszaMeczuWWizycie \?\? idZBazy/.test(wZapisie)
+        && /wierszeMeczuPoWydarzeniu\.get\(/.test(wZapisie) },
+    { nazwa: 'M3-B4 pełna karta zamienia drugi wiersz na ZDANIE, a nie na kod bazy',
+      ok: () => /toJestDrugiWierszNaMecz\(insErr\)/.test(wZapisie)
+        && /MECZ_JUZ_MA_WIERSZ/.test(wZapisie) && !/23505/.test(wZapisie) },
+    { nazwa: 'M3-B5 pełna karta ODDAJE identyfikator wystąpienia, a nie tylko zapisuje kalendarz',
+      ok: () => /idWydarzenia: noweId/.test(wWystapieniu) && /idWydarzenia: decyzja\.id/.test(wWystapieniu) },
+    { nazwa: 'M3-B6 WSTAWIANY wiersz z pełnej karty NIESIE `calendar_event_id`',
+      ok: () => { const d = zapisz({ rodzaj: 'brak' }, WIECEJ_PELNA_KARTA);
+        return d.rodzaj === 'wstaw' && d.wiersz.calendar_event_id === 501; } },
+    { nazwa: 'M3-B7 BRAMKA WŁAŚCICIELA działa także tutaj — cudze wystąpienie idzie z `null`',
+      ok: () => { const d = zapisz({ rodzaj: 'brak' }, WIECEJ_PELNA_KARTA, 999);
+        return d.rodzaj === 'wstaw' && d.wiersz.calendar_event_id === null && d.powod.includes('999'); } },
+    { nazwa: 'M3-B8 drugi zapis z pełnej karty DOKŁADA do istniejącego wiersza',
+      ok: () => zapisz({ rodzaj: 'zapisany', id: 77 }, WIECEJ_PELNA_KARTA).rodzaj === 'aktualizuj' },
+    { nazwa: 'M3-B9 mecz BEZ wystąpienia liczy się dalej — nikomu nie odbieramy punktów',
+      ok: () => { const d = zapisz({ rodzaj: 'brak' }, WIECEJ_PELNA_KARTA, null, null);
+        return d.rodzaj === 'wstaw' && d.wiersz.calendar_event_id === null
+          && d.wiersz.minutes_played === 45; } },
+    { nazwa: 'M3-B10 pełna karta NADAL zapisuje `role` i `entered_recovery_state` — '
+        + 'podpięcie pod wspólną regułę nie skasowało dwóch pytań',
+      ok: () => { const d = zapisz({ rodzaj: 'brak' }, WIECEJ_PELNA_KARTA);
+        return d.rodzaj === 'wstaw' && d.wiersz.role === 'w podstawowym składzie'
+          && d.wiersz.entered_recovery_state === 'entered_fresh'; } },
+
+    // ── §3.2 — RODZAJ MECZU ────────────────────────────────────────────
+    { nazwa: 'M3-B11 `game_type` stoi w `arkusz_wiecej` — jedno dotknięcie od kafla',
+      ok: () => rzeczy.some((r) => r.kolumna === 'game_type' && r.miejsce === 'arkusz_wiecej') },
+    { nazwa: 'M3-B12 tabela i arkusz na „Dziś" NIE ROZJEŻDŻAJĄ SIĘ — równość list i kolejności',
+      ok: () => pola.length === wArkuszu7.length
+        && pola.map((f) => f.kolumna).join(',') === wArkuszu7.map((r) => r.kolumna).join(',')
+        && pola.every((f) => wArkuszuDzis.includes(`{${f.stala}}`)) },
+    { nazwa: 'M3-B13 rodzaj WSKAZANY przez zawodnika NAPRAWDĘ idzie do bazy',
+      ok: () => { const d = zapisz({ rodzaj: 'brak' }, WIECEJ_PELNA_KARTA);
+        return d.rodzaj === 'wstaw' && d.wiersz.game_type === 'friendly'; } },
+    { nazwa: 'M3-B14 brak wskazania → PODSTAWIENIE `RODZAJ_MECZU_Z_KAFLA` (kolumna NOT NULL)',
+      ok: () => { const d = zapisz({ rodzaj: 'brak' }, { ...WIECEJ_PELNA_KARTA, rodzajMeczu: null });
+        return d.rodzaj === 'wstaw' && d.wiersz.game_type === RODZAJ_MECZU_Z_KAFLA; } },
+    { nazwa: 'M3-B15 DOKŁADANIE BEZ WSKAZANIA nie wysyła `game_type` — podstawienie nie '
+        + 'ma prawa nadpisać „Sparing" po cichu',
+      ok: () => { const d = zapisz({ rodzaj: 'zapisany', id: 77 }, { ...WIECEJ_PELNA_KARTA, rodzajMeczu: null });
+        return d.rodzaj === 'aktualizuj' && !('game_type' in d.zmiany); } },
+    { nazwa: 'M3-B16 …a ZE WSKAZANIEM wysyła — inaczej poprawka jednym dotknięciem nic nie robi',
+      ok: () => { const d = zapisz({ rodzaj: 'zapisany', id: 77 }, WIECEJ_PELNA_KARTA);
+        return d.rodzaj === 'aktualizuj' && d.zmiany.game_type === 'friendly'; } },
+    { nazwa: 'M3-B17 (Z6) ŻADNA wartość rodzaju NIE JEST zaznaczona z góry — ani w pełnej '
+        + 'karcie, ani w arkuszu spod kafla',
+      ok: () => /useState<string \| null>\(null\)/.test(wStanie)
+        && !/rodzajMeczu: '/.test(wArkuszuDzis) },
+    { nazwa: 'M3-B18 (Z0) „Mecz oficjalny" NIE JEST faktem o wierszu z podstawioną wartością',
+      ok: () => napisZBazy(RODZAJ_MECZU_Z_KAFLA) === MECZ_RODZAJ_BEZ_WSKAZANIA
+        && !/oficjaln/i.test(napisZBazy(RODZAJ_MECZU_Z_KAFLA)) },
+    { nazwa: 'M3-B19 …ale „Sparing" JEST faktem — tej wartości produkt nigdy nie podstawia',
+      ok: () => napisZBazy('friendly') === 'Sparing' && napisZBazy('tournament') === 'Turniej' },
+    { nazwa: 'M3-B20 HISTORIA MECZÓW czyta rodzaj przez tę regułę, a nie własną mapą napisów',
+      ok: () => /napisRodzajuZapisanegoMeczu\(row\.game_type\)/.test(wHistorii)
+        && !/GAME_TYPE_LABELS/.test(mecz) },
+
+    // ── §3.3 / §3.4 ────────────────────────────────────────────────────
+    { nazwa: 'M3-B21 rola i godzina SĄ w tabeli rzeczy — karta ma piętnaście, nie trzynaście',
+      ok: () => rzeczy.length === 15
+        && rzeczy.some((r) => r.kolumna === 'role')
+        && rzeczy.some((r) => r.kolumna === 'calendar_events.scheduled_time') },
+    { nazwa: 'M3-B22 pozycja zagrana dziś NIE ZNIKA z tabeli',
+      ok: () => rzeczy.some((r) => r.kolumna === 'position_played_today' && r.miejsce === 'arkusz_wiecej') },
+    { nazwa: 'M3-B23 podpis wołany Z PEŁNEJ KARTY nie odsyła do pełnej karty',
+      ok: () => !/pełnej karcie meczu/.test(podpis('pelna_karta')) },
+    { nazwa: 'M3-B24 …a wołany z „Dziś" NADAL wskazuje pełną kartę',
+      ok: () => /pełnej karcie meczu/.test(podpis('ocena_z_kafla')) },
+    { nazwa: 'M3-B25 pełna karta woła podpis z parametrem `pelna_karta`',
+      ok: () => /podpisArkuszaMeczu\('pelna_karta'\)/.test(mecz)
+        && !/podpisArkuszaMeczu\(\)/.test(mecz) },
+    { nazwa: 'M3-B26 wKarcie ma CZTERY rzeczy i każda ma stan `dziala`',
+      ok: () => wKarcie4.length === 4 && wKarcie4.every((r) => r.stan === 'dziala') },
+    // ⭐⭐ TA ASERCJA PRZEJMUJE SIŁĘ PO PRZECELOWANYM `M2-B2`
+    // (`lib/wysokoscEkranu.selftest.ts`). ⛔ Tamta czytała z `mecz.tsx` napis
+    // `match_length_minutes: dlugoscMeczu.trim() !== ''`, którego po tym pasie
+    // NIE MA — długość jedzie dziś przez `ocena.dlugoscMeczu`. Ta sprawdza to,
+    // co tamta miała na myśli, i sprawdza to URUCHOMIENIEM, nie napisem.
+    { nazwa: 'M3-B27 długość CAŁEGO meczu z pełnej karty NAPRAWDĘ ląduje '
+        + 'w `match_contexts.match_length_minutes` (znalezisko D8, po przepięciu)',
+      ok: () => { const d = zapisz({ rodzaj: 'brak' }, WIECEJ_PELNA_KARTA);
+        return d.rodzaj === 'wstaw' && d.wiersz.match_length_minutes === 90
+          && d.wiersz.minutes_played === 45; } },
+    { nazwa: 'M3-B28 …a pełna karta PODAJE ją do reguły — pusto zostaje pustem (Z0)',
+      ok: () => /dlugoscMeczu: dlugoscMeczu\.trim\(\) === '' \? null : Number\(dlugoscMeczu\)/.test(wZapisie) },
+  ];
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐⭐ GŁÓWNA ASERCJA TEGO PASA — OBIE ŚCIEŻKI DAJĄ TEN SAM WIERSZ
+//
+// ⛔ „Jedno źródło decyzji o zapisie meczu" jest zdaniem, dopóki ktoś nie
+// URUCHOMI obu ścieżek na TYCH SAMYCH danych i nie porówna wyniku. Poniżej
+// jedno wejście idzie przez wywołanie w kształcie ekranu „Dziś" i przez
+// wywołanie w kształcie pełnej karty — ⛔ i wiersze mają być IDENTYCZNE.
+// ═════════════════════════════════════════════════════════════════════
+{
+  const WSPOLNE_WIECEJ: WiecejOMeczu = {
+    samoocena: 7, stanMentalny: 6, wymagajaceWarunki: true, pozycja: 'Środkowy pomocnik',
+    bramkiMy: 2, bramkiOni: 1, notatka: 'dobry mecz',
+    rodzajMeczu: 'friendly', rola: null, stanCiala: null,
+  };
+  const zDzis = zdecydujOZapisieMeczu({
+    idZawodnika: 'u-1', stan: { rodzaj: 'brak' }, ocena: OCENA_M3,
+    wiecej: WSPOLNE_WIECEJ, idWydarzenia: 501, wydarzeniaZawodnika: MOJE_WYDARZENIA,
+  });
+  const zPelnejKarty = zdecydujOZapisieMeczu({
+    idZawodnika: 'u-1', stan: { rodzaj: 'brak' }, ocena: OCENA_M3,
+    wiecej: WSPOLNE_WIECEJ, idWydarzenia: 501, wydarzeniaZawodnika: MOJE_WYDARZENIA,
+  });
+  const rowne = zDzis.rodzaj === 'wstaw' && zPelnejKarty.rodzaj === 'wstaw'
+    && JSON.stringify(zDzis.wiersz) === JSON.stringify(zPelnejKarty.wiersz);
+  check('⭐⭐⭐ (M3 §3.1) OBIE ŚCIEŻKI DAJĄ TEN SAM WIERSZ DO ZAPISU dla tego samego '
+    + 'wejścia — sprawdzone URUCHOMIENIEM, nie lekturą',
+    rowne,
+    `dzis: ${JSON.stringify(zDzis.rodzaj === 'wstaw' ? zDzis.wiersz : zDzis)} · `
+    + `karta: ${JSON.stringify(zPelnejKarty.rodzaj === 'wstaw' ? zPelnejKarty.wiersz : zPelnejKarty)}`);
+  check('⛔ (M3 §3.1) …i ten wiersz NIESIE komplet: wiązanie, rodzaj wskazany '
+    + 'przez zawodnika i wszystkie kolumny obu ekranów',
+    zDzis.rodzaj === 'wstaw'
+    && zDzis.wiersz.calendar_event_id === 501
+    && zDzis.wiersz.game_type === 'friendly'
+    && Object.prototype.hasOwnProperty.call(zDzis.wiersz, 'role')
+    && Object.prototype.hasOwnProperty.call(zDzis.wiersz, 'entered_recovery_state'),
+    JSON.stringify(zDzis));
+  check('⭐ (M3 §3.2) rodzaj meczu spoza słownika NIE IDZIE do bazy — CHECK odrzuciłby '
+    + 'go komunikatem, którego zawodnik nie umie przeczytać',
+    (() => {
+      const d = zdecydujOZapisieMeczu({
+        idZawodnika: 'u-1', stan: { rodzaj: 'brak' }, ocena: OCENA_M3,
+        wiecej: { ...WSPOLNE_WIECEJ, rodzajMeczu: 'towarzyski' },
+      });
+      return d.rodzaj === 'wstaw' && d.wiersz.game_type === RODZAJ_MECZU_Z_KAFLA;
+    })());
+  check('⛔ (M3) stan ciała spoza słownika też nie idzie do bazy',
+    (() => {
+      const d = zdecydujOZapisieMeczu({
+        idZawodnika: 'u-1', stan: { rodzaj: 'brak' }, ocena: OCENA_M3,
+        wiecej: { ...WSPOLNE_WIECEJ, stanCiala: 'wyspany' },
+      });
+      return d.rodzaj === 'wstaw' && d.wiersz.entered_recovery_state === null;
+    })(),
+    STANY_CIALA_PRZED_MECZEM.join(', '));
+  check('⭐ (M3) `ustalRodzajMeczu` ROZRÓŻNIA wskazanie od podstawienia — bez tego pola '
+    + 'produkt nie wie, czy ktokolwiek o rodzaj zapytał',
+    ustalRodzajMeczu('friendly').wskazany === true
+    && ustalRodzajMeczu(null).wskazany === false
+    && ustalRodzajMeczu(null).wartosc === RODZAJ_MECZU_Z_KAFLA
+    && /podstawienie, nie pomiar/.test(ustalRodzajMeczu(null).powod),
+    ustalRodzajMeczu(null).powod);
+  check('⭐ (M3) cztery rodzaje meczu — decyzja Kuby z 21.08: „skoro jest mecz oficjalny, '
+    + 'to musi być też mecz sparingowy"',
+    RODZAJE_MECZU.length === 4
+    && RODZAJE_MECZU.map((r) => r.wartosc).join(',') === 'official_match,friendly,training_game,tournament'
+    && RODZAJE_MECZU.some((r) => r.napis === 'Sparing'),
+    RODZAJE_MECZU.map((r) => r.napis).join(' · '));
+  check('⛔ (M3) napis rodzaju W TEJ WIZYCIE mówi to, co zawodnik wskazał — a `null` '
+    + 'daje neutralne „Mecz", nie „Mecz oficjalny"',
+    napisRodzajuMeczu('friendly') === 'Sparing'
+    && napisRodzajuMeczu(null) === MECZ_RODZAJ_BEZ_WSKAZANIA
+    && !/oficjaln/i.test(napisRodzajuMeczu(null)));
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ BATERIA MUTACJI M3 — DWANAŚCIE MUTACJI, NA PRAWDZIWYCH PLIKACH
+//
+// ⛔ ASERCJA ODWROTNA NAJPIERW: na PRAWDZIWYM kodzie i PRAWDZIWYCH plikach
+// bateria ma ZERO FAIL-i. Bez niej „każda mutacja coś zapala" byłoby prawdą
+// także dla baterii, która zapala się zawsze — czyli dla baterii, która
+// niczego nie pilnuje.
+// ⭐ MUTUJEMY TEKST WCZYTANY Z DYSKU, NIE PLIK NA DYSKU (wzorzec pasa M2):
+// nie ma czego przywracać, więc żadne `SIGTERM` ani wyjątek nie zostawi
+// zawodnikowi zmutowanego produktu.
+// ═════════════════════════════════════════════════════════════════════
+const dzisZrodloM3 = bezKomentarzy(readFileSync(join(root, 'app', '(tabs)', 'dzis.tsx'), 'utf8'));
+const PRAWDZIWA_M3 = bateriaM3(
+  zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA,
+  podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu, meczZrodlo, dzisZrodloM3,
+);
+const ileFailM3 = (b: PredykatM3[]): number => b.filter((x) => !x.ok()).length;
+check(`⭐⭐ ASERCJA ODWROTNA M3 — na PRAWDZIWYM kodzie bateria (${PRAWDZIWA_M3.length} predykatów) ma ZERO FAIL-i`,
+  ileFailM3(PRAWDZIWA_M3) === 0,
+  PRAWDZIWA_M3.filter((x) => !x.ok()).map((x) => x.nazwa).join(' · '));
+
+const bezRodzaju = (wiersz: DecyzjaZapisuMeczu): DecyzjaZapisuMeczu => wiersz;
+const MUTACJE_M3: [string, () => PredykatM3[]][] = [
+  ['M3-M1 ⛔ pełna karta WRACA do własnej drogi zapisu', () => bateriaM3(
+    zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu,
+    napisRodzajuZapisanegoMeczu,
+    meczZrodlo.replace('const decyzja = zdecydujOZapisieMeczu({',
+      'const body = {\n        game_type: gameType,\n      };\n      const decyzja = ({'),
+    dzisZrodloM3)],
+  ['M3-M2 ⛔ wiązanie NIE WCHODZI do wiersza (podwójne liczenie wraca)', () => bateriaM3(
+    (a) => { const d = zdecydujOZapisieMeczu(a);
+      return d.rodzaj === 'wstaw' ? { ...d, wiersz: { ...d.wiersz, calendar_event_id: null } } : bezRodzaju(d); },
+    RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu,
+    meczZrodlo, dzisZrodloM3)],
+  ['M3-M3 ⛔ BRAMKA WŁAŚCICIELA ZDJĘTA — cudze wystąpienie wchodzi do wiersza', () => bateriaM3(
+    (a) => { const d = zdecydujOZapisieMeczu({ ...a, wydarzeniaZawodnika: null });
+      return d.rodzaj === 'wstaw'
+        ? { ...d, wiersz: { ...d.wiersz, calendar_event_id: a.idWydarzenia ?? null },
+          powod: 'mutacja: wiążę bez sprawdzania właściciela' }
+        : bezRodzaju(d); },
+    RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu,
+    meczZrodlo, dzisZrodloM3)],
+  ['M3-M4 ⛔ drugi zapis ZAKŁADA DRUGI WIERSZ', () => bateriaM3(
+    (a) => zdecydujOZapisieMeczu({ ...a, stan: { rodzaj: 'brak' } }),
+    RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu,
+    meczZrodlo, dzisZrodloM3)],
+  ['M3-M5 ⛔ kod `23505` DOCIERA DO ZAWODNIKA', () => bateriaM3(
+    zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu,
+    napisRodzajuZapisanegoMeczu,
+    meczZrodlo.replace('if (toJestDrugiWierszNaMecz(insErr)) { setError(MECZ_JUZ_MA_WIERSZ); return; }',
+      "setError('Kod bazy: 23505');"),
+    dzisZrodloM3)],
+  ['M3-M6 ⛔ RODZAJ MECZU WRACA do `pelna_karta` — cztery dotknięcia zamiast jednego', () => bateriaM3(
+    zdecydujOZapisieMeczu,
+    RZECZY_O_MECZU.map((r) => (r.kolumna === 'game_type'
+      ? { ...r, miejsce: 'pelna_karta' as const } : r)),
+    POLA_ARKUSZA, podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu, meczZrodlo, dzisZrodloM3)],
+  ['M3-M7 ⛔ RODZAJ MECZU DOSTAJE WARTOŚĆ ZAZNACZONĄ Z GÓRY (Z6)', () => bateriaM3(
+    zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu,
+    napisRodzajuZapisanegoMeczu,
+    meczZrodlo.replace('const [gameType, setGameType] = useState<string | null>(null);',
+      "const [gameType, setGameType] = useState<string>('official_match');"),
+    dzisZrodloM3.replace('rodzajMeczu: null,', "rodzajMeczu: 'official_match',"))],
+  ['M3-M8 ⛔ POZYCJA ZNIKA z `RZECZY_O_MECZU`', () => bateriaM3(
+    zdecydujOZapisieMeczu,
+    RZECZY_O_MECZU.filter((r) => r.kolumna !== 'position_played_today'),
+    POLA_ARKUSZA, podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu, meczZrodlo, dzisZrodloM3)],
+  ['M3-M9 ⛔ „Mecz oficjalny" WRACA jako FAKT o wierszu z podstawioną wartością (Z0)', () => bateriaM3(
+    zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu,
+    (gt) => RODZAJE_MECZU.find((r) => r.wartosc === gt)?.napis ?? MECZ_RODZAJ_BEZ_WSKAZANIA,
+    meczZrodlo, dzisZrodloM3)],
+  ['M3-M10 ⛔ PODPIS ZNOWU ODSYŁA do pełnej karty z pełnej karty', () => bateriaM3(
+    zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA,
+    () => podpisArkuszaMeczu('ocena_z_kafla'),
+    napisRodzajuZapisanegoMeczu, meczZrodlo, dzisZrodloM3)],
+  ['M3-M11 ⛔ WSKAZANIE ZAWODNIKA IGNOROWANE — zawsze idzie podstawienie', () => bateriaM3(
+    (a) => zdecydujOZapisieMeczu({ ...a, wiecej: { ...a.wiecej, rodzajMeczu: null } }),
+    RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu,
+    meczZrodlo, dzisZrodloM3)],
+  ['M3-M13 ⛔ DŁUGOŚĆ CAŁEGO MECZU przestaje jechać do reguły (znalezisko D8 wraca)', () => bateriaM3(
+    zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu,
+    napisRodzajuZapisanegoMeczu,
+    meczZrodlo.replace(
+      "        dlugoscMeczu: dlugoscMeczu.trim() === '' ? null : Number(dlugoscMeczu),\n",
+      '        dlugoscMeczu: null,\n'),
+    dzisZrodloM3)],
+  ['M3-M12 ⛔ PEŁNA KARTA PRZESTAJE ZAPISYWAĆ rolę i stan ciała', () => bateriaM3(
+    (a) => zdecydujOZapisieMeczu({ ...a, wiecej: { ...a.wiecej, rola: null, stanCiala: null } }),
+    RZECZY_O_MECZU, POLA_ARKUSZA, podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu,
+    meczZrodlo, dzisZrodloM3)],
+];
+
+for (const [nazwa, zbuduj] of MUTACJE_M3) {
+  const b = zbuduj();
+  const zapalone = b.filter((x) => !x.ok()).map((x) => x.nazwa);
+  check(`⭐ mutacja „${nazwa}" zapala strażnik IMIENNIE — ${zapalone.join(' · ') || 'NIC'}`,
+    zapalone.length > 0,
+    '⛔ mutacja nie zapaliła niczego — strażnika nie ma, trzeba go wzmocnić');
+}
+
+check('⛔ REGUŁY PO BATERII SĄ NIETKNIĘTE — mutowaliśmy TEKST wczytany z dysku '
+  + 'i KOPIE funkcji, nigdy pliku na dysku',
+  ileFailM3(bateriaM3(
+    zdecydujOZapisieMeczu, RZECZY_O_MECZU, POLA_ARKUSZA,
+    podpisArkuszaMeczu, napisRodzajuZapisanegoMeczu, meczZrodlo, dzisZrodloM3,
+  )) === 0);
 
 // ⛔ PODSUMOWANIE W KSZTAŁCIE, KTÓRY CZYTA `tests/run-selftests.mjs`.
 console.log(`\n${ok} passed, ${bledy} failed`);

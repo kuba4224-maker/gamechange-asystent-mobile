@@ -147,10 +147,52 @@ check('⭐⛔ (A5) ekran bierze DZIEŃ Z REGUŁY (`kiedy`), a nie z własnej ary
   && !/setDate\(/.test(ekran) && !/new Date\(r, m - 1, d\)/.test(ekran),
   'ekran liczy datę sam');
 
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ PRZEPISANA 21.08.2026 (PAS K1) — Z POWODEM, NIE Z WYGODY.
+//
+// ⛔ CO TA ASERCJA ROBIŁA DO 21.08: wymagała trzech linii CO DO ZNAKU —
+//     if (!brama.wolno) return;
+//     setArkusz(null);
+//     router.push('/kalendarz');
+// czyli przybijała do miejsca DOKŁADNIE TĘ LINIĘ, którą polecenie pasa K1
+// nazywa defektem (§2): `router.push('/kalendarz')` bez ani jednego parametru
+// zostawiało zawodnika na zakładce „Tydzień", na której NIE MA formularza.
+// Właściciel produktu nie umiał przez to dodać meczu we własnej aplikacji.
+//
+// ⛔ ASERCJA, KTÓRA PRZYBIJA DEFEKT, PILNUJE DEFEKTU — nie obietnicy. Intencja
+// była i zostaje jedna: **push stoi W CIELE `przejdzDoDodania` i PO bramce**.
+// Sprawdzamy dziś dokładnie to, tyle że po KOLEJNOŚCI W WYCINKU, a nie po
+// literalnym kształcie trzech linii. ⭐ I dokładamy drugą połowę, której
+// dotąd nie było: trasa ma NIEŚĆ dzień i zakładkę z formularzem.
+// ═════════════════════════════════════════════════════════════════════
+const cialoPrzejscia = (() => {
+  const i = ekran.indexOf('function przejdzDoDodania');
+  if (i === -1) return '';
+  const otw = ekran.indexOf('{', i);
+  if (otw === -1) return '';
+  let g = 0;
+  for (let j = otw; j < ekran.length; j++) {
+    if (ekran[j] === '{') g += 1;
+    else if (ekran[j] === '}') { g -= 1; if (g === 0) return ekran.slice(otw, j + 1); }
+  }
+  return '';
+})();
+
+check('⛔ STRAŻNIK STRAŻNIKA — wycinek `przejdzDoDodania` ISTNIEJE i nie jest pusty',
+  cialoPrzejscia.length > 80, `${cialoPrzejscia.length} B`);
+
 check('⛔ (A5) ścieżka do kalendarza prowadzi PRZEZ bramkę — `router.push` stoi '
-  + 'w `przejdzDoDodania`, nie obok niej',
-  /if \(!brama\.wolno\) return;\s*\n\s*setArkusz\(null\);\s*\n\s*router\.push\('\/kalendarz'\);/.test(ekran),
+  + 'w `przejdzDoDodania`, PO odmowie bramki, a nie obok niej',
+  cialoPrzejscia !== ''
+  && cialoPrzejscia.includes('if (!brama.wolno) return;')
+  && cialoPrzejscia.includes('router.push(')
+  && cialoPrzejscia.indexOf('if (!brama.wolno) return;') < cialoPrzejscia.indexOf('router.push('),
   'obejście bramki');
+
+check('⭐ (K1, 21.08.2026) …i trasa NIESIE dzień z reguły oraz zakładkę z formularzem — '
+  + 'push bez parametrów lądował na zakładce, na której nie ma formularza',
+  /dataStartowa\(\{/.test(cialoPrzejscia) && /trasaDodania\(\{/.test(cialoPrzejscia),
+  'trasa nie niesie ani dnia, ani zakładki');
 
 // ⛔ PODSUMOWANIE W KSZTAŁCIE, KTÓRY CZYTA `tests/run-selftests.mjs`.
 // Bez tej linii runner nie odróżnia strażnika, który wszystko sprawdził,

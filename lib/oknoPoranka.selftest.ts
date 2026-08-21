@@ -36,6 +36,12 @@ import {
   stanOknaPoranka,
   czyOknoPorankaOtwarte,
   powodOdmowyZapisuPoranka,
+  // ⭐⭐ PAS D3 21.08.2026 — cztery stany ankiety (§4 polecenia).
+  stanAnkietyPorannej,
+  ANKIETA_PORANNA_WYPELNIONA_ZDANIE,
+  ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE,
+  type OdczytDzisiejszegoWpisu,
+  type StanAnkietyPorannej,
 } from './oknoPoranka';
 
 let passed = 0;
@@ -335,6 +341,239 @@ console.log('\n7. ⭐⭐ BATERIA MUTACJI — NA PRAWDZIWYCH PLIKACH');
 
   check('⭐ …a prawdziwe pliki są po baterii NIETKNIĘTE',
     regulyLamane(PRAWDA).length === 0 && kodDziennika === bezKomentarzy(zrodloDziennika),
+    'bateria zostawiła po sobie zmieniony stan');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n8. ⭐⭐ (D3-1) CZTERY STANY ANKIETY, NIE DWA — ZNALEZISKO T2 §7.4');
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ CO BYŁO ZEPSUTE DO 21.08.2026 — słowami samego pasa T2 (nota, §7.4):
+//     „Historia wpisów pokaże wpis, ale kafel będzie zaszarzony tak samo
+//      jak u kogoś, kto nie wypełnił."
+// Zawodnik, który wypełnił ankietę o 7:00, czytał po 12:00 dokładnie to samo
+// zdanie o przepadnięciu, co zawodnik, któremu przepadła. ⛔ To jest to jedno
+// rozróżnienie, którego wymaga R5 — i ono nie istniało.
+{
+  const oGodz = (h: number) => new Date(2026, 7, 21, h, 0, 0, 0);
+  const ODCZYTY: OdczytDzisiejszegoWpisu[] = ['jest', 'niema', 'nieznany'];
+
+  check('⭐ przy OTWARTYM oknie stan to „okno_otwarte" — niezależnie od odczytu',
+    ODCZYTY.every((o) => stanAnkietyPorannej(oGodz(9), o) === 'okno_otwarte'),
+    ODCZYTY.map((o) => `${o}:${stanAnkietyPorannej(oGodz(9), o)}`).join(' '));
+
+  check('⭐⭐ (R5) po 12:00 WYPEŁNIONA ankieta ma WŁASNY stan, nie ten sam co przepadnięta',
+    stanAnkietyPorannej(oGodz(15), 'jest') === 'zamkniete_wpis_jest'
+    && stanAnkietyPorannej(oGodz(15), 'jest') !== stanAnkietyPorannej(oGodz(15), 'niema'),
+    `${stanAnkietyPorannej(oGodz(15), 'jest')} / ${stanAnkietyPorannej(oGodz(15), 'niema')}`);
+
+  check('⭐⭐ (R5) NIEUDANY ODCZYT ma CZWARTY stan — ⛔ nie udaje „nie wypełniona"',
+    stanAnkietyPorannej(oGodz(15), 'nieznany') === 'zamkniete_nie_wiemy'
+    && stanAnkietyPorannej(oGodz(15), 'nieznany') !== stanAnkietyPorannej(oGodz(15), 'niema'),
+    `${stanAnkietyPorannej(oGodz(15), 'nieznany')} / ${stanAnkietyPorannej(oGodz(15), 'niema')}`);
+
+  // ⛔ ZAPADKA NA RÓWNOŚĆ: cztery wejścia, CZTERY RÓŻNE wyniki. Gdyby
+  // którekolwiek dwa się zlały, ten zbiór miałby trzy elementy, a nie cztery.
+  const wszystkie = new Set<StanAnkietyPorannej>([
+    stanAnkietyPorannej(oGodz(9), 'niema'),
+    stanAnkietyPorannej(oGodz(15), 'jest'),
+    stanAnkietyPorannej(oGodz(15), 'niema'),
+    stanAnkietyPorannej(oGodz(15), 'nieznany'),
+  ]);
+  check('⭐⭐ (D3) CZTERY stany są CZTEREMA różnymi wartościami — ani jeden nie zlany z innym',
+    wszystkie.size === 4, `[${[...wszystkie].join(', ')}]`);
+
+  check('⭐ granica okna działa tak samo dla stanu ankiety: 11:59 otwarte, 12:00 już nie',
+    stanAnkietyPorannej(new Date(2026, 7, 21, 11, 59), 'niema') === 'okno_otwarte'
+    && stanAnkietyPorannej(new Date(2026, 7, 21, 12, 0), 'niema') === 'zamkniete_wpisu_nie_ma',
+    'granica stanu ankiety rozjechała się z granicą okna');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n9. ⭐⭐ (D3-2) TRZY BRZMIENIA — MÓWIĄ, CO JEST, I NICZEGO NIE LICZĄ');
+// ═════════════════════════════════════════════════════════════════════
+{
+  const TRZY = [
+    OKNO_PORANKA_ZAMKNIETE_ZDANIE,
+    ANKIETA_PORANNA_WYPELNIONA_ZDANIE,
+    ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE,
+  ];
+
+  check('⭐⭐ trzy zdania trzech stanów są TRZEMA RÓŻNYMI zdaniami',
+    new Set(TRZY).size === 3, TRZY.join(' | '));
+
+  check('⭐ zdanie potwierdzenia mówi, ŻE WPIS JEST',
+    /wpis/i.test(ANKIETA_PORANNA_WYPELNIONA_ZDANIE)
+    && /zapisan/i.test(ANKIETA_PORANNA_WYPELNIONA_ZDANIE),
+    ANKIETA_PORANNA_WYPELNIONA_ZDANIE);
+
+  // ⛔ N1 — NAGRADZAMY WYKONANĄ PRACĘ, NIGDY OBECNOŚĆ. Wypełnienie ankiety
+  // NIE JEST pracą rozwojową (makieta v3: `ROZWOJ_ZERO` obejmuje ankietę
+  // poranną wprost), więc pochwała za nie byłaby nagrodą za obecność.
+  check('⛔⛔ (N1) ŻADNE z trzech zdań NIE CHWALI zawodnika',
+    !TRZY.some((z) => /świetnie|brawo|dobra robota|super|gratul|tak trzymaj|systematyczn|mistrz|jesteś dobry/i.test(z)),
+    TRZY.join(' | '));
+
+  check('⛔⛔ (N1) ŻADNE z trzech zdań NIE ZAWIERA ani jednej cyfry',
+    !TRZY.some((z) => /[0-9]/.test(z)), TRZY.join(' | '));
+
+  check('⛔ (R5) zdanie czwartego stanu NIE TWIERDZI, że zawodnik nie wypełnił',
+    !/nie wypełni|przepad|nie zdążył|za późno/i.test(ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE),
+    ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE);
+
+  check('⭐ zdanie czwartego stanu MÓWI, że to odczyt nie wyszedł, a nie zawodnik',
+    /nie udało się sprawdzić/i.test(ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE),
+    ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE);
+
+  check('⛔ (W3) żadne z trzech zdań nie obiecuje powiadomienia ani przypomnienia',
+    !TRZY.some((z) => /przypomn|powiadom|pchni/i.test(z)), TRZY.join(' | '));
+
+  // ⛔ Funkcja stanu NIE MA jak policzyć serii, bo nie dostaje historii.
+  check('⛔ (N1) `stanAnkietyPorannej` przyjmuje WYŁĄCZNIE zegar i jeden odczyt',
+    /export function stanAnkietyPorannej\(\s*teraz: Date, odczyt: OdczytDzisiejszegoWpisu,?\s*\)/
+      .test(zrodloModulu),
+    'funkcja stanu dostała wejście, z którego da się policzyć serię');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n10. ⭐⭐ (D3-3) EKRAN NAPRAWDĘ CZYTA DZISIEJSZY WPIS');
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ Do 21.08.2026 ten ekran NIGDY nie czytał dzisiejszego wiersza: formularz
+// czyścił się po zapisie i nie wczytywał niczego. Bez tego odczytu czwarty
+// stan nie ma skąd wziąć wartości, a drugi nie ma jak powstać.
+{
+  check('⭐⭐ ekran ma odczyt dzisiejszego wpisu porannego i pyta o `entry_type = morning`',
+    /const loadDzisiejszyPoranek = useCallback/.test(kodDziennika)
+    && /loadDzisiejszyPoranek[\s\S]{0,900}?\.eq\('entry_type', 'morning'\)/.test(kodDziennika),
+    'ekran nadal nie wie, czy dzisiejszy wpis jest');
+
+  check('⭐ odczyt jest wołany przy wejściu na ekran I przy pociągnięciu w dół',
+    /useFocusEffect\([\s\S]{0,200}?loadDzisiejszyPoranek\(\)/.test(kodDziennika)
+    && /Promise\.all\(\[[^\]]*loadDzisiejszyPoranek\(\)/.test(kodDziennika),
+    'odczyt jest w kodzie, ale nikt go nie woła — albo woła raz i nigdy więcej');
+
+  check('⭐⭐ (R5) NIEUDANY odczyt zostawia „nieznany", a NIE „niema"',
+    /if \(err\) \{[\s\S]{0,300}?setDzisiejszyPoranek\('nieznany'\)/.test(kodDziennika)
+    && !/if \(err\) \{[\s\S]{0,300}?setDzisiejszyPoranek\('niema'\)/.test(kodDziennika),
+    'błąd odczytu udaje „nie wypełniona" — czyli produkt kłamie zawodnikowi o jego pracy');
+
+  check('⛔ nieudany odczyt NIE JEST ciszą — zostawia ślad w konsoli z powodem',
+    /loadDzisiejszyPoranek[\s\S]{0,900}?console\.warn\(opisBleduOdczytuDoLogu\(/.test(kodDziennika),
+    'odczyt pada po cichu');
+
+  check('⭐ stan ankiety liczony jest PRZY RENDERZE, a nie trzymany w `useState`',
+    /const stanAnkiety = stanAnkietyPorannej\(new Date\(\), dzisiejszyPoranek\)/.test(kodDziennika)
+    && !/useState[^\n]*stanAnkiety/.test(kodDziennika),
+    'stan ankiety zamrożony — ekran otwarty rano pokaże poranek do wieczora');
+
+  check('⭐⭐ ekran rysuje WSZYSTKIE TRZY zdania stanów zamkniętego okna',
+    /OKNO_PORANKA_ZAMKNIETE_ZDANIE/.test(kodDziennika)
+    && /ANKIETA_PORANNA_WYPELNIONA_ZDANIE/.test(kodDziennika)
+    && /ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE/.test(kodDziennika),
+    'któryś ze stanów nie ma czego pokazać — czyli zlewa się z innym');
+
+  check('⭐⭐ (R5) szarość kafla należy WYŁĄCZNIE do stanu „okno zamknięte i wpisu nie ma"',
+    /stanAnkiety === 'zamkniete_wpisu_nie_ma' && styles\.toggleBtnPoOknie/.test(kodDziennika)
+    && !/!oknoPorankaOtwarte && styles\.toggleBtnPoOknie/.test(kodDziennika),
+    'kafel szarzeje także wtedy, gdy zawodnik ankietę WYPEŁNIŁ — czyli tak jak przed tym pasem');
+
+  // ⛔ ZAPORA ZAPISU JEST NIETKNIĘTA. Czwarty stan nie ma prawa jej otworzyć:
+  // „nie wiem, czy wpis jest" to nie to samo, co „wolno pisać wstecz" (Z0).
+  check('⛔ (Z0) zapora zapisu nadal pyta o OKNO, a nie o stan ankiety',
+    /powodOdmowyZapisuPoranka\(new Date\(\)\)/.test(kodDziennika)
+    && !/stanAnkiety[\s\S]{0,80}?powodOdmowyZapisuPoranka/.test(kodDziennika),
+    'zapora zapisu zaczęła zależeć od odczytu — nieudany odczyt otwierałby wtedy zapis wstecz');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n11. ⭐⭐ (D3-4) BATERIA MUTACJI — CZTERY STANY NA PRAWDZIWYCH PLIKACH');
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ NAJPIERW ASERCJA ODWROTNA: na prawdziwych plikach bateria ma dać ZERO
+// zapaleń. Bateria, która zapala się na zdrowym kodzie, mierzy własny błąd.
+{
+  type StanD3 = {
+    kod: string;
+    modul: string;
+    zdanieJest: string;
+    zdanieNieWiemy: string;
+    stan: (h: number, o: OdczytDzisiejszegoWpisu) => StanAnkietyPorannej;
+  };
+
+  const PRAWDA_D3: StanD3 = {
+    kod: kodDziennika,
+    modul: bezKomentarzy(zrodloModulu),
+    zdanieJest: ANKIETA_PORANNA_WYPELNIONA_ZDANIE,
+    zdanieNieWiemy: ANKIETA_PORANNA_STAN_NIEZNANY_ZDANIE,
+    stan: (h, o) => stanAnkietyPorannej(new Date(2026, 7, 21, h, 0, 0, 0), o),
+  };
+
+  /** Siedem reguł zadania §4, sprawdzanych na PODANYM stanie. */
+  const regulyLamaneD3 = (s: StanD3): string[] => {
+    const zle: string[] = [];
+    if (s.stan(15, 'jest') === s.stan(15, 'niema')) {
+      zle.push('⛔⛔ R5 — wypełniona i niewypełniona ankieta zlały się w jeden stan');
+    }
+    if (s.stan(15, 'nieznany') === s.stan(15, 'niema')) {
+      zle.push('⛔⛔ R5 — nieudany odczyt udaje „nie wypełniona"');
+    }
+    if (new Set([s.stan(9, 'niema'), s.stan(15, 'jest'), s.stan(15, 'niema'), s.stan(15, 'nieznany')]).size !== 4) {
+      zle.push('⛔ D3 — czterech stanów jest mniej niż cztery');
+    }
+    if (!/const loadDzisiejszyPoranek = useCallback/.test(s.kod)) {
+      zle.push('⛔ D3 — ekran przestał czytać dzisiejszy wpis, więc nie ma skąd wziąć stanu');
+    }
+    if (!/setDzisiejszyPoranek\('nieznany'\)/.test(s.kod)) {
+      zle.push('⛔ R5 — nieudany odczyt nie zostawia już „nieznany"');
+    }
+    if (!/stanAnkiety === 'zamkniete_wpisu_nie_ma' && styles\.toggleBtnPoOknie/.test(s.kod)) {
+      zle.push('⛔ R5 — szarość kafla przestała należeć wyłącznie do przepadnięcia');
+    }
+    if (/dni z ankietą|dniZAnkieta|dni bez ankiety|dni?BezAnkiety|dni z rzędu|ZRzedu|streak|passa|bezWpisu|seriaWpis/i
+      .test(`${s.kod}${s.modul}`)) {
+      zle.push('⛔⛔ N1 — pojawił się licznik dni z ankietą albo bez niej');
+    }
+    if (/[0-9]/.test(s.zdanieJest) || /[0-9]/.test(s.zdanieNieWiemy)) {
+      zle.push('⛔ N1 — zdanie dla zawodnika podaje liczbę');
+    }
+    if (/świetnie|brawo|dobra robota|super|gratul|tak trzymaj|systematyczn/i.test(s.zdanieJest)) {
+      zle.push('⛔ N1 — potwierdzenie chwali zawodnika za wypełnienie, zamiast mówić, że wpis jest');
+    }
+    return zle;
+  };
+
+  check('⭐⭐ ASERCJA ODWROTNA — na PRAWDZIWYCH plikach bateria D3 ma ZERO zapaleń',
+    regulyLamaneD3(PRAWDA_D3).length === 0, regulyLamaneD3(PRAWDA_D3).join(' · '));
+
+  const MUTACJE_D3: Array<[string, StanD3]> = [
+    ['D3-M1 ⛔⛔ wypełniona i niewypełniona ankieta ZLEWAJĄ SIĘ w jeden stan',
+      { ...PRAWDA_D3, stan: (h, o) => (h < 12 ? 'okno_otwarte' : (o === 'nieznany' ? 'zamkniete_nie_wiemy' : 'zamkniete_wpisu_nie_ma')) }],
+    ['D3-M2 ⛔⛔ nieudany odczyt UDAJE „nie wypełniona"',
+      { ...PRAWDA_D3, stan: (h, o) => (h < 12 ? 'okno_otwarte' : (o === 'jest' ? 'zamkniete_wpis_jest' : 'zamkniete_wpisu_nie_ma')) }],
+    ['D3-M3 ⛔ ekran przestaje czytać dzisiejszy wpis',
+      { ...PRAWDA_D3, kod: PRAWDA_D3.kod.replace(/const loadDzisiejszyPoranek = useCallback/g, 'const __zdjete = useCallback') }],
+    ['D3-M4 ⛔ nieudany odczyt zaczyna ustawiać „niema" zamiast „nieznany"',
+      { ...PRAWDA_D3, kod: PRAWDA_D3.kod.replace(/setDzisiejszyPoranek\('nieznany'\)/g, "setDzisiejszyPoranek('niema')") }],
+    ['D3-M5 ⛔ szarość kafla wraca do samego „okno zamknięte"',
+      { ...PRAWDA_D3, kod: PRAWDA_D3.kod.replace(/stanAnkiety === 'zamkniete_wpisu_nie_ma' && styles\.toggleBtnPoOknie/g, '!oknoPorankaOtwarte && styles.toggleBtnPoOknie') }],
+    ['D3-M6 ⛔⛔ pojawia się licznik dni z ankietą (N1)',
+      { ...PRAWDA_D3, kod: `${PRAWDA_D3.kod}\nconst dniZAnkieta = policzDniZRzedu(historia);` }],
+    ['D3-M7 ⛔ potwierdzenie zaczyna CHWALIĆ zamiast mówić, że wpis jest',
+      { ...PRAWDA_D3, zdanieJest: 'Świetnie — poranny wpis z dzisiaj jest zapisany.' }],
+    ['D3-M8 ⛔ potwierdzenie zaczyna podawać liczbę',
+      { ...PRAWDA_D3, zdanieJest: 'Poranny wpis z dzisiaj jest zapisany. To 3. w tym tygodniu.' }],
+  ];
+
+  const zapaleniaD3 = MUTACJE_D3.map(([opis, stan]) => {
+    const zle = regulyLamaneD3(stan);
+    console.log(`       ${opis}   →   ${zle.length} zapaleń: ${zle.join(' · ') || '⛔⛔ ŻADNEGO'}`);
+    return zle.length;
+  });
+
+  check('⭐⭐ KAŻDA z ośmiu mutacji D3 zapala strażnika',
+    zapaleniaD3.every((n) => n > 0), JSON.stringify(zapaleniaD3));
+
+  check('⭐ …a prawdziwe pliki są po baterii NIETKNIĘTE',
+    regulyLamaneD3(PRAWDA_D3).length === 0
+    && kodDziennika === bezKomentarzy(readFileSync(SCIEZKA_DZIENNIKA, 'utf8')),
     'bateria zostawiła po sobie zmieniony stan');
 }
 
