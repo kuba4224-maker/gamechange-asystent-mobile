@@ -475,9 +475,20 @@ const MUTACJE: Mutacja[] = [
   {
     nazwa: 'S3-M10 ⛔ kafel przestaje mówić, że czeka na ocenę (plakietka na sztywno)',
     coPsuje: '23/13 — znika jedyny znak na ekranie, że ta rzecz czeka na Twoje słowo',
+    // ⚠️ PRZECELOWANIE, NIE OSŁABIENIE — PAS B1, 21.08.2026. JEDNA LINIA.
+    // ⛔ POWÓD: pas B1 naprawił defekt R1 #10 („kafel rzeczy JUŻ OCENIONEJ mówi
+    // «do zrobienia» i prowadzi do Kalendarza"), więc wyrażenie plakietki ma
+    // dziś TRZY stany zamiast dwóch: `ocenione ? PLAKIETKA_OCENIONE : pyt ===
+    // null ? PLAKIETKA_DO_ZROBIENIA : KAFEL_CZEKA_NA_OCENE`. Stara kotwica
+    // („plakietka: pyt === null ? …") przestała pasować, więc mutacja NIC NIE
+    // ZMIENIAŁA i przechodziła jako niema — czyli bateria badała nic.
+    // ⭐ DOWÓD, ŻE TO PRZECELOWANIE: mutacja nadal usuwa `KAFEL_CZEKA_NA_OCENE`
+    // z wycinka kafli dnia, więc nadal zapala asercję „23e — kafel, który CZEKA
+    // NA OCENĘ, mówi to plakietką". Każdy stan, który zapalał starą, zapala nową.
+    // ⛔ Jeżeli się nie zgadzasz — to jest JEDNA LINIA do cofnięcia (kotwica).
     zastosuj: (z) => ({ ...z, dzis: z.dzis.replace(
-      'plakietka: pyt === null ? PLAKIETKA_DO_ZROBIENIA : KAFEL_CZEKA_NA_OCENE,',
-      'plakietka: PLAKIETKA_DO_ZROBIENIA,') }),
+      ': pyt === null ? PLAKIETKA_DO_ZROBIENIA : KAFEL_CZEKA_NA_OCENE,',
+      ': PLAKIETKA_DO_ZROBIENIA,') }),
   },
   {
     nazwa: "S3-M11 ⛔ NAZWA_ROZWOJU → 'TWÓJ DOROBEK' (mutacja M-F1 pasa F2)",

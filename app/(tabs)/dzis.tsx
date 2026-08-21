@@ -594,6 +594,15 @@ import {
   opisOcenyDoLogu,
   zbudujPayloadIZrodla,
   RPE_WARTOSCI,
+  // ⭐⭐ PAS B1 21.08.2026 — BÓL MA WŁASNE PYTANIE. ⛔ `BOL_WARTOSCI` jest
+  // OSOBNĄ stałą od `RPE_WARTOSCI` świadomie: dzięki temu strażnik `B1` umie
+  // odróżnić „liczba z pytania o ból" od „liczba z pytania o ciężkość", czytając
+  // ten plik jako tekst. Wspólna stała skasowałaby tę różnicę.
+  BOL_WARTOSCI,
+  bolNatezeniePoczatkowe,
+  stanZapisuBolu,
+  POLE_BOL_NATEZENIE,
+  BOL_BEZ_NATEZENIA,
   POWODY_NIEOBECNOSCI,
   POWOD_NAPIS,
   KROK_CZAS_I_RPE,
@@ -609,6 +618,7 @@ import {
   type IdKroku,
   type PowodNieobecnosci,
   type FaktyPozycji,
+  type WartoscBolu,
   type WartoscRpe,
   type WartoscZeZrodlem,
 } from '../../lib/ocenaZKafla';
@@ -1345,8 +1355,22 @@ export default function DzisScreen() {
    */
   const [czasWybrany, setCzasWybrany] = useState<number | null>(null);
   const [czasZPlanu, setCzasZPlanu] = useState<boolean>(false);
-  /** ⭐ PLAN-D-O1 — ból: miejsce i natężenie. ⛔ Bez wartości początkowej. */
+  /** ⭐ PLAN-D-O1 — ból: miejsce. ⛔ Bez wartości początkowej. */
   const [bolMiejsce, setBolMiejsce] = useState<string | null>(null);
+  /**
+   * ⭐⭐ PAS B1 21.08.2026 — NATĘŻENIE BÓLU MA WŁASNY STAN I ZACZYNA OD PUSTKI.
+   *
+   * ⛔ CO TU STAŁO DO 21.08.2026: nic. Stanu nie było, a do kolumny
+   * `pain_entries.intensity` wchodziło `rpeWybrane ?? 1` — odpowiedź na pytanie
+   * „jak ciężka była sesja" albo wartość domyślna 1. `lib/wgladyZAlgorytmu.ts`
+   * podawał tę liczbę zawodnikowi w rejestrze `fakt_o_tobie`, czyli JAKO
+   * ZMIERZONY FAKT O JEGO CIELE, i wysyłał ją do raportu dla rodzica.
+   *
+   * ⛔ `null` znaczy „zawodnik nie podał" i ma znaczyć TYLKO to (R5). Nie ma tu
+   * wartości domyślnej — przy bólu liczba podpowiedziana przekrzywia odpowiedź
+   * najmocniej ze wszystkich pól produktu (Z6).
+   */
+  const [bolNatezenie, setBolNatezenie] = useState<WartoscBolu | null>(bolNatezeniePoczatkowe());
   /** ⭐ PLAN-D-O1 — powód nieobecności. ⛔ `null` to „nie wiemy", nie „bez powodu". */
   const [powodWybrany, setPowodWybrany] = useState<PowodNieobecnosci | null>(null);
   // ═════════════════════════════════════════════════════════════════
@@ -2691,6 +2715,35 @@ export default function DzisScreen() {
       wartosci.push({ klucz: 'rpe', liczba: rpeWybrane, zrodlo: 'zawodnik' });
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // ⛔⛔ PAS B1 21.08.2026 — BRAMKA BÓLU STOI PRZED KAŻDYM ZAPISEM.
+    //
+    // ⚠️ TRZY STANY, NIE DWA (R5). Rozstrzyga je CZYSTA FUNKCJA
+    // `stanZapisuBolu` z `lib/ocenaZKafla.ts`, a ten kod ją WYKONUJE — ten sam
+    // podział, co przy powodzie nieobecności i przy bramce „+".
+    //
+    // ⛔ DLACZEGO PRZED, A NIE PO. Zawodnik, który zaznaczył, ŻE go boli, i nie
+    // powiedział JAK MOCNO, jest w stanie „nie wiemy". Kolumna
+    // `pain_entries.intensity` jest dziś `NOT NULL` (odczytane 21.08.2026,
+    // `pain_entries_intensity_check`: 0–10), więc tego stanu NIE DA SIĘ ZAPISAĆ —
+    // propozycja migracji leży w nocie pasa B1 i ⛔ nie została wykonana.
+    // Gdyby ta bramka stała PO wpisie do `daily_logs`, zawodnik po uzupełnieniu
+    // natężenia i drugim dotknięciu przycisku zostawiłby DRUGI wpis potreningowy,
+    // a licznik pracy policzyłby tę sesję dwa razy. Przed zapisem nie ginie nic
+    // i nie powstaje nic zbędnego: werdykt („odbyło się" / „nie odbyło się")
+    // leży w bazie od osobnego, wcześniejszego dotknięcia (decyzja D2).
+    //
+    // ⛔ TO NIE JEST ODMOWA, TYLKO HAMULEC Z DROGĄ WYJŚCIA: zdanie mówi, czego
+    // brakuje, ile to kosztuje (jedno dotknięcie) i że reszta jest zapisana.
+    // To samo zdanie stoi W ARKUSZU, przy pytaniu — zawodnik widzi je ZANIM
+    // naciśnie przycisk, a nie dopiero po.
+    const stanBolu = stanZapisuBolu({ miejsce: bolMiejsce, natezenie: bolNatezenie });
+    if (stanBolu.rodzaj === 'nie_wiemy') {
+      setZapisWerdyktu(null);
+      setBladWerdyktu(stanBolu.zdanie);
+      return;
+    }
+
     const wpis = wierszWpisuPoTreningu({
       idZawodnika: currentUser.id,
       idWydarzenia: p.idWydarzenia,
@@ -2724,12 +2777,30 @@ export default function DzisScreen() {
     // wymaga `daily_log_id` wskazującego wpis tego samego zawodnika — wpis
     // bólu bez tego zostałby odrzucony, a zawodnik zobaczyłby błąd po tym,
     // jak reszta odpowiedzi już się zapisała.
-    const bol = bolMiejsce === null ? null : wierszBolu({
+    //
+    // ⛔⛔ PAS B1 21.08.2026 — NATĘŻENIE BÓLU BIERZE SIĘ Z PYTANIA O BÓL
+    // I Z NICZEGO INNEGO.
+    //
+    // CO TU STAŁO: `natezenie: rpeWybrane ?? 1`. Do kolumny „jak bardzo Cię
+    // boli" wchodziła odpowiedź na pytanie „jak ciężka była sesja", a gdy
+    // zawodnik ciężkości nie wybrał — liczba 1, czyli „prawie nie boli".
+    // ⛔ Zawodnik żadnej z tych liczb nigdy nie podał, a `lib/wgladyZAlgorytmu.ts`
+    // podawał mu ją z powrotem w rejestrze `fakt_o_tobie` — jako ZMIERZONY FAKT
+    // O JEGO CIELE. Ta sama liczba szła do raportu dla rodzica i do historii bólu.
+    // To jest złamanie Z0 („nie podajemy prawdopodobnego jako pewnego")
+    // w miejscu, gdzie nie chodziło nawet o prawdopodobne — tylko o liczbę
+    // z zupełnie innego pytania.
+    //
+    // ⛔ `rpeWybrane` NIE MA PRAWA POJAWIĆ SIĘ W TYM WYWOŁANIU — ani jako
+    // wartość, ani jako wartość domyślna. Pilnuje tego strażnik
+    // `lib/bolCzerwienIKafel.selftest.ts`, który czyta ten plik jako tekst.
+    //
+    const bol = stanBolu.rodzaj !== 'zapisz' ? null : wierszBolu({
       idZawodnika: currentUser.id,
       idWpisu,
-      miejsce: bolMiejsce,
+      miejsce: bolMiejsce ?? '',
       strona: null,
-      natezenie: rpeWybrane ?? 1,
+      natezenie: stanBolu.natezenie,
       wykluczaZTreningu: false,
     });
     if (bol !== null) {
@@ -2764,6 +2835,10 @@ export default function DzisScreen() {
     setCzasZPlanu(false);
     setRpeWybrane(rpePoczatkowe());
     setBolMiejsce(null);
+    // ⛔ PAS B1 — NATĘŻENIE WRACA DO PUSTKI, nie do 1 i nie do ostatniej
+    // wartości. Liczba, która została po poprzedniej rzeczy, byłaby przy
+    // następnej podpowiedzią (Z6) — i to jest ta sama pomyłka, tylko wolniejsza.
+    setBolNatezenie(bolNatezeniePoczatkowe());
     // ⛔ MINUT I DŁUGOŚCI NIE CZYŚCIMY DO ZERA, tylko do „nie zaznaczone" —
     // zero jest ODPOWIEDZIĄ („nie wszedłem na boisko"), a nie stanem pustym (R5).
     setMinutyNaBoisku(null);
@@ -3805,6 +3880,54 @@ export default function DzisScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+                {/* ═══════════════════════════════════════════════════════
+                    ⭐⭐ PAS B1 21.08.2026 — PYTANIE O NATĘŻENIE BÓLU. WPROST.
+
+                    ⛔ CZEGO TU NIE BYŁO DO 21.08.2026: tego pytania. Zawodnik
+                    zaznaczał miejsce, a produkt sam dopisywał natężenie —
+                    z pytania o ciężkość sesji (`rpeWybrane`) albo z wartości
+                    domyślnej 1. Liczba wracała do niego jako `fakt_o_tobie`,
+                    czyli jako pomiar jego ciała, i szła do raportu dla rodzica.
+
+                    ⭐ POKAZUJE SIĘ DOPIERO PO ZAZNACZENIU MIEJSCA i to jest
+                    decyzja o koszcie uwagi: zawodnikowi, którego nic nie boli,
+                    nie zadajemy pytania o to, jak mocno. Koszt na ekranie
+                    przy braku bólu: 0 dp.
+
+                    ⛔ ANI JEDNA WARTOŚĆ NIE JEST ZAZNACZONA Z GÓRY (Z6).
+                    Zaznaczenie bierze się WYŁĄCZNIE z `bolNatezenie`, które
+                    startuje z `bolNatezeniePoczatkowe()`, czyli z pustki.
+                    ⛔ Nie ma tu suwaka i nie będzie: suwak ma uchwyt, uchwyt
+                    gdzieś stoi, a to „gdzieś" jest liczbą podpowiedzianą —
+                    przy bólu najgorszą z możliwych.
+
+                    ⭐ K4 — LICZBA STOI NA PRZYCISKU, więc kto nie rozróżnia
+                    barw, czyta dokładnie to samo: wyróżnienie wybranej wartości
+                    niesie kolor ORAZ ten sam napis, który niesie wartość. */}
+                {bolMiejsce === null ? null : (
+                  <>
+                    <Text style={styles.licznikPodpis}>{POLE_BOL_NATEZENIE}</Text>
+                    {/* ⭐ ZDANIE STOI PRZED PRZYCISKIEM ZAPISU, nie po nieudanym
+                        zapisie. ⛔ Hamulec bez drogi wyjścia jest odmową; ten
+                        mówi, czego brakuje i ile to kosztuje (jedno dotknięcie),
+                        zanim zawodnik cokolwiek naciśnie. */}
+                    {bolNatezenie === null
+                      ? <Text style={styles.licznikPodpis}>{BOL_BEZ_NATEZENIA}</Text>
+                      : null}
+                    <View style={styles.pytanieOdpowiedzi}>
+                      {BOL_WARTOSCI.map((b) => (
+                        <TouchableOpacity
+                          key={b}
+                          disabled={leci}
+                          style={[styles.pytanieBtn, bolNatezenie === b && styles.pytanieBtnWybrany]}
+                          onPress={() => setBolNatezenie(b)}
+                        >
+                          <Text style={[styles.pytanieBtnTxt, bolNatezenie === b && styles.pytanieBtnTxtWybrany]}>{String(b)}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
                 <TouchableOpacity style={styles.pytanieBtn} disabled={leci} onPress={() => zapiszSzczegolyOceny(p)}>
                   <Text style={styles.pytanieBtnTxt}>{ZAPISZ_SZCZEGOL}</Text>
                 </TouchableOpacity>
@@ -4739,7 +4862,18 @@ export default function DzisScreen() {
               (todayEvents === null ? [] : todayEvents).map((e) => {
                 const opisRodzaju = opiszRodzaj(e.event_type);
                 if (!opisRodzaju.znany) console.warn(opisNieznanegoRodzajuDoLogu(opisRodzaju));
-                const pyt = bezOceny.find((q) => q.idWydarzenia === e.id) ?? null;
+                // ⭐⭐ PAS B1 21.08.2026 — KAFEL SZUKA W `pytaniaLista`, NIE
+                // W `bezOceny`. ⛔ CO BYŁO ZEPSUTE (znalezisko R1 #10): `bezOceny`
+                // to `pytaniaLista.filter(stan.rodzaj === 'pytam')`, więc rzecz
+                // JUŻ OCENIONA nie była w tym zbiorze i wypadała do gałęzi
+                // „nie ma o co pytać" — dostawała plakietkę „do zrobienia"
+                // i prowadziła do Kalendarza. ⛔ To jest ta sama klasa defektu,
+                // przez którą Kuba nie umiał dodać meczu: DROGA PROWADZI GDZIE
+                // INDZIEJ NIŻ NAPIS OBIECUJE, a napis w dodatku kłamie o stanie.
+                const pyt = pytaniaLista.find((q) => q.idWydarzenia === e.id) ?? null;
+                // ⛔ TRZY STANY, NIE DWA (R5): „nie ma pytania" ≠ „czeka na ocenę"
+                // ≠ „ocenione". Sklejenie pierwszego z trzecim było całym defektem.
+                const ocenione = pyt !== null && pyt.stan.rodzaj === 'odpowiedziane';
                 // ⭐ D-3 · RODZAJ POZYCJI (Z5). ⛔ Rozstrzyga to `opiszRodzaj`
                 // z `lib/meczWKalendarzu.ts`, a nie własna tabela w tym pliku —
                 // ekran, który sam mapuje rodzaje, jest drugą kopią reguły.
@@ -4753,9 +4887,23 @@ export default function DzisScreen() {
                   rodzaj: rodzajKafla,
                   // ⭐ D-5 · REJESTR (Z1, R5). ⛔ „czeka na ocenę” to NIE JEST
                   // „pusto” — to jest NIE WIEMY, i ma własny kształt ramki.
-                  rejestr: pyt === null ? 'plan' : 'niewiem',
+                  // ⭐ PAS B1 — RZECZ OCENIONA JEST ZMIERZONA, nie „nie wiemy".
+                  rejestr: ocenione ? 'zmierzone' : pyt === null ? 'plan' : 'niewiem',
                   // ⭐ D-4 · PLAKIETKA STANU — trzeci nośnik, tekstowy (K4).
-                  plakietka: pyt === null ? PLAKIETKA_DO_ZROBIENIA : KAFEL_CZEKA_NA_OCENE,
+                  // ⛔ PAS B1 — „ocenione" to STAŁA, KTÓRA JUŻ BYŁA
+                  // (`PLAKIETKA_OCENIONE`, użyta przy wierszu dnia). Zero nowych
+                  // brzmień: rzecz oceniona przestaje mówić „do zrobienia".
+                  plakietka: ocenione ? PLAKIETKA_OCENIONE
+                    : pyt === null ? PLAKIETKA_DO_ZROBIENIA : KAFEL_CZEKA_NA_OCENE,
+                  // ⭐ PAS B1 · Z-5 — DOTKNIĘCIA OD INTENCJI DO SKUTKU.
+                  // „chcę poprawić albo uzupełnić ocenę rzeczy, którą już
+                  // oceniłem": PRZED — z kafla NIE DA SIĘ, kafel prowadził do
+                  // Kalendarza, a wiersz „Bez oceny" pokazuje wyłącznie `pytam`.
+                  // PO — JEDNO dotknięcie: kafel otwiera arkusz TEJ rzeczy,
+                  // z zaznaczonym werdyktem i z krokami czasu, ciężkości i bólu.
+                  // ⚠️ CIAŁO `onPress` ZOSTAJE CO DO ZNAKU — mutacja `S3-M2`
+                  // z `lib/zdobyczeRundy.selftest.ts` kotwiczy się na tych
+                  // czterech liniach. ⛔ Komentarz stoi NAD nimi celowo.
                   onPress: () => {
                     if (pyt !== null) setArkusz({ rodzaj: 'ocena', klucz: pyt.klucz });
                     else router.push('/kalendarz');

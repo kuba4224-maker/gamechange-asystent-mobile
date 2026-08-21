@@ -618,6 +618,77 @@ export function wierszWpisuPoTreningu(args: {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 5b. ⛔⛔ PAS B1 21.08.2026 — BÓL MA WŁASNE PYTANIE, WŁASNE WARTOŚCI
+//      I WŁASNY STAN „NIE WIEMY"
+// ═══════════════════════════════════════════════════════════════════
+//
+// ⛔ CO BYŁO ZEPSUTE. `app/(tabs)/dzis.tsx` budował wiersz `pain_entries`
+// z `natezenie: rpeWybrane ?? 1`. Do kolumny „jak bardzo Cię boli" wchodziła
+// odpowiedź na pytanie „jak ciężka była sesja", a gdy zawodnik RPE nie wybrał —
+// liczba 1, czyli „prawie nie boli". ⛔ NIKT ZAWODNIKA O BÓL NIE PYTAŁ.
+//
+// ⭐ CO STOI W TYM MIEJSCU. Jedno pytanie wprost, w tym samym arkuszu (koszt
+// 0 dp na ekranie), z własnymi wartościami i BEZ WARTOŚCI ZAZNACZONEJ Z GÓRY.
+// Przy bólu podpowiedziana liczba przekrzywia odpowiedź najmocniej ze
+// wszystkich pól produktu — zawodnik ma silny powód, żeby zgodzić się
+// z liczbą, którą widzi, zamiast podać własną.
+//
+// ⚠️ GRANICA PRZEPISANA Z BAZY, Z DATĄ (R4): `pain_entries_intensity_check`,
+// odczytany 21.08.2026 — `intensity >= 0 AND intensity <= 10`.
+// ⛔ TO JEST INNA GRANICA NIŻ `MAKS_RPE`, choć dziś obie wynoszą 10. Wspólna
+// stała znaczyłaby, że zmiana zakresu ciężkości po cichu przestawia zakres
+// bólu — a to jest dokładnie ten rodzaj sklejenia, który stworzył ten defekt.
+export const MAKS_BOLU = 10;
+
+/**
+ * ⭐ DZIESIĘĆ WARTOŚCI NATĘŻENIA BÓLU. ⛔ OSOBNA STAŁA OD `RPE_WARTOSCI` i to
+ * nie jest powielenie: strażnik `B1` czyta `app/(tabs)/dzis.tsx` JAKO TEKST
+ * i pyta, czy pole `natezenie` bierze się z pytania o ból, a nie z pytania
+ * o ciężkość. Gdyby obie listy były tą samą stałą, mutacja przywracająca
+ * `rpeWybrane` nie miałaby jak zapalić żadnej asercji.
+ * ⛔ Zero nie jest tu wartością do wyboru: „boli 0" znaczy „nie boli",
+ * a to zawodnik mówi, NIE zaznaczając miejsca — nie zaznaczając zera.
+ */
+export const BOL_WARTOSCI = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+export type WartoscBolu = (typeof BOL_WARTOSCI)[number];
+
+/**
+ * ⛔ STAN POCZĄTKOWY NATĘŻENIA BÓLU. Zwraca `null` i ma zwracać `null` —
+ * funkcja istnieje po to, żeby dało się to sprawdzić URUCHOMIENIOWO (O88),
+ * dokładnie tak jak `rpePoczatkowe()`.
+ */
+export function bolNatezeniePoczatkowe(zasady: ZasadyOceny = ZASADY_PRAWDZIWE_OCENY): WartoscBolu | null {
+  if (!zasady.rpeBezPodpowiedzi) return 5;
+  return null;
+}
+
+/**
+ * ⭐ TRZY STANY BÓLU, NIE DWA (R5).
+ *
+ * ⛔ `nie_wiemy` NIE JEST „nie boli". Zawodnik powiedział, że coś go boli,
+ * i nie powiedział, jak mocno — a to jest INNA WIEDZA niż brak bólu i inna
+ * niż liczba. ⚠️ Kolumna `pain_entries.intensity` jest dziś `NOT NULL`
+ * (odczytane 21.08.2026), więc tego stanu NIE DA SIĘ DZIŚ ZAPISAĆ: propozycja
+ * migracji leży w nocie pasa B1 i ⛔ nie została wykonana.
+ * Dlatego produkt mówi wprost, czego mu brakuje, zamiast wstawić liczbę.
+ */
+export type StanZapisuBolu =
+  | { rodzaj: 'bez_bolu' }
+  | { rodzaj: 'nie_wiemy'; zdanie: string }
+  | { rodzaj: 'zapisz'; natezenie: number };
+
+export function stanZapisuBolu(args: {
+  miejsce: string | null;
+  natezenie: number | null;
+}): StanZapisuBolu {
+  if (args.miejsce === null || args.miejsce.trim() === '') return { rodzaj: 'bez_bolu' };
+  if (args.natezenie === null || !Number.isFinite(args.natezenie)) {
+    return { rodzaj: 'nie_wiemy', zdanie: BOL_BEZ_NATEZENIA };
+  }
+  return { rodzaj: 'zapisz', natezenie: Math.max(0, Math.min(MAKS_BOLU, Math.round(args.natezenie))) };
+}
+
 /**
  * Wiersz `pain_entries`. ⚠️ Polityka `pain_entries_owner` (odczytana 17.08.2026)
  * wymaga, żeby wpis bólu WISIAŁ NA WPISIE DZIENNIKA albo na karcie meczu —
@@ -638,12 +709,25 @@ export function wierszBolu(args: {
   idWpisu: number;
   miejsce: string;
   strona: string | null;
-  natezenie: number;
+  /**
+   * ⛔⛔ PAS B1 21.08.2026 — `null` ZNACZY „ZAWODNIK NIE PODAŁ" I ODDAJE `null`,
+   * A NIE LICZBĘ. Do 21.08.2026 ekran „Dziś" wstawiał tu `rpeWybrane ?? 1`,
+   * czyli odpowiedź na pytanie „jak ciężka była sesja" ALBO wartość domyślną 1.
+   * Ta liczba szła dalej do `lib/wgladyZAlgorytmu.ts` jako rejestr
+   * `fakt_o_tobie` — czyli jako ZMIERZONY FAKT O CIELE ZAWODNIKA (złamanie Z0
+   * w rejestrze o najwyższej stawce), a stamtąd do raportu dla rodzica
+   * i do historii bólu.
+   * ⛔ Natężenie bólu wchodzi WYŁĄCZNIE z pytania o ból. Nie ma tu wartości
+   * domyślnej i nie będzie: „prawie nie boli" wymyślone przez produkt jest
+   * tak samo nieprawdziwe jak „boli 8" przepisane z ciężkości treningu.
+   */
+  natezenie: number | null;
   wykluczaZTreningu: boolean;
 }): WierszBolu | null {
   if (typeof args.miejsce !== 'string' || args.miejsce.trim() === '') return null;
+  if (args.natezenie === null) return null;
   if (!Number.isFinite(args.natezenie)) return null;
-  const natezenie = Math.max(0, Math.min(MAKS_RPE, Math.round(args.natezenie)));
+  const natezenie = Math.max(0, Math.min(MAKS_BOLU, Math.round(args.natezenie)));
   return {
     user_id: args.idZawodnika,
     daily_log_id: args.idWpisu,
@@ -735,6 +819,31 @@ export const POLE_CZAS = 'Ile trwało';
 export const POLE_RPE = 'Jak ciężko było';
 /** ⚠️ DO PRZEJRZENIA — O1. Nagłówek kroku 3. */
 export const KROK_BOL = 'Coś Cię boli?';
+/**
+ * ⚠️ DO PRZEJRZENIA PRZEZ KUBĘ — ⭐ NOWE BRZMIENIE, PAS B1 21.08.2026.
+ * Podpis pytania o natężenie bólu.
+ *
+ * ⛔ KOTWICE SKALI SĄ W PYTANIU, NIE POD NIM, i to nie jest ozdobnik: bez nich
+ * „7" znaczy co innego u każdego zawodnika, a produkt i tak zapisze tę liczbę
+ * jako fakt o jego ciele. Kotwica jest DEFINICJĄ SKALI, ⛔ nie podpowiedzią
+ * wartości — żadna liczba nie jest zaznaczona (Z6).
+ * ⛔ Zero łagodzenia: pytanie nie brzmi „czy chcesz podać", bo ból jest sygnałem
+ * o najwyższej stawce, a koszt niepowiedzenia jest tu wyższy niż koszt pytania.
+ */
+export const POLE_BOL_NATEZENIE = 'Jak mocno boli — 1 ledwo czuć, 10 nie do wytrzymania';
+/**
+ * ⚠️ DO PRZEJRZENIA PRZEZ KUBĘ — ⭐ NOWE BRZMIENIE, PAS B1 21.08.2026.
+ * Zdanie dla zawodnika, który zaznaczył miejsce bólu i nie podał natężenia.
+ *
+ * ⛔ MÓWI, CZEGO BRAKUJE I CO Z TYM ZROBIĆ — jedno dotknięcie. To jest hamulec
+ * warunkowy z drogą wyjścia, a nie odmowa: reszta odpowiedzi jest już zapisana
+ * i zdanie mówi to wprost, żeby zawodnik nie sądził, że przepadła.
+ * ⛔ Zdanie „nie wstawię tu liczby za Ciebie" ZOSTAJE — to jest cała różnica
+ * między tym produktem a tym, który zmyślał natężenie do 21.08.2026.
+ */
+export const BOL_BEZ_NATEZENIA =
+  'Powiedz jeszcze, jak mocno boli — jedno dotknięcie. Bez tego nie zapiszę tego kroku, '
+  + 'bo nie wstawię tu liczby za Ciebie. To, co powiedziałeś wyżej, jest już zapisane.';
 /** ⚠️ DO PRZEJRZENIA — O1. Nagłówek kroku 4 — ⛔ OFERTA, nie żądanie. */
 export const KROK_POWOD = 'Powód — jeśli chcesz go podać';
 /** ⚠️ DO PRZEJRZENIA — O1. Zdanie, które mówi, że reszta jest dobrowolna. */
