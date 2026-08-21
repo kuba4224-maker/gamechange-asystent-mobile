@@ -228,7 +228,7 @@ console.log('\n(2) ZDANIE NAD TYGODNIEM NIE POWSTAJE BEZ LICZB');
     wydarzenia: [e(10, 'Trening klubowy', 'club_training', '2026-08-11')],
   }));
   check('jedna pozycja WYSTARCZY, żeby zdanie powstało — i jest policzone',
-    jedenTrening.zdanie?.podsumowanie === 'Jeden trening, sześć dni bez nic.',
+    jedenTrening.zdanie?.podsumowanie === 'Jeden trening. Sześć dni bez zaplanowanej pracy.',
     String(jedenTrening.zdanie?.podsumowanie));
 
   check('⛔ część o napięciu jest OSOBNA i bez planu lekcji nie powstaje',
@@ -241,7 +241,7 @@ console.log('\n(2) ZDANIE NAD TYGODNIEM NIE POWSTAJE BEZ LICZB');
     ],
   }));
   check('dwa mecze — zdanie podaje liczbę, a nie zgaduje jednego dnia',
-    dwaMecze.zdanie?.podsumowanie === 'Dwa mecze, pięć dni bez nic.',
+    dwaMecze.zdanie?.podsumowanie === 'Dwa mecze. Pięć dni bez zaplanowanej pracy.',
     String(dwaMecze.zdanie?.podsumowanie));
 }
 
@@ -465,7 +465,7 @@ console.log('\n(6) ⭐ ASERCJA DOMYKAJĄCA — komplet danych MUSI dać treść'
     t.dni.map((d) => d.pozycje.length).join(','));
 
   check('⭐ tydzień MA zdanie podsumowujące, policzone z wierszy (WT-08)',
-    t.zdanie?.podsumowanie === 'Trzy treningi, dwie sesje, mecz w sobotę, dwa dni bez nic.',
+    t.zdanie?.podsumowanie === 'Trzy treningi, dwie sesje, mecz w sobotę. Dwa dni bez zaplanowanej pracy.',
     String(t.zdanie?.podsumowanie));
 
   check('⭐ tydzień MA zdanie o napięciu i mówi, KTÓRY dzień jest najciaśniejszy (WT-09)',
@@ -614,6 +614,96 @@ console.log('\n(7) EKRAN NAPRAWDĘ TO RYSUJE — asercje na źródło (ponad wym
   // grupa 11 — i przemiata CAŁE repozytorium, nie ten jeden ekran (O69).
   // ⛔ Nie dublujemy jej tutaj: dwie zapadki na tę samą rzecz znaczą, że przy
   // zmianie brzmienia ktoś poprawi jedną i zostawi drugą jako czerwoną.
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n(8) ⭐ PAS T2 19.08.2026 — „DNI BEZ ZAPLANOWANEJ PRACY": ODMIANA I ZAPADKA');
+// ═══════════════════════════════════════════════════════════════════════════
+// ⛔ CZEGO TA GRUPA PILNUJE. Brzmienie zmienione 19.08.2026 (pas T2, decyzja
+// Kuby z 18.08, zgłoszenie W1-L3 / defekt T-9) ma DWIE części, które da się
+// zepsuć osobno: słowa („bez nic" → „bez zaplanowanej pracy") i kształt
+// (osobne zdanie z wielkiej litery zamiast członu po przecinku).
+// ⛔ ODMIANA SPRAWDZANA JEST NA WSZYSTKICH FORMACH LICZEBNIKA, nie na jednej —
+// bo `forma(...)` ma trzy gałęzie i asercja na jednej liczbie przepuszcza dwie.
+{
+  /** Tydzień, w którym praca stoi w `ile` różnych dniach → `7 - ile` dni bez niej. */
+  const tydzienZDniamiPracy = (ile: number) => zbudujTydzien(bazowe({
+    wydarzenia: Array.from({ length: ile }, (_, i) =>
+      e(600 + i, 'Trening klubowy', 'club_training', `2026-08-${10 + i}`)),
+  }));
+
+  const zdanieDla = (ile: number) => tydzienZDniamiPracy(ile).zdanie?.podsumowanie ?? '';
+
+  // ── forma liczebnika: 1 → „dzień", 2–4 → „dni", 5+ → „dni" ────────────────
+  // ⚠️ Wszystkie trzy gałęzie `forma(...)` są tu naprawdę odwiedzone: 6 dni bez
+  // pracy trafia w gałąź „wiele", 3 w gałąź „kilka", 1 w gałąź „pojedynczą".
+  const FORMY: Array<[number, string]> = [
+    [6, 'Jeden trening. Sześć dni bez zaplanowanej pracy.'],
+    [5, 'Dwa treningi. Pięć dni bez zaplanowanej pracy.'],
+    [4, 'Trzy treningi. Cztery dni bez zaplanowanej pracy.'],
+    [3, 'Cztery treningi. Trzy dni bez zaplanowanej pracy.'],
+    [2, 'Pięć treningów. Dwa dni bez zaplanowanej pracy.'],
+    [1, 'Sześć treningów. Jeden dzień bez zaplanowanej pracy.'],
+  ];
+  for (const [dniBez, oczekiwane] of FORMY) {
+    const ileDniPracy = 7 - dniBez;
+    check(`⭐ (T2) ${dniBez} dni bez pracy → „${oczekiwane}"`,
+      zdanieDla(ileDniPracy) === oczekiwane, zdanieDla(ileDniPracy));
+  }
+
+  check('⭐⛔ (T2) „jeden dzień" NIE brzmi „jeden dni" — pojedyncza forma żyje',
+    / Jeden dzień bez zaplanowanej pracy\.$/.test(zdanieDla(6)), zdanieDla(6));
+
+  check('⛔ (T2) tydzień BEZ ani jednego pustego dnia nie dokleja tej części',
+    zdanieDla(7) === 'Siedem treningów.', zdanieDla(7));
+
+  check('⛔ (T2) stare brzmienie „bez nic" NIE WRACA na żadnej z siedmiu liczb',
+    [1, 2, 3, 4, 5, 6, 7].every((i) => !/bez nic/.test(zdanieDla(i))),
+    [1, 2, 3, 4, 5, 6, 7].map(zdanieDla).join(' | '));
+
+  check('⭐ (T2) część o dniach bez pracy jest OSOBNYM ZDANIEM, nie członem po przecinku',
+    /\. [A-ZŚĆŁÓŻŹŃĘĄ][a-ząćęłńóśźż]+ dni?e?ń? ?bez zaplanowanej pracy\.$/.test(zdanieDla(4))
+    && !/, \w+ dni bez zaplanowanej pracy\./.test(zdanieDla(4)),
+    zdanieDla(4));
+
+  // ── ⛔ N1: TO NIE JEST LICZNIK SERII ──────────────────────────────────────
+  // ⛔ Reguła N1 zakazuje liczenia OBECNOŚCI. Ta część liczy dni W TYM tygodniu
+  // (fakt o kalendarzu), a nie dni „z rzędu" (sąd o zawodniku). Zapadka pilnuje,
+  // żeby nikt nie dopisał drugiego znaczenia do tej samej liczby.
+  const zrodloWidoku = readFileSync(join(root, 'lib', 'widokTygodnia.ts'), 'utf8');
+  check('⛔⛔ (T2/N1) `lib/widokTygodnia.ts` NIE MÓWI „z rzędu" ani o serii bez pracy',
+    !/z rzędu|seria bez|passa|streak/i.test(zrodloWidoku.replace(/⛔ TA CZĘŚĆ NIE JEST LICZNIKIEM SERII[\s\S]*?nie ma koloru\./, '')),
+    'w źródle pojawiła się mowa o serii — N1 zakazuje nagradzania i karania obecności');
+
+  // ── ⭐ BATERIA MUTACJI ────────────────────────────────────────────────────
+  // ⛔ NAJPIERW ASERCJA ODWROTNA: na PRAWDZIWYM zdaniu bateria ma ZERO zapaleń.
+  // Bez niej bateria mogłaby badać pustkę i wyglądać na skuteczną.
+  const przezZdanie = (z: string) => ({
+    slowa: !/bez nic/.test(z) && /bez zaplanowanej pracy/.test(z),
+    osobneZdanie: /\. [A-ZŚĆŁÓŻŹŃĘĄ]/.test(z),
+    forma: !/\bjeden dni\b|\bsześć dzień\b/i.test(z),
+  });
+  const zapalenia = (z: string) => Object.values(przezZdanie(z)).filter((ok) => !ok).length;
+
+  check('⭐⭐ (T2-M) ASERCJA ODWROTNA — na prawdziwym zdaniu bateria ma ZERO zapaleń',
+    zapalenia(zdanieDla(1)) === 0 && zapalenia(zdanieDla(6)) === 0,
+    `${zapalenia(zdanieDla(1))} / ${zapalenia(zdanieDla(6))}`);
+
+  const MUTACJE: Array<[string, string]> = [
+    ['M1 ⛔ brzmienie wraca do starego („trzy dni bez nic")', 'Jeden trening, trzy dni bez nic.'],
+    ['M2 ⛔ część wraca do wyliczenki po przecinku', 'Jeden trening, trzy dni bez zaplanowanej pracy.'],
+    ['M3 ⛔ zła forma liczebnika („jeden dni")', 'Sześć treningów. Jeden dni bez zaplanowanej pracy.'],
+  ];
+  const zapalone = MUTACJE.map(([opis, zmutowane]) => {
+    const n = zapalenia(zmutowane);
+    console.log(`       ${opis}   →   ${n} zapaleń`);
+    return n;
+  });
+  check('⭐⭐ (T2-M) KAŻDA z trzech mutacji zapala strażnika',
+    zapalone.every((n) => n > 0), JSON.stringify(zapalone));
+
+  check('⭐ (T2-M) …a prawdziwe zdanie jest po baterii NIETKNIĘTE',
+    zdanieDla(3) === 'Trzy treningi. Cztery dni bez zaplanowanej pracy.', zdanieDla(3));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

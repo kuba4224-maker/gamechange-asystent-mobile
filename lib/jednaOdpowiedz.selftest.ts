@@ -50,6 +50,7 @@ import {
   BLOK_NOWA_PORCJA,
   ZAPROSZENIE_ZAPLANUJ_BLOK,
   DLACZEGO_OSLONA,
+  dlaczegoZGardla,
   NAGLOWEK_CO_ZROBIC,
   NAGLOWEK_DLACZEGO,
   NAGLOWEK_CO_ZMIENI,
@@ -243,7 +244,7 @@ console.log('\n3. (T1) DLACZEGO AKURAT TO — jedno zdanie albo NIC');
 {
   const zGardlem = zbudujJednaOdpowiedz(wejscie({ rekomendacja: { jest: true, powiazanaZGardlem: true } }));
   check('rekomendacja powiązana z wąskim gardłem → uzasadnienie z nazwy gardła',
-    zGardlem.dlaczego === 'Pomaga Ci przy: Moc', String(zGardlem.dlaczego));
+    zGardlem.dlaczego === 'Bo to jest dziś Twój największy zwrot — moc.', String(zGardlem.dlaczego));
 
   const bezPowiazania = zbudujJednaOdpowiedz(wejscie({ rekomendacja: { jest: true, powiazanaZGardlem: false } }));
   check('rekomendacja NIEpowiązana → `null`, a nie zmyślone zdanie',
@@ -260,11 +261,12 @@ console.log('\n3. (T1) DLACZEGO AKURAT TO — jedno zdanie albo NIC');
   check('`nie_wiem` o Osłonie NIE produkuje zdania o Osłonie (Z0)',
     zbudujJednaOdpowiedz(wejscie({
       oslona: 'nie_wiem', rekomendacja: { jest: true, powiazanaZGardlem: true },
-    })).dlaczego === 'Pomaga Ci przy: Moc', '');
+    })).dlaczego === 'Bo to jest dziś Twój największy zwrot — moc.', '');
 
   const zPodpowiedzi = zbudujJednaOdpowiedz(wejscie({ podpowiedz: stanPodpowiedzi([wiersz()]) }));
   check('podpowiedź → uzasadnienie z nazwy Elementu Z BAZY, nie z naszego zdania',
-    zPodpowiedzi.dlaczego === 'Pomaga Ci przy: Skok dosiężny', String(zPodpowiedzi.dlaczego));
+    zPodpowiedzi.dlaczego === 'Bo to jest dziś Twój największy zwrot — skok dosiężny.',
+    String(zPodpowiedzi.dlaczego));
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -609,6 +611,74 @@ console.log('\n6. (T8/R1) NA „DZIŚ" NIE MA ELEMENTU POZA REJESTREM');
   check('(T1) …a same brzmienia stoją w lib/, nie w JSX (dają się sprawdzić bez appki)',
     NAGLOWEK_CO_ZROBIC.length > 0 && NAGLOWEK_DLACZEGO.length > 0 && NAGLOWEK_CO_ZMIENI.length > 0,
     `${NAGLOWEK_CO_ZROBIC} / ${NAGLOWEK_DLACZEGO} / ${NAGLOWEK_CO_ZMIENI}`);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n9. ⭐ PAS T2 19.08.2026 — „DLACZEGO AKURAT TO" JEST ZDANIEM, NIE SKLEJKĄ');
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ CZEGO TA GRUPA PILNUJE. Do 19.08.2026 `dlaczegoZGardla` zwracała
+// „Pomaga Ci przy: Moc" — sklejkę „przyimek + etykieta obszaru" (zgłoszenie
+// W1-L2, defekt D-10). Kuba przyjął 18.08 propozycję zdania. Ta grupa pilnuje
+// trzech rzeczy naraz: brzmienia, wstawiania etykiety W ŚRODEK zdania
+// (mała litera) i tego, że stare brzmienie nie wraca żadną drogą.
+{
+  check('⭐ (T2) zdanie powstaje z etykiety obszaru i kończy się kropką',
+    dlaczegoZGardla('Moc') === 'Bo to jest dziś Twój największy zwrot — moc.',
+    dlaczegoZGardla('Moc'));
+
+  check('⭐ (T2) etykieta wieloczłonowa nie gubi reszty wyrazów',
+    dlaczegoZGardla('Skok dosiężny') === 'Bo to jest dziś Twój największy zwrot — skok dosiężny.',
+    dlaczegoZGardla('Skok dosiężny'));
+
+  check('⭐ (T2) mała litera robiona po polsku — „Śmiałość" → „śmiałość"',
+    dlaczegoZGardla('Śmiałość podania') === 'Bo to jest dziś Twój największy zwrot — śmiałość podania.',
+    dlaczegoZGardla('Śmiałość podania'));
+
+  check('⛔ (T2) zmieniana jest WYŁĄCZNIE pierwsza litera — skrót w środku zostaje',
+    dlaczegoZGardla('Skok CMJ') === 'Bo to jest dziś Twój największy zwrot — skok CMJ.',
+    dlaczegoZGardla('Skok CMJ'));
+
+  check('⛔ (T2) pusta etykieta nie wywraca funkcji ani nie dokłada spacji',
+    dlaczegoZGardla('') === 'Bo to jest dziś Twój największy zwrot — .', dlaczegoZGardla(''));
+
+  // ── ⛔ STARE BRZMIENIE NIE ZOSTAJE MARTWĄ STAŁĄ (B3) ────────────────────
+  const zrodloOdpowiedzi = readFileSync(join(libDir, 'jednaOdpowiedz.ts'), 'utf8');
+  const bezKomentarzyProste = zrodloOdpowiedzi.replace(/^[ \t]*(\/\/|\*|\/\*).*$/gm, '');
+  check('⛔⛔ (T2/B3) po starym brzmieniu NIE ZOSTAŁA martwa stała — jest nagrobek w komentarzu',
+    !/Pomaga Ci przy/.test(bezKomentarzyProste) && /Pomaga Ci przy/.test(zrodloOdpowiedzi),
+    'albo stare brzmienie wróciło do kodu, albo zniknęło bez nagrobka');
+
+  check('⛔ (T2) żadne wywołanie w repozytorium nie zwraca już „Pomaga Ci przy:"',
+    !/Pomaga Ci przy/.test(dlaczegoZGardla('Moc') + dlaczegoZGardla('Wytrzymałość')), '');
+
+  // ── ⭐ BATERIA MUTACJI ─────────────────────────────────────────────────
+  // ⛔ ASERCJA ODWROTNA NAJPIERW: na prawdziwym zdaniu ZERO zapaleń.
+  const przezZdanie = (z: string) => ({
+    stare: !/Pomaga Ci przy/.test(z),
+    zdanie: /^Bo to jest dziś Twój największy zwrot — /.test(z) && z.endsWith('.'),
+    malaLitera: !/— [A-ZŚĆŁÓŻŹŃĘĄ]/.test(z),
+  });
+  const zapalenia = (z: string) => Object.values(przezZdanie(z)).filter((ok) => !ok).length;
+
+  check('⭐⭐ (T2-M) ASERCJA ODWROTNA — na prawdziwym brzmieniu bateria ma ZERO zapaleń',
+    zapalenia(dlaczegoZGardla('Moc')) === 0 && zapalenia(dlaczegoZGardla('Wytrzymałość')) === 0,
+    `${zapalenia(dlaczegoZGardla('Moc'))} / ${zapalenia(dlaczegoZGardla('Wytrzymałość'))}`);
+
+  const MUTACJE: Array<[string, string]> = [
+    ['M1 ⛔ brzmienie wraca do starej sklejki', 'Pomaga Ci przy: Moc'],
+    ['M2 ⛔ etykieta wchodzi wielką literą w środek zdania', 'Bo to jest dziś Twój największy zwrot — Moc.'],
+    ['M3 ⛔ zdanie traci kropkę i znów jest etykietą', 'Bo to jest dziś Twój największy zwrot — moc'],
+  ];
+  const zapalone = MUTACJE.map(([opis, zmutowane]) => {
+    const n = zapalenia(zmutowane);
+    console.log(`       ${opis}   →   ${n} zapaleń`);
+    return n;
+  });
+  check('⭐⭐ (T2-M) KAŻDA z trzech mutacji zapala strażnika',
+    zapalone.every((n) => n > 0), JSON.stringify(zapalone));
+
+  check('⭐ (T2-M) …a prawdziwe brzmienie jest po baterii NIETKNIĘTE',
+    dlaczegoZGardla('Moc') === 'Bo to jest dziś Twój największy zwrot — moc.', dlaczegoZGardla('Moc'));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

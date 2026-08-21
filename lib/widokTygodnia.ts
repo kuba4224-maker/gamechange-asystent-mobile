@@ -771,15 +771,41 @@ function zbudujZdanie(dni: WierszDnia[], odczytWydarzen: boolean): ZdanieTygodni
   }
 
   // ⛔ BRAMKA: bez ani jednej policzonej pozycji zdanie NIE POWSTAJE.
-  // Samo „siedem dni bez nic" nie jest podsumowaniem tygodnia — jest pustką,
-  // a pustka ma własne brzmienie i własne wyjście.
+  // Samo „siedem dni bez zaplanowanej pracy" nie jest podsumowaniem tygodnia —
+  // jest pustką, a pustka ma własne brzmienie i własne wyjście.
   if (czlony.length === 0) return null;
 
+  // ⭐ BRZMIENIE ZMIENIONE 19.08.2026, PAS T2 — ⚠️ DO PRZEJRZENIA PRZEZ KUBĘ.
+  //
+  // 🪦 NAGROBEK (B3). Do 19.08.2026 stała tu jedna linia:
+  //
+  //     czlony.push(`${slownie(dniBezNic)} ${forma(dniBezNic, 'dzień bez nic',
+  //                  'dni bez nic', 'dni bez nic')}`);
+  //
+  // czyli człon doklejany PRZECINKIEM do wyliczenki: „Jeden trening, trzy dni
+  // bez nic." Kuba zgłosił to jako niezręczne po polsku (pas W1, pozycja
+  // W1-L3, defekt T-9) i 18.08.2026 przyjął propozycję. To jest ona.
+  //
+  // ⭐ ZMIENIŁY SIĘ DWIE RZECZY NARAZ I OBIE SĄ CELOWE:
+  //   1. „bez nic" → „bez zaplanowanej pracy" — mówi FAKT o tygodniu
+  //      (nie było czego zaplanować), a nie sąd o zawodniku. ⛔ To jest test
+  //      §7 skillu: opisujemy tydzień, nie charakter.
+  //   2. człon przestaje być doklejany przecinkiem i staje się OSOBNYM
+  //      ZDANIEM z wielkiej litery — „Jeden trening. Trzy dni bez
+  //      zaplanowanej pracy." Bez tego zdanie docelowe z polecenia
+  //      („Trzy dni bez zaplanowanej pracy.") nie miałoby jak powstać:
+  //      w wyliczence stałoby zawsze małą literą i po przecinku.
+  //
+  // ⛔ ODMIANA IDZIE PRZEZ ISTNIEJĄCE `forma(...)` — ⛔ nie piszę drugiej
+  // funkcji od liczebników. „jeden dzień" · „trzy dni" · „siedem dni".
+  // ⛔ TA CZĘŚĆ NIE JEST LICZNIKIEM SERII (N1): liczy dni W TYM tygodniu,
+  // nie „z rzędu", nie narasta między tygodniami i nie ma koloru.
+  const zdania = [`${zWielkiej(czlony.join(', '))}.`];
   if (dniBezNic > 0) {
-    czlony.push(`${slownie(dniBezNic)} ${forma(dniBezNic, 'dzień bez nic', 'dni bez nic', 'dni bez nic')}`);
+    zdania.push(`${zWielkiej(slownie(dniBezNic))} ${forma(dniBezNic, 'dzień', 'dni', 'dni')} bez zaplanowanej pracy.`);
   }
 
-  const podsumowanie = `${zWielkiej(czlony.join(', '))}.`;
+  const podsumowanie = zdania.join(' ');
 
   // ── WT-09: który dzień jest najciaśniejszy ──────────────────────────
   let najciasniejszy: WierszDnia | null = null;

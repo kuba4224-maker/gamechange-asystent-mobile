@@ -123,6 +123,12 @@ export type WierszMeczuWgl = {
    * `wagaMeczu()` podstawia wtedy 90 jako DECYZJĘ PRODUKTOWĄ, nie pomiar.
    */
   match_length_minutes: number | null;
+  /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026 — WYSTĄPIENIE, KTÓREGO TEN WIERSZ DOTYCZY.
+   * ⛔ `null` = wiersz sprzed migracji albo zapis bez sprawdzonego właściciela
+   * wydarzenia. Taki wiersz LICZY SIĘ NADAL i nie pochłania niczego (R5).
+   */
+  calendar_event_id: number | null;
 };
 
 /** Jedyna kolumna katalogu podpowiedzi, jakiej WT-26 potrzebuje. */
@@ -151,8 +157,13 @@ export const TABELA_MECZOW = 'match_contexts';
 // zagrał pełne 60 minut meczu 60-minutowego: 3 punkty zamiast 4, czyli kara
 // za to, że jego mecz jest krótszy. ⛔ Pole zapisane i nigdy nieodczytane
 // wygląda dokładnie jak pole, którego nie ma — z tą różnicą, że nikt go nie szuka.
+//
+// ⭐⭐ PLAN-D-D2 19.08.2026 — doszło `calendar_event_id`, i to jest cały ten pas.
+// ⛔ ZMIERZONE: bez tej kolumny w zapytaniu `jednostkiZMeczow()` nie ma czym
+// zestawić wiersza meczu z wydarzeniem, więc jeden mecz liczy się DWA RAZY
+// (7 punktów zamiast 4). Kolumna założona na produkcji 19.08.2026.
 export const SELECT_MECZOW =
-  'id,created_at,match_rpe,entered_recovery_state,minutes_played,match_length_minutes';
+  'id,created_at,match_rpe,entered_recovery_state,minutes_played,match_length_minutes,calendar_event_id';
 
 /**
  * ⭐ KOLUMNY, KTÓRYCH MAPOWANIE NAPRAWDĘ UŻYWA — wyprowadzone z `SELECT_MECZOW`,
@@ -282,7 +293,37 @@ export function meczDlaNagrody(w: WierszMeczuWgl): WierszMeczu {
     minutes_played: liczbaAlboNull(w.minutes_played),
     dlugoscMeczu: liczbaAlboNull(w.match_length_minutes),
     match_rpe: liczbaAlboNull(w.match_rpe),
+    // ⭐⭐ PLAN-D-D2 — bez tego przemianowania kolumna jest w zapytaniu
+    // i wypada w mapowaniu, czyli wygląda dokładnie jak kolumna, której nie ma.
+    calendar_event_id: liczbaAlboNull(w.calendar_event_id),
   };
+}
+
+/**
+ * ⭐⭐ PLAN-D-D2 19.08.2026 — WYSTĄPIENIE → WIERSZ `match_contexts`.
+ *
+ * ⛔ PO CO TO ISTNIEJE (§4.3 polecenia D2). Do 19.08 mapa „które wystąpienie
+ * ma który wiersz meczu" żyła WYŁĄCZNIE w stanie ekranu, więc po restarcie
+ * aplikacji ten sam mecz oceniony ponownie zakładał DRUGI wiersz — produkt
+ * nie miał czym odnaleźć wiersza, który sam założył. Od dziś odnajduje go
+ * po `calendar_event_id`, czyli w bazie, a nie w pamięci ekranu.
+ *
+ * ⚠️ Wiersze bez `calendar_event_id` NIE WCHODZĄ do mapy i to nie jest
+ * przeoczenie: nie ma po czym ich odnaleźć, a wpisanie ich pod jakimkolwiek
+ * kluczem znaczyłoby przypisanie cudzego meczu do wystąpienia (Z0).
+ */
+export function mapaWierszyMeczuPoWydarzeniu(
+  wiersze: readonly WierszMeczuWgl[],
+): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const w of wiersze) {
+    if (!w || typeof w.id !== 'number' || !Number.isFinite(w.id)) continue;
+    const e = liczbaAlboNull(w.calendar_event_id);
+    if (e === null) continue;
+    // ⛔ Pierwszy wygrywa — unikalny indeks częściowy pilnuje, że drugiego nie ma.
+    if (!out.has(e)) out.set(e, w.id);
+  }
+  return out;
 }
 
 export function meczDlaWgladu(w: WierszMeczuWgl): WpisMeczuWglad {

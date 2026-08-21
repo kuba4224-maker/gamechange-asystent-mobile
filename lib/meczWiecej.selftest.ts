@@ -26,11 +26,16 @@ import {
   MECZ_ZERO_MINUT, MECZ_BEZ_ZAZNACZENIA, MECZ_MINUTY_PONAD_DLUGOSC,
   MECZ_WIECEJ_NIC_DO_ZAPISU, RODZAJ_MECZU_Z_KAFLA, PUSTE_WIECEJ_O_MECZU, POLA_ARKUSZA,
   minutyPonadDlugosc, wynikMeczu, zdecydujOZapisieMeczu, opisZapisuMeczuDoLogu,
+  // ⭐⭐ PLAN-D-D2 19.08.2026
+  ustalWiazanieMeczu, toJestDrugiWierszNaMecz,
+  INDEKS_JEDEN_WIERSZ_NA_WYDARZENIE, MECZ_JUZ_MA_WIERSZ,
   type RzeczOMeczu, type OcenaMeczu, type WiecejOMeczu, type WynikMeczu,
   type StanKontekstuMeczu, type DecyzjaZapisuMeczu,
 } from './meczWiecej';
 import {
   SELECT_MECZOW, KOLUMNY_MECZOW, meczDlaNagrody, type WierszMeczuWgl,
+  // ⭐⭐ PLAN-D-D2 19.08.2026
+  mapaWierszyMeczuPoWydarzeniu,
 } from './wejsciaWgladow';
 import {
   jednostkiZMeczow, wagaMeczu, punktyRozwojuNaEkranie,
@@ -513,7 +518,10 @@ const MUTACJE: [string, () => Predykat[]][] = [
       ? { rodzaj: 'wstaw', wiersz: { user_id: a.idZawodnika, game_type: RODZAJ_MECZU_Z_KAFLA,
         minutes_played: a.ocena.minutyNaBoisku, match_length_minutes: a.ocena.dlugoscMeczu,
         match_rpe: null, self_rating: null, mental_state: null, demanding_conditions: null,
-        position_played_today: null, own_score: null, opponent_score: null, free_note: null },
+        position_played_today: null, own_score: null, opponent_score: null, free_note: null,
+        // ⭐ PLAN-D-D2 19.08.2026 — mutacja M5 dotyczy sprzeczności minut, nie
+        // wiązania; pole dołożone, żeby kształt wiersza zgadzał się z typem.
+        calendar_event_id: null },
       powod: 'mutacja' }
       : zdecydujOZapisieMeczu(a)),
     meczDlaNagrody, RZECZY_O_MECZU)],
@@ -545,6 +553,116 @@ function zdecydujOZabisieMeczuZastepczy(
   a: Parameters<typeof zdecydujOZapisieMeczu>[0],
 ): DecyzjaZapisuMeczu {
   return zdecydujOZapisieMeczu(a);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ PLAN-D-D2 19.08.2026 — WIĄZANIE WIERSZA MECZU Z WYSTĄPIENIEM
+//
+// ⛔ CZEGO TE ASERCJE NIE DOWODZĄ, i mówię to pierwszym zdaniem: żadna z nich
+// nie dotyka bazy. Dowodzą KSZTAŁTU żądania i rozstrzygnięć czystych funkcji.
+// „Zapis przechodzi w Supabase" jest twierdzeniem o RLS i o kolumnie, i jego
+// dowód leży w pomiarze `select` z noty pasa, nie tutaj (Z0).
+// ═════════════════════════════════════════════════════════════════════
+{
+  const OCENA_Z_MINUTAMI: OcenaMeczu = { minutyNaBoisku: 90, dlugoscMeczu: 90, rpe: 7 };
+  const moje = new Set<number>([501, 502]);
+
+  // ── 1. WIĄZANIE: cztery stany, nie dwa ──
+  check('⛔ (D2) wystąpienie NA EKRANIE zawodnika → wiążemy',
+    (() => { const w = ustalWiazanieMeczu({ idWydarzenia: 501, wydarzeniaZawodnika: moje });
+      return w.rodzaj === 'jest' && w.idWydarzenia === 501; })());
+  check('⛔⛔ (D2 §3) wystąpienie SPOZA ekranu zawodnika → NIE wiążemy — klucz obcy '
+    + 'sprawdza istnienie, NIE właściciela',
+    (() => { const w = ustalWiazanieMeczu({ idWydarzenia: 999, wydarzeniaZawodnika: moje });
+      return w.rodzaj === 'brak' && w.powod.includes('999'); })());
+  check('⛔ (D2, R5) NIEODCZYTANA lista wydarzeń (`null`) ≠ pusta → NIE wiążemy',
+    ustalWiazanieMeczu({ idWydarzenia: 501, wydarzeniaZawodnika: null }).rodzaj === 'brak');
+  check('⛔ (D2) brak wystąpienia z ekranu → NIE wiążemy, i to nie jest awaria',
+    ustalWiazanieMeczu({ idWydarzenia: null, wydarzeniaZawodnika: moje }).rodzaj === 'brak');
+
+  // ── 2. §4.1 — `calendar_event_id` NAPRAWDĘ WCHODZI DO WIERSZA ──
+  const wstaw = zdecydujOZapisieMeczu({
+    idZawodnika: 'u1', stan: { rodzaj: 'brak' }, ocena: OCENA_Z_MINUTAMI,
+    wiecej: PUSTE_WIECEJ_O_MECZU, idWydarzenia: 501, wydarzeniaZawodnika: moje,
+  });
+  check('⭐⭐ (D2 §4.1) WSTAWIANY wiersz meczu NIESIE `calendar_event_id`',
+    wstaw.rodzaj === 'wstaw' && wstaw.wiersz.calendar_event_id === 501,
+    JSON.stringify(wstaw));
+  const wstawObcy = zdecydujOZapisieMeczu({
+    idZawodnika: 'u1', stan: { rodzaj: 'brak' }, ocena: OCENA_Z_MINUTAMI,
+    wiecej: PUSTE_WIECEJ_O_MECZU, idWydarzenia: 999, wydarzeniaZawodnika: moje,
+  });
+  check('⛔⛔ (D2 §3) wiersz dla CUDZEGO wystąpienia idzie do bazy z `null`, '
+    + 'a powód stoi w zdaniu do logu — nie ginie po cichu',
+    wstawObcy.rodzaj === 'wstaw' && wstawObcy.wiersz.calendar_event_id === null
+    && wstawObcy.powod.includes('999'),
+    JSON.stringify(wstawObcy));
+
+  // ── 3. §4.3 — DOKŁADANIE NIE KASUJE WIĄZANIA ──
+  const dolozZWiazaniem = zdecydujOZapisieMeczu({
+    idZawodnika: 'u1', stan: { rodzaj: 'zapisany', id: 77 }, ocena: OCENA_Z_MINUTAMI,
+    wiecej: PUSTE_WIECEJ_O_MECZU, idWydarzenia: 501, wydarzeniaZawodnika: moje,
+  });
+  check('⭐ (D2 §4.3) dokładanie do wiersza DOPISUJE wiązanie, gdy je znamy',
+    dolozZWiazaniem.rodzaj === 'aktualizuj' && dolozZWiazaniem.zmiany.calendar_event_id === 501);
+  const dolozBezWiazania = zdecydujOZapisieMeczu({
+    idZawodnika: 'u1', stan: { rodzaj: 'zapisany', id: 77 }, ocena: OCENA_Z_MINUTAMI,
+    wiecej: PUSTE_WIECEJ_O_MECZU, idWydarzenia: null, wydarzeniaZawodnika: moje,
+  });
+  check('⛔⛔ (D2 §4.3) dokładanie BEZ wiązania NIE WYSYŁA `calendar_event_id: null` — '
+    + 'odebranie wiązania przywróciłoby podwójne liczenie po cichu',
+    dolozBezWiazania.rodzaj === 'aktualizuj'
+    && !('calendar_event_id' in dolozBezWiazania.zmiany));
+
+  // ── 4. §4.3 — DRUGI WIERSZ TO ZDANIE, NIE KOD `23505` ──
+  check('⛔ (D2 §4.3) `23505` z bazy jest ROZPOZNANY jako drugi wiersz na wystąpienie',
+    toJestDrugiWierszNaMecz({ code: '23505', message: 'duplicate key value' }));
+  check('⛔ (D2 §4.3) …a także wtedy, gdy kodu nie ma, ale jest NAZWA indeksu',
+    toJestDrugiWierszNaMecz({ message: `duplicate key value violates unique constraint "${INDEKS_JEDEN_WIERSZ_NA_WYDARZENIE}"` }));
+  check('⛔ (D2 §4.3) …i NIE jest nim byle jaki błąd (inaczej ekran kłamałby przy awarii sieci)',
+    !toJestDrugiWierszNaMecz({ code: '42501', message: 'permission denied' })
+    && !toJestDrugiWierszNaMecz(null) && !toJestDrugiWierszNaMecz('cokolwiek'));
+  check('⛔ (D2 §4.3) zdanie dla zawodnika NIE ZAWIERA kodu bazy ani nazwy indeksu',
+    !/23505|match_contexts|constraint/i.test(MECZ_JUZ_MA_WIERSZ) && MECZ_JUZ_MA_WIERSZ.length > 20,
+    MECZ_JUZ_MA_WIERSZ);
+
+  // ── 5. §4.3 — WIERSZ ODNAJDUJE SIĘ PO RESTARCIE, czyli Z BAZY ──
+  const wiersze: WierszMeczuWgl[] = [
+    { id: 77, created_at: '2026-08-15T10:00:00Z', match_rpe: 7, entered_recovery_state: null,
+      minutes_played: 90, match_length_minutes: 90, calendar_event_id: 501 },
+    { id: 12, created_at: '2026-07-29T10:00:00Z', match_rpe: 6, entered_recovery_state: null,
+      minutes_played: null, match_length_minutes: null, calendar_event_id: null },
+  ];
+  const mapa = mapaWierszyMeczuPoWydarzeniu(wiersze);
+  check('⭐⭐ (D2 §4.3) produkt ODNAJDUJE swój wiersz po `calendar_event_id` — '
+    + 'to jest to, czego nie umiał po restarcie aplikacji',
+    mapa.get(501) === 77);
+  check('⛔ (D2 §4.3) wiersz BEZ wiązania (sprzed migracji) nie wchodzi do mapy — '
+    + 'nie ma po czym go odnaleźć, a zgadywanie byłoby przypisaniem cudzego meczu',
+    mapa.size === 1 && !mapa.has(12));
+  check('⛔ (D2) `calendar_event_id` JEST w zapytaniu — bez tego kolumna wygląda jak nieistniejąca',
+    KOLUMNY_MECZOW.includes('calendar_event_id') && SELECT_MECZOW.includes('calendar_event_id'));
+  check('⛔ (D2) …i mapowanie NAPRAWDĘ ją przemianowuje (pole zapisane i nieodczytane '
+    + 'wygląda dokładnie jak pole, którego nie ma)',
+    meczDlaNagrody(wiersze[0]).calendar_event_id === 501
+    && meczDlaNagrody(wiersze[1]).calendar_event_id === null);
+
+  // ── 6. EKRAN NAPRAWDĘ TO PODAJE — asercja na WYCINKU, nie na całym pliku ──
+  // ⛔ Wycinek, nie „czy napis pada gdziekolwiek w pliku" (§0.8 polecenia D2):
+  // pytanie o cały plik przeszłoby na kodzie, w którym `idWydarzenia` stoi
+  // w komentarzu albo w zupełnie innej funkcji.
+  const dzisSrc = bezKomentarzy(readFileSync(join(root, 'app', '(tabs)', 'dzis.tsx'), 'utf8'));
+  const i0 = dzisSrc.indexOf('async function zapiszKontekstMeczu');
+  const wycinek = i0 < 0 ? '' : dzisSrc.slice(i0, dzisSrc.indexOf('\n  }', i0));
+  check('⛔ STRAŻNIK STRAŻNIKA — wycinek `zapiszKontekstMeczu` ISTNIEJE i nie jest pusty',
+    wycinek.length > 400, `${wycinek.length} znaków`);
+  check('⭐⭐ (D2) ekran PODAJE `idWydarzenia` i listę wydarzeń zawodnika do decyzji o zapisie',
+    /idWydarzenia,/.test(wycinek) && /wydarzeniaZawodnika,/.test(wycinek));
+  check('⭐⭐ (D2 §4.3) ekran szuka wiersza NAJPIERW w wizycie, POTEM w bazie',
+    /wierszeMeczuPoWydarzeniu\.get\(idWydarzenia\)/.test(wycinek)
+    && /kontekstyMeczu\[klucz\] \?\? idZBazy/.test(wycinek));
+  check('⛔ (D2 §4.3) ekran zamienia drugi wiersz na ZDANIE, a nie na kod bazy',
+    /toJestDrugiWierszNaMecz\(bladW\)/.test(wycinek) && /MECZ_JUZ_MA_WIERSZ/.test(wycinek));
 }
 
 // ⛔ PODSUMOWANIE W KSZTAŁCIE, KTÓRY CZYTA `tests/run-selftests.mjs`.

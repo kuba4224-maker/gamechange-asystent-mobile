@@ -72,6 +72,8 @@ import {
   JEDNOSTKA_ODNIESIENIA_ROZWOJU,
   MAKS_PUNKTOW_ZA_MECZ,
   ZASADY_NAGRODY_PRAWDZIWE,
+  // ⭐⭐ PLAN-D-D2 19.08.2026
+  type WierszMeczu,
   type JednostkaPracy,
   type NagrodaZaPrace,
   type OdznakaId,
@@ -1579,6 +1581,168 @@ console.log('\nW1-M. ⭐ BATERIA MUTACJI');
     ileFail(bateria(wagaSesji, wagaMeczu, { ...WAGI_PRACY })) === 0
     && WAGI_PRACY.wpis_dziennika === 0 && PROG_DLUGOSCI_SESJI_MIN === 45,
     'bateria zostawiła po sobie ślad w prawdziwych regułach');
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ PLAN-D-D2 19.08.2026 — KONIEC PODWÓJNEGO LICZENIA MECZU
+//
+// ⛔ CO BYŁO ZEPSUTE, ZMIERZONE DWA RAZY NIEZALEŻNIE (pas D8 §7.1, sesja
+// nawigująca 19.08 o 01:20 UTC): jeden mecz dawał 7 punktów zamiast 4, bo
+// `jednostkiZSesji` oddawało `sesja:501@2026-08-15` (waga zobowiązania 3),
+// `jednostkiZMeczow` oddawało `mecz:77` (waga 4), a klucze były RÓŻNE, więc
+// odsiew po kluczu ich nie łączył.
+//
+// ⛔ CZEGO TE ASERCJE NIE DOWODZĄ: niczego o bazie. To są czyste funkcje.
+// Pomiar na danych produkcyjnych stoi w nocie pasa (`select`, pięć kont).
+// ═════════════════════════════════════════════════════════════════════
+console.log('\n⭐⭐ PLAN-D-D2 — mecz liczony RAZ\n');
+{
+  const DZIEN = '2026-08-15';
+  /** Wystąpienie `event_type='match'` z dowodem — dokładnie tak, jak z `zrodloSesji`. */
+  const wydarzenieMeczu = (id: number): WierszSesji => ({
+    idWydarzenia: id, dzien: DZIEN, segment: null, maWpisWDzienniku: false,
+    eventType: 'match', source: 'coach', maSesjeTrenera: false,
+    minutyZmierzone: null, minutyZPlanu: 90, rpeZmierzone: null,
+  });
+  /**
+   * Wiersz `match_contexts`: 90 z 90 minut, RPE 8 — czyli `90 × 8 ⁄ 180 = 4`,
+   * DOKŁADNIE sufit meczu.
+   * ⚠️ RPE 8, a nie 7, i to nie jest kosmetyka: przy RPE 7 waga wynosi 3,5,
+   * więc `Math.round` na sumie robi z jednego meczu 4, a z dwóch 7 zamiast 8.
+   * Asercja o dwóch meczach zapaliłaby się wtedy na ZAOKRĄGLENIU, a nie na
+   * pochłanianiu — czyli mierzyłaby nie to, o czym mówi. ⭐ Zmierzone
+   * uruchomieniem 19.08.2026, przy pierwszym podejściu tej baterii.
+   */
+  const wierszMeczu = (id: number, wydarzenie: number | null): WierszMeczu => ({
+    id, created_at: `${DZIEN}T18:00:00Z`, minutes_played: 90, dlugoscMeczu: 90,
+    match_rpe: 8, calendar_event_id: wydarzenie,
+  });
+  const policz = (sesjeWe: WierszSesji[], meczeWe: WierszMeczu[], zasady = ZASADY_NAGRODY_PRAWDZIWE) =>
+    policzNagrode(we({
+      sesje: zrodlo(jednostkiZSesji(sesjeWe)),
+      mecze: zrodlo(jednostkiZMeczow(meczeWe)),
+    }), zasady);
+
+  // ── ASERCJA ODWROTNA: defekt, którego ten pas dotyczy, JEST ZMIERZONY ──
+  const zDefektem = policz([wydarzenieMeczu(501)], [wierszMeczu(77, 501)],
+    { ...ZASADY_NAGRODY_PRAWDZIWE, meczPochlaniaSwojeWydarzenie: false });
+  check('⛔⛔ (D2) DEFEKT JEST ZMIERZONY, a nie opowiedziany: bez pochłaniania jeden mecz '
+    + `daje ${WAGA_ZOBOWIAZANIA} + ${MAKS_PUNKTOW_ZA_MECZ} = 7 punktów`,
+    zDefektem.rodzaj === 'policzona' && zDefektem.punkty === WAGA_ZOBOWIAZANIA + MAKS_PUNKTOW_ZA_MECZ,
+    opisNagrodyDoLogu(zDefektem));
+
+  // ── §4.2 WYMAGANIE 1 — mecz Z wierszem liczy się RAZ, wagą z minut ──
+  const jeden = policz([wydarzenieMeczu(501)], [wierszMeczu(77, 501)]);
+  check('⭐⭐ (D2 §4.2/1) mecz z wierszem `match_contexts` liczy się RAZ, wagą z minut na boisku',
+    jeden.rodzaj === 'policzona' && jeden.punkty === MAKS_PUNKTOW_ZA_MECZ && jeden.jednostki === 1,
+    opisNagrodyDoLogu(jeden));
+
+  // ── §4.2 WYMAGANIE 2 — mecz BEZ wiersza liczy się RAZ, jako zobowiązanie ──
+  const bezWiersza = policz([wydarzenieMeczu(501)], []);
+  check('⭐⭐ (D2 §4.2/2) mecz BEZ wiersza liczy się RAZ, jako zobowiązanie — ⛔ zawodnik '
+    + 'NIE TRACI punktu za to, że nie wypełnił karty',
+    bezWiersza.rodzaj === 'policzona' && bezWiersza.punkty === WAGA_ZOBOWIAZANIA && bezWiersza.jednostki === 1,
+    opisNagrodyDoLogu(bezWiersza));
+
+  // ── §4.2 WYMAGANIE 5 — stary wiersz bez wiązania NADAL SIĘ LICZY ──
+  const stary = policz([], [wierszMeczu(12, null)]);
+  check('⭐⭐ (D2 §4.2/5) wiersz meczu BEZ `calendar_event_id` (sprzed migracji) NADAL SIĘ LICZY '
+    + '— ⛔ migracja nie kasuje historii',
+    stary.rodzaj === 'policzona' && stary.punkty === MAKS_PUNKTOW_ZA_MECZ && stary.jednostki === 1,
+    opisNagrodyDoLogu(stary));
+  const staryObokWydarzenia = policz([wydarzenieMeczu(501)], [wierszMeczu(12, null)]);
+  check('⛔ (D2 §4.2/5) …i NIE POCHŁANIA cudzego wystąpienia, bo nie wie, którego dotyczy',
+    staryObokWydarzenia.rodzaj === 'policzona'
+    && staryObokWydarzenia.punkty === WAGA_ZOBOWIAZANIA + MAKS_PUNKTOW_ZA_MECZ,
+    opisNagrodyDoLogu(staryObokWydarzenia));
+
+  // ── §4.2 WYMAGANIE 3 (kształt) — POCHŁANIANIE NIE ODBIERA CUDZEJ PRACY ──
+  const obok = policz(
+    [wydarzenieMeczu(501), { idWydarzenia: 777, dzien: DZIEN, segment: null, maWpisWDzienniku: false,
+      eventType: 'club_training', source: 'coach', maSesjeTrenera: true }],
+    [wierszMeczu(77, 501)],
+  );
+  check('⛔⛔ (D2 §4.2/3) pochłonięcie dotyczy WYŁĄCZNIE tego jednego wystąpienia — '
+    + 'trening klubowy z tego samego dnia zostaje nietknięty',
+    obok.rodzaj === 'policzona' && obok.punkty === MAKS_PUNKTOW_ZA_MECZ + WAGA_ZOBOWIAZANIA
+    && obok.jednostki === 2,
+    opisNagrodyDoLogu(obok));
+
+  // ── §4.2 WYMAGANIE 4 — ODSIEWANIE JEST JAWNE ──
+  check('⭐⭐ (D2 §4.2/4) log mówi, KTÓRY klucz został pochłonięty PRZEZ KTÓRY',
+    jeden.rodzaj === 'policzona' && jeden.pochloniete.length === 1
+    && jeden.pochloniete[0].klucz === `sesja:501@${DZIEN}`
+    && jeden.pochloniete[0].przez === 'mecz:77'
+    && jeden.pochloniete[0].wydarzenie === 501
+    && opisNagrodyDoLogu(jeden).includes(`sesja:501@${DZIEN} → mecz:77`),
+    opisNagrodyDoLogu(jeden));
+  check('⛔ (D2 §4.2/4) …a „pochłoniętych 0" jest ZDANIEM, nie ciszą (ta sama reguła, co O76)',
+    opisNagrodyDoLogu(bezWiersza).includes('pochłoniętych 0'),
+    opisNagrodyDoLogu(bezWiersza));
+
+  // ── ⛔⛔ NIC NIE GINIE NA POZOSTAŁYCH DWÓCH OSIACH ──
+  // ⛔ ZNALEZISKO WŁASNEGO POMIARU 19.08.2026, na danych z produkcji: pierwsze
+  // podejście tego pasa dawało dorobek 7 → 4 poprawnie, ale RAZEM z tym
+  // `domkniętych 3 → 2`. Strata na osi jakości jest tak samo cicha jak strata
+  // punktów i tak samo zakazana (§4.2 pkt 3).
+  {
+    const zDowodem: WierszSesji = { ...wydarzenieMeczu(501), maWpisWDzienniku: true, segment: 'wytrzymalosc' };
+    const w = policzNagrode(we({
+      sesje: zrodlo(jednostkiZSesji([zDowodem])),
+      mecze: zrodlo(jednostkiZMeczow([wierszMeczu(77, 501)])),
+      segmentyCelow: { rodzaj: 'pelne', segmenty: new Set(['wytrzymalosc']) },
+    }));
+    check('⛔⛔ (D2 §4.2/3) pochłonięta jednostka ODDAJE domknięcie wierszowi meczu — '
+      + 'zawodnik nie traci „rzeczy domkniętej odpowiedzią"',
+      w.rodzaj === 'policzona' && w.odpowiedziKontrolne === 1,
+      opisNagrodyDoLogu(w));
+    check('⛔⛔ (D2 §4.2/3) …i ODDAJE SEGMENT — praca nad własnym celem nie znika '
+      + 'z miary `punkty_w_celu` tylko dlatego, że `match_contexts` nie ma kolumny segmentu',
+      w.rodzaj === 'policzona' && w.punktyWCelu === MAKS_PUNKTOW_ZA_MECZ,
+      opisNagrodyDoLogu(w));
+  }
+
+  // ── ⛔ POCHŁANIANIE NIE MA PRAWA DZIAŁAĆ W DRUGĄ STRONĘ ──
+  const dwaMecze = policz([wydarzenieMeczu(501), wydarzenieMeczu(502)],
+    [wierszMeczu(77, 501), wierszMeczu(78, 502)]);
+  check('⛔ (D2) dwa różne mecze = dwie jednostki, nie jedna — pochłanianie idzie '
+    + 'po WYSTĄPIENIU, a nie po rodzaju',
+    dwaMecze.rodzaj === 'policzona' && dwaMecze.jednostki === 2
+    && dwaMecze.punkty === 2 * MAKS_PUNKTOW_ZA_MECZ,
+    opisNagrodyDoLogu(dwaMecze));
+
+  // ── BATERIA MUTACJI NA REGUŁACH (punkt wpięcia `ZasadyNagrody`) ──
+  const mutacjeD2: { nazwa: string; zasady: ZasadyNagrody; oczekiwane: number }[] = [
+    { nazwa: 'MD2-1 ⛔ pochłanianie wyłączone — wraca 7 punktów za jeden mecz',
+      zasady: { ...ZASADY_NAGRODY_PRAWDZIWE, meczPochlaniaSwojeWydarzenie: false },
+      oczekiwane: WAGA_ZOBOWIAZANIA + MAKS_PUNKTOW_ZA_MECZ },
+  ];
+  for (const m of mutacjeD2) {
+    const w = policz([wydarzenieMeczu(501)], [wierszMeczu(77, 501)], m.zasady);
+    check(`⭐ mutacja „${m.nazwa}" ZMIENIA WYNIK — inaczej reguła jest kodem bez rozstrzygnięcia`,
+      w.rodzaj === 'policzona' && w.punkty === m.oczekiwane && w.punkty !== MAKS_PUNKTOW_ZA_MECZ,
+      opisNagrodyDoLogu(w));
+  }
+  const poBaterii = policz([wydarzenieMeczu(501)], [wierszMeczu(77, 501)]);
+  check('⭐ (D2) …a prawdziwe reguły są po baterii NIETKNIĘTE',
+    ZASADY_NAGRODY_PRAWDZIWE.meczPochlaniaSwojeWydarzenie === true
+    && poBaterii.rodzaj === 'policzona' && poBaterii.punkty === MAKS_PUNKTOW_ZA_MECZ,
+    opisNagrodyDoLogu(poBaterii));
+
+  // ── ZAPADKA D2 NA PLIKU: pochłanianie NIE MOŻE ZALEŻEĆ OD DATY ──
+  // ⛔ Ten pas dokłada do `policzNagrode` pętlę po jednostkach. Gdyby ktoś
+  // wpiął w nią `kiedy`, dorobek zacząłby spadać po tygodniu przerwy (N1).
+  {
+    const src = bezKomentarzy(readFileSync(join(root, 'lib', 'nagrodaZaPrace.ts'), 'utf8'));
+    const i0 = src.indexOf('export function policzNagrode');
+    const cialo = i0 < 0 ? '' : src.slice(i0, src.indexOf('\nexport function opisNagrodyDoLogu', i0));
+    check('⛔ STRAŻNIK STRAŻNIKA — ciało `policzNagrode` istnieje i nie jest puste',
+      cialo.length > 1500, `${cialo.length} znaków`);
+    check('⛔⛔ (D2 + L1-D2) ciało `policzNagrode` NADAL nie czyta pola `kiedy` — '
+      + 'pochłanianie idzie po WYSTĄPIENIU, nigdy po dacie',
+      !/\.kiedy\b/.test(cialo) && /\.wydarzenie\b/.test(cialo),
+      cialo.slice(0, 200));
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

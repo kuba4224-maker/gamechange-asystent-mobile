@@ -41,6 +41,15 @@ import { higherIsBetterColor, higherIsWorseColor, sleepHoursColor, neutralIntens
 import { toJestBrakDostepu, ZAPIS_ODRZUCONY_BRAK_DOSTEPU } from '../../lib/dostepKonta';
 // ⭐ PLAN-D-C3 15.08.2026 — trzy pustki na ścieżkach odczytu tego ekranu.
 import { rozpoznajPustke, opisBleduOdczytuDoLogu } from '../../lib/trzyPustki';
+// ⭐ PLAN-D PAS T2 19.08.2026 — OKNO PORANKA DO 12:00 (decyzja Kuby z 17.08:
+// „nie można wypełniać ankiety wstecz. To byłoby nierzetelne"). Cała reguła
+// i cały jej powód stoją w `lib/oknoPoranka.ts`; ten ekran jej UŻYWA i nigdzie
+// nie porównuje godziny sam.
+import {
+  czyOknoPorankaOtwarte,
+  powodOdmowyZapisuPoranka,
+  OKNO_PORANKA_ZAMKNIETE_ZDANIE,
+} from '../../lib/oknoPoranka';
 
 // JEDNA DROGA B2 08.08.2026 — lokalne kopie 17 lokalizacji bólu, ich mapy nazw
 // i listy lokalizacji bez strony ciała usunięte; wszystkie trzy pochodzą teraz
@@ -313,6 +322,13 @@ export default function DziennikScreen() {
     tekstBrakuDanych: 'Brak wpisów — dodaj pierwszy powyżej.',
   });
 
+  // ⭐ PAS T2 19.08.2026 — stan okna poranka liczony PRZY KAŻDYM RENDERZE.
+  // ⚠️ Świadomie NIE jest w `useState`: gdyby był, zawodnik, który zostawił
+  // ekran otwarty przez południe, widziałby otwarte okno do końca dnia.
+  // ⛔ Tu rozstrzyga się wyłącznie WYGLĄD. O tym, czy zapis przejdzie,
+  // rozstrzyga zegar odczytany w `submitDailyLog` w chwili dotknięcia.
+  const oknoPorankaOtwarte = czyOknoPorankaOtwarte(new Date());
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([populateCalendarLinkSelect(), loadHistory()]);
@@ -334,6 +350,30 @@ export default function DziennikScreen() {
   const submitDailyLog = async () => {
     if (!currentUser) return;
     setError(null); setOk(null);
+
+    // ════════════════════════════════════════════════════════════
+    // ⭐⛔ ZAPORA OKNA PORANKA — STOI W ZAPISIE, NIE W WYGLĄDZIE.
+    //
+    // Zaszarzony kafel niżej jest UPRZEJMOŚCIĄ wobec zawodnika. TĄ zaporą
+    // jest ten warunek. Powód jest praktyczny, nie teoretyczny: wystarczy
+    // otworzyć ekran o 11:58, wyjść do szkoły i dotknąć „Zapisz" o 15:00 —
+    // `entryType` nadal brzmi `morning`, formularz nadal jest wypełniony,
+    // a wygląd był rozstrzygnięty przy renderze, nie przy dotknięciu.
+    // ⛔ Bez tej linijki istniałby stan, w którym zapis wstecz przechodzi (Z0).
+    //
+    // ⚠️ ZEGAR: `new Date()` to czas LOKALNY urządzenia zawodnika — ten sam,
+    // którym niżej liczony jest `startOfDay` deduplikacji. Nazwane wprost
+    // w `OKNO_PORANKA_ZEGAR`.
+    // ⛔ Odmowa NICZEGO NIE LICZY: nie zapisuje nieudanej próby, nie zwiększa
+    // żadnego licznika i nie zostawia śladu „kolejny dzień bez wpisu" (N1).
+    // ════════════════════════════════════════════════════════════
+    if (entryType === 'morning') {
+      const odmowa = powodOdmowyZapisuPoranka(new Date());
+      if (odmowa !== null) {
+        setError(odmowa);
+        return;
+      }
+    }
 
     if (hasPain && painIntensity === undefined) {
       setError('Zaznacz intensywność bólu.');
@@ -549,8 +589,18 @@ export default function DziennikScreen() {
       <Text style={styles.title}>Dziennik zawodnika</Text>
 
       <View style={styles.toggle}>
+        {/* ⭐⛔ PAS T2 19.08.2026 — KAFEL ANKIETY NIE ZNIKA PO 12:00.
+            Szarzeje (`toggleBtnPoOknie`) i zostaje dotykalny, żeby zawodnik
+            mógł dotknąć i PRZECZYTAĆ POWÓD. Reguła R5: kafel, który znika,
+            sprawia, że zawodnik nie odróżnia „wypełniłem" od „przepadło" —
+            a to są dwie różne rzeczy i tylko jedna z nich jest jego.
+            ⛔ Zaszarzenie NIE JEST czerwienią i nie jest ostrzeżeniem (Z2). */}
         <TouchableOpacity
-          style={[styles.toggleBtn, entryType === 'morning' && styles.toggleBtnActive]}
+          style={[
+            styles.toggleBtn,
+            entryType === 'morning' && styles.toggleBtnActive,
+            !oknoPorankaOtwarte && styles.toggleBtnPoOknie,
+          ]}
           onPress={() => setEntryType('morning')}
         >
           <Text style={[styles.toggleTxt, entryType === 'morning' && styles.toggleTxtActive]}>Wpis poranny</Text>
@@ -566,7 +616,19 @@ export default function DziennikScreen() {
       {error && <Text style={styles.error}>{error}</Text>}
       {ok && <Text style={styles.ok}>{ok}</Text>}
 
-      {entryType === 'morning' ? (
+      {entryType === 'morning' && !oknoPorankaOtwarte ? (
+        /* ⭐⛔ PAS T2 19.08.2026 — ZAMKNIĘTE OKNO PORANKA MÓWI, DLACZEGO.
+           ⛔ Formularz NIE JEST rysowany: pola, których nie da się zapisać,
+           byłyby zaproszeniem do pracy, która przepada przy dotknięciu
+           „Zapisz". ⭐ Ale kafel wyżej ZOSTAJE — to jest cała różnica między
+           „szarzeje" a „znika".
+           ⛔ To zdanie NIE MÓWI, ile dni z rzędu zawodnik nie wypełnił, bo
+           takiej liczby w tym produkcie nie ma i mieć nie będzie (N1).
+           ⛔ Wpis potreningowy jest nadal dostępny — okno dotyczy PORANKA. */
+        <View style={styles.oknoZamknieteBox}>
+          <Text style={styles.oknoZamknieteTxt}>{OKNO_PORANKA_ZAMKNIETE_ZDANIE}</Text>
+        </View>
+      ) : entryType === 'morning' ? (
         <>
           <Text style={styles.label}>Ile godzin spałeś?</Text>
           {/* ZMIANA 05.08.2026, na prośbę Kuby: było pole tekstowe (ryzyko
@@ -701,7 +763,16 @@ export default function DziennikScreen() {
         )}
       </View>
 
-      <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={submitDailyLog}>
+      {/* ⭐ PAS T2 19.08.2026 — przycisk po 12:00 SZARZEJE przy wpisie porannym,
+          a nie znika: zawodnik ma widzieć, że ekran jest ten sam i że to okno,
+          a nie awaria. ⛔ To jest wygląd — prawdziwa zapora stoi w
+          `submitDailyLog`, bo `disabled` przestaje obowiązywać w tej samej
+          sekundzie, w której ktoś zmieni ten JSX. */}
+      <TouchableOpacity
+        style={[styles.btn, (saving || (entryType === 'morning' && !oknoPorankaOtwarte)) && styles.btnDisabled]}
+        disabled={saving || (entryType === 'morning' && !oknoPorankaOtwarte)}
+        onPress={submitDailyLog}
+      >
         <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Zapisz wpis'}</Text>
       </TouchableOpacity>
 
@@ -808,6 +879,12 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: colors.brand, borderColor: colors.brand },
   toggleTxt: { ...typography.bodyMedium, fontSize: 14, color: colors.textPrimary },
   toggleTxtActive: { color: colors.white },
+  // ⭐ PAS T2 19.08.2026 — kafel ankiety po 12:00. ⛔ Sama przezroczystość,
+  // ZERO czerwieni: zamknięte okno to stan, nie ostrzeżenie (Z2 — czerwień
+  // należy w tym produkcie wyłącznie do bólu).
+  toggleBtnPoOknie: { opacity: 0.4 },
+  oknoZamknieteBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.surface, padding: spacing.md, marginBottom: spacing.md },
+  oknoZamknieteTxt: { ...typography.body, fontSize: 14, color: colors.textSecondary },
   // W1: nadtytuły na ink3 (koncepcja: ink3 = podpisy, nadtytuły)
   label: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: 6, marginTop: 4 },
   sectionLabel: { ...typography.bodyMedium, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: colors.textTertiary, marginBottom: spacing.md },

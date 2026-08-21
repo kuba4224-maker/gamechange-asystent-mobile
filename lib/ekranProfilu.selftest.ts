@@ -45,6 +45,10 @@ import {
   rozwojZNagrody,
   trafnoscZawodnika,
   policzObciazenieZOdczytow,
+  policzRozwojZOdczytow,
+  mapaSegmentowBlokow,
+  stanSegmentowSesji,
+  zdanieOSegmentachDoLogu,
   wejscieNagrodyZOdczytow,
   wejscieObciazeniaZOdczytow,
   wybierzPozycje,
@@ -58,12 +62,22 @@ import {
 } from './ekranProfilu';
 import {
   PROGI,
+  jednostkiZDziennika,
+  jednostkiZMeczow,
+  jednostkiZOdpowiedziKontrolnych,
+  opisNagrodyDoLogu,
   policzNagrode,
   wagaSesji,
+  zrodloSesji,
   type JednostkaPracy,
   type NagrodaZaPrace,
   type WejscieNagrody,
+  type WierszOdpowiedziKontrolnej,
 } from './nagrodaZaPrace';
+// ⛔ PAS P1 — ścieżka „Dziś" liczy się TYMI SAMYMI funkcjami, co produkcyjna.
+// Przepisanie jej tutaj dowodziłoby wyłącznie tego, że umiem przepisać.
+import { WERDYKTY_NIEPODANE } from './wykonanieSesji';
+import { meczDlaNagrody, type WierszMeczuWgl } from './wejsciaWgladow';
 import {
   OKNO_OBCIAZENIA_DNI,
   OKNO_ODNIESIENIA_DNI,
@@ -154,6 +168,9 @@ function odczytyZSesja(dzien = '2026-08-17'): OdczytyDoRozwoju {
     odpowiedziKontrolne: { rodzaj: 'jest', wiersze: [] },
     mecze: { rodzaj: 'jest', wiersze: [] },
     cele: { rodzaj: 'jest', wiersze: [{ segment_id: 'moc' }] },
+    // ⭐ PAS P1 — Blok, z którego pochodzi sesja `blok-1`. Do 19.08.2026 tego
+    // pola w ogóle nie było, a moduł podawał `segmentBloku: null` na sztywno.
+    bloki: { rodzaj: 'jest', wiersze: [{ id: 'blok-1', segment_id: 'fizycznosc' }] },
     zwrot: null,
   };
 }
@@ -267,6 +284,7 @@ check('⭐⛔ (A2b) moduł ekranu 2 NIE PRZEPISAŁ SOBIE wzoru obciążenia',
     odpowiedziKontrolne: { rodzaj: 'jest', wiersze: [] },
     mecze: { rodzaj: 'jest', wiersze: [] },
     cele: { rodzaj: 'jest', wiersze: [{ segment_id: 'moc' }, { segment_id: 'wytrzymalosc' }] },
+    bloki: { rodzaj: 'jest', wiersze: [] },
     zwrot: null,
   };
   const we = wejscieNagrodyZOdczytow(o);
@@ -772,6 +790,386 @@ console.log('\n══ F. IMPORTY URUCHOMIONE, NIE PRZECZYTANE ══════
     brakujace.length === 0, brakujace.join(' · '));
   check('⭐ (F4b) …a co najmniej trzy moduły sprawdzono URUCHOMIENIEM, nie odczytem',
     uruchomione.length >= 3, `uruchomione: ${uruchomione.join(', ')}`);
+}
+
+console.log('\n══ P1. ROZWÓJ NA „PROFILU" == ROZWÓJ NA „DZIŚ" ════════════════');
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ PAS P1 19.08.2026 — GŁÓWNA ASERCJA PASA
+// ═════════════════════════════════════════════════════════════════════
+//
+// ⛔ CO BYŁO ZEPSUTE. `wejscieNagrodyZOdczytow` podawało do `zrodloSesji`
+// `segmentBloku: null` NA SZTYWNO, więc na ekranie „Profil" KAŻDA sesja
+// dostawała trafność 1,0 — także ta, która na „Dziś" dostaje 1,5.
+// ⛔ Zawodnik widział pod słowem ROZWÓJ MNIEJ, niż naprawdę zrobił.
+//
+// ⚠️ TA SEKCJA LICZY OBIE ŚCIEŻKI NA JEDNYM ZESTAWIE WIERSZY. Ścieżka „Dziś"
+// nie jest tu przepisana ze zrozumienia — składa się z DOKŁADNIE TYCH SAMYCH
+// funkcji, które woła `app/(tabs)/dzis.tsx` (`zrodloSesji`,
+// `jednostkiZDziennika`, `jednostkiZOdpowiedziKontrolnych`, `jednostkiZMeczow`
+// po `meczDlaNagrody`). Poniżej stoi asercja tekstowa na WYCINKU pliku „Dziś",
+// która pilnuje, że te cztery wywołania tam nadal są — bo replika, która
+// rozjedzie się z oryginałem, dowodzi wyłącznie sama siebie.
+
+const T_P1 = trafnoscZawodnika({
+  wyniki: WYNIKI_PRAWDZIWE, pozycjaZDiagnozy: POZYCJA_PRAWDZIWA,
+  pozycjaZProfilu: null, rodzajePracy: 'silownia',
+});
+
+/** ⛔ `fizycznosc` ma w `WYNIKI_PRAWDZIWE` wynik 30 — najniższy, czyli TRAFNY. */
+const BLOKI_P1 = [
+  { id: 'blok-fiz', segment_id: 'fizycznosc' },
+  { id: 'blok-mental', segment_id: 'mental' },
+];
+
+const WYDARZENIA_P1 = [
+  // (1) sesja w Bloku o ZNANYM i TRAFNYM obszarze — to jest ta, której
+  //     „Profil" do 19.08 odbierał premię 1,5.
+  { id: 101, scheduled_date: '2026-08-17', status: 'completed', recurrence_rule: null,
+    focus_block_id: 'blok-fiz', event_type: 'own_training', source: 'player', planned_minutes: 60 },
+  // (2) sesja SPOZA Bloku — trafność 1,0 jest tu POPRAWNA i ma powód.
+  { id: 102, scheduled_date: '2026-08-16', status: 'completed', recurrence_rule: null,
+    focus_block_id: null, event_type: 'own_training', source: 'player', planned_minutes: 45 },
+  // (3) sesja wskazująca Blok, którego W ODCZYCIE NIE MA — trafność 1,0
+  //     jest tu NIEWIEDZĄ, nie pomiarem.
+  { id: 103, scheduled_date: '2026-08-15', status: 'completed', recurrence_rule: null,
+    focus_block_id: 'blok-skasowany', event_type: 'own_training', source: 'player', planned_minutes: 30 },
+];
+
+const DZIENNIK_P1 = [
+  { id: 11, entry_type: 'post_training', created_at: '2026-08-17T19:00:00Z',
+    payload: { duration_minutes: 60, rpe: 7 }, calendar_event_id: 101 },
+  { id: 12, entry_type: 'post_training', created_at: '2026-08-16T19:00:00Z',
+    payload: { duration_minutes: 45, rpe: 5 }, calendar_event_id: 102 },
+  { id: 13, entry_type: 'post_training', created_at: '2026-08-15T19:00:00Z',
+    payload: { duration_minutes: 30, rpe: 6 }, calendar_event_id: 103 },
+];
+
+const KONTROLE_P1 = [
+  { id: 'kontrola-1', focus_block_id: 'blok-fiz', answered_at: '2026-08-17T20:00:00Z' },
+];
+
+/**
+ * ⛔ DWA MECZE, I TO NIE JEST OZDOBA.
+ *   • id 7 — z RPE. `wagaMeczu()` liczy go wzorem `minuty × RPE`, więc długość
+ *     meczu NIE WCHODZI do wyniku i rozjazd `dlugoscMeczu` tu NIE WIDAĆ.
+ *   • id 8 — BEZ RPE. Dopiero tu mianownikiem jest długość meczu: 60 minut
+ *     rozegranych z 60 to 4 punkty, a z podstawionych 90 — 2,67.
+ * ⚠️ Gdyby stał tu wyłącznie mecz z RPE, asercja o przemianowaniu byłaby
+ * zielona i NIC BY NIE MIERZYŁA. Zmierzone na tej właśnie asercji 19.08.2026.
+ */
+const MECZE_P1: WierszMeczuWgl[] = [
+  // ⭐ PLAN-D-D2 19.08.2026 — `calendar_event_id` doszło do `WierszMeczuWgl`.
+  // `null` = wiersz niezwiązany z wystąpieniem; ten pas mierzy przemianowanie
+  // długości meczu, więc wiązanie jest tu nieistotne i ma być jawnie puste (R5).
+  { id: 7, created_at: '2026-08-14T12:00:00Z', match_rpe: 7,
+    entered_recovery_state: null, minutes_played: 60, match_length_minutes: 60,
+    calendar_event_id: null },
+  { id: 8, created_at: '2026-08-13T12:00:00Z', match_rpe: null,
+    entered_recovery_state: null, minutes_played: 60, match_length_minutes: 60,
+    calendar_event_id: null },
+];
+
+function odczytyP1(nadpisz: Partial<OdczytyDoRozwoju> = {}): OdczytyDoRozwoju {
+  return {
+    wydarzenia: { rodzaj: 'jest', wiersze: WYDARZENIA_P1 },
+    dziennik: { rodzaj: 'jest', wiersze: DZIENNIK_P1 },
+    odpowiedziKontrolne: { rodzaj: 'jest', wiersze: KONTROLE_P1 },
+    mecze: { rodzaj: 'jest', wiersze: MECZE_P1 },
+    cele: { rodzaj: 'jest', wiersze: [{ segment_id: 'fizycznosc' }] },
+    bloki: { rodzaj: 'jest', wiersze: BLOKI_P1 },
+    zwrot: T_P1.zwrot,
+    ...nadpisz,
+  };
+}
+
+/**
+ * ⭐ ŚCIEŻKA „DZIŚ", ZŁOŻONA Z TYCH SAMYCH FUNKCJI, CO PRODUKCYJNA.
+ * ⛔ `mapaBloku === null` odwzorowuje defekt: tak wyglądał „Profil" do 19.08.
+ */
+function wejscieJakNaDzis(o: OdczytyDoRozwoju, mapaBloku: ReadonlyMap<string, string> | null): WejscieNagrody {
+  const wiersze = o.dziennik.rodzaj === 'nie_odczytano' ? [] : o.dziennik.wiersze;
+  const minuty = new Map<number, number>();
+  const rpe = new Map<number, number>();
+  const ids = new Set<number>();
+  for (const l of wiersze) {
+    const id = l?.calendar_event_id;
+    if (typeof id !== 'number') continue;
+    ids.add(id);
+    const pl = l?.payload as Record<string, unknown> | null;
+    if (pl === null || typeof pl !== 'object') continue;
+    const min = pl.duration_minutes;
+    if (typeof min === 'number' && Number.isFinite(min) && min > 0) minuty.set(id, Math.max(minuty.get(id) ?? 0, min));
+    const r = pl.rpe;
+    if (typeof r === 'number' && Number.isFinite(r) && r > 0 && r <= 10) rpe.set(id, Math.max(rpe.get(id) ?? 0, r));
+  }
+  const segment = (idBloku: string | null | undefined): string | null =>
+    (mapaBloku === null || typeof idBloku !== 'string' || idBloku.length === 0
+      ? null : mapaBloku.get(idBloku) ?? null);
+  return {
+    sesje: zrodloSesji({
+      wydarzenia: o.wydarzenia.rodzaj === 'nie_odczytano' ? null : o.wydarzenia.wiersze,
+      werdykty: WERDYKTY_NIEPODANE,
+      wpisyDziennika: ids,
+      segmentBloku: mapaBloku,
+      minutyZWpisow: minuty,
+      rpeZWpisow: rpe,
+      zwrot: o.zwrot,
+    }),
+    dziennik: { rodzaj: 'jest', jednostki: jednostkiZDziennika(wiersze) },
+    odpowiedziKontrolne: {
+      rodzaj: 'jest',
+      jednostki: jednostkiZOdpowiedziKontrolnych(
+        (o.odpowiedziKontrolne.rodzaj === 'nie_odczytano' ? [] : o.odpowiedziKontrolne.wiersze)
+          .map((c): WierszOdpowiedziKontrolnej => ({
+            id: c.id, answered_at: c.answered_at ?? null, segment: segment(c.focus_block_id),
+          })),
+      ),
+    },
+    mecze: {
+      rodzaj: 'jest',
+      jednostki: jednostkiZMeczow(
+        (o.mecze.rodzaj === 'nie_odczytano' ? [] : o.mecze.wiersze).map(meczDlaNagrody),
+      ),
+    },
+    segmentyCelow: {
+      rodzaj: 'pelne',
+      segmenty: new Set((o.cele.rodzaj === 'nie_odczytano' ? [] : o.cele.wiersze)
+        .map((g) => g.segment_id)
+        .filter((x): x is string => typeof x === 'string' && x.length > 0)),
+    },
+  };
+}
+
+const MAPA_P1 = new Map(BLOKI_P1.map((b) => [b.id, b.segment_id] as const));
+
+{
+  // ── P1-1: mapa segmentów powstaje z PRAWDZIWYCH wierszy, nie z `null` ──
+  const mapa = mapaSegmentowBlokow({ rodzaj: 'jest', wiersze: BLOKI_P1 });
+  check('⭐ (P1-1) `mapaSegmentowBlokow` oddaje `focus_block_id → segment_id`, nie `null`',
+    mapa !== null && mapa.get('blok-fiz') === 'fizycznosc' && mapa.size === 2,
+    JSON.stringify(mapa === null ? null : [...mapa]));
+  check('⭐ (P1-1b) …a nieodczytana tabela Bloków daje `null`, nie pustą mapę udającą „nie masz Bloków"',
+    mapaSegmentowBlokow({ rodzaj: 'nie_odczytano', powod: 'RLS' }) === null,
+    'nieudany odczyt zamienił się w twierdzenie o zawodniku');
+
+  const we = wejscieNagrodyZOdczytow(odczytyP1());
+  const segmenty = we.sesje.rodzaj === 'jest'
+    ? we.sesje.jednostki.filter((j) => j.rodzaj === 'sesja_z_dowodem').map((j) => j.segment)
+    : [];
+  check('⭐⭐ (P1-1c) sesja z Bloku `blok-fiz` wchodzi na „Profil" Z SEGMENTEM `fizycznosc`',
+    segmenty.includes('fizycznosc'),
+    `segmenty jednostek: ${JSON.stringify(segmenty)}`);
+}
+
+{
+  // ── P1-2: ⭐⭐⭐ GŁÓWNA ASERCJA PASA — JEDEN ZESTAW WIERSZY, DWIE ŚCIEŻKI ──
+  const o = odczytyP1();
+  const profil = policzRozwojZOdczytow(o);
+  const dzis = policzNagrode(wejscieJakNaDzis(o, MAPA_P1));
+  // ⛔ STAN SPRZED PASA P1, odtworzony CO DO ARGUMENTU: `segmentBloku: null`.
+  const przed = policzNagrode(wejscieJakNaDzis(o, null));
+
+  check('⭐⭐⭐ (P1-2) ROZWÓJ na „Profilu" i na „Dziś" z TYCH SAMYCH wierszy — TA SAMA LICZBA',
+    profil.rodzaj === 'policzona' && dzis.rodzaj === 'policzona' && profil.punkty === dzis.punkty,
+    `Profil=${profil.rodzaj === 'policzona' ? profil.punkty : profil.rodzaj} `
+    + `vs Dziś=${dzis.rodzaj === 'policzona' ? dzis.punkty : dzis.rodzaj}`);
+  check('⭐⭐ (P1-2b) …i TA SAMA praca w celu, i TYLE SAMO jednostek, i TE SAME odznaki',
+    profil.rodzaj === 'policzona' && dzis.rodzaj === 'policzona'
+    && profil.punktyWCelu === dzis.punktyWCelu
+    && profil.jednostki === dzis.jednostki
+    && profil.odznaki.map((z) => z.id).join(',') === dzis.odznaki.map((z) => z.id).join(','),
+    `${opisNagrodyDoLogu(profil)} VS ${opisNagrodyDoLogu(dzis)}`);
+  // ⛔ BEZ TEJ ASERCJI POWYŻSZE NIC NIE MIERZY: gdyby mapa segmentów nie
+  // zmieniała ani jednej liczby, równość byłaby prawdziwa i bezużyteczna.
+  check('⭐⭐⭐ (P1-2c) …a stan SPRZED pasa (`segmentBloku: null`) dawał liczbę NIŻSZĄ — poprawka coś rusza',
+    profil.rodzaj === 'policzona' && przed.rodzaj === 'policzona' && przed.punkty < profil.punkty,
+    `przed=${przed.rodzaj === 'policzona' ? przed.punkty : przed.rodzaj} `
+    + `po=${profil.rodzaj === 'policzona' ? profil.punkty : profil.rodzaj}`);
+  check('⭐⭐ (P1-2d) ⛔ ROZWÓJ ROŚNIE, NIE MALEJE — poprawka nie zabiera nikomu ani punktu',
+    profil.rodzaj === 'policzona' && przed.rodzaj === 'policzona' && profil.punkty >= przed.punkty,
+    'poprawka odebrała zawodnikowi pracę, którą wykonał');
+}
+
+{
+  // ── P1-2e: WYCINEK PLIKU „DZIŚ" — replika wyżej nie rozjechała się z oryginałem ──
+  const zrodloDzis = readFileSync('app/(tabs)/dzis.tsx', 'utf8');
+  const od = zrodloDzis.indexOf('const wejsciaNagrody: WejscieNagrody = {');
+  const wycinek = od < 0 ? '' : zrodloDzis.slice(od, od + 4000);
+  check('⭐⛔ (P1-2e) wycinek „Dziś" z wejściem nagrody ISTNIEJE i nie jest pusty',
+    wycinek.length > 500, `długość wycinka: ${wycinek.length}`);
+  const brakujace = ['zrodloSesji(', 'segmentBloku', 'jednostkiZDziennika(',
+    'jednostkiZOdpowiedziKontrolnych(', 'jednostkiZMeczow(', 'meczDlaNagrody']
+    .filter((n) => !wycinek.includes(n));
+  check('⭐⛔ (P1-2f) …i woła DOKŁADNIE te funkcje, z których złożona jest replika wyżej',
+    wycinek.length > 500 && brakujace.length === 0, `brakuje w wycinku: ${brakujace.join(', ')}`);
+}
+
+{
+  // ── P1-3: ⛔ BRAK MAPY ≠ TRAFNOŚĆ 1,0 — STAN MA NAZWĘ (R5) ──
+  const znam = stanSegmentowSesji(odczytyP1());
+  const bezMapy = stanSegmentowSesji(odczytyP1({ bloki: { rodzaj: 'nie_odczytano', powod: 'RLS na focus_blocks' } }));
+  check('⭐⭐ (P1-3) „nie odczytałem Bloków" ma WŁASNY, NAZWANY stan — nie zlewa się z „znam mapę"',
+    bezMapy.rodzaj === 'nie_znam_mapy' && znam.rodzaj === 'znam_mape',
+    `${bezMapy.rodzaj} vs ${znam.rodzaj}`);
+  check('⭐⭐ (P1-3b) …a przy znanej mapie „spoza Bloku" i „Blok nieznany" są POLICZONE OSOBNO',
+    znam.rodzaj === 'znam_mape' && znam.zSegmentem === 1 && znam.spozaBloku === 1 && znam.blokNieznany === 1,
+    JSON.stringify(znam));
+  check('⭐⛔ (P1-3c) niewiedza WYCHODZI DO LOGU — obie odmiany mówią, ⛔ a pełna wiedza MILCZY',
+    zdanieOSegmentachDoLogu(bezMapy) !== null
+    && zdanieOSegmentachDoLogu(znam) !== null
+    && zdanieOSegmentachDoLogu({ rodzaj: 'znam_mape', zSegmentem: 3, spozaBloku: 1, blokNieznany: 0 }) === null,
+    `bezMapy=${zdanieOSegmentachDoLogu(bezMapy)} · znam=${zdanieOSegmentachDoLogu(znam)}`);
+  // ⛔ WYCINEK, NIE „czy napis pada gdziekolwiek". Zmierzone na tej asercji
+  // 19.08.2026: wersja pytająca o samą obecność wywołania NIE ZAPALIŁA SIĘ
+  // na mutacji, która policzyła zdanie i WYRZUCIŁA je zamiast wypisać.
+  // Wywołanie bez odbiorcy to kod, który wygląda jak reguła i nic nie robi.
+  {
+    const od = ekranZywy.indexOf('const zdanieOSegmentach');
+    const wycinek = od < 0 ? '' : ekranZywy.slice(od, od + 400);
+    check('⭐⛔ (P1-3d) wycinek ekranu wokół `stanSegmentowSesji` ISTNIEJE i nie jest pusty',
+      wycinek.length > 100, `długość wycinka: ${wycinek.length}`);
+    check('⭐⛔ (P1-3d2) …a zdanie o niewiedzy TRAFIA DO LOGU, nie tylko powstaje',
+      wycinek.includes('zdanieOSegmentachDoLogu(')
+      && /console\.warn\(\s*zdanieOSegmentach\s*\)/.test(wycinek),
+      'ekran liczy zdanie i je wyrzuca — niewiedza wraca do ciszy');
+  }
+  check('⭐⛔ (P1-3e) ekran NIE PODAJE JUŻ `segmentBloku: null` — ani ekran, ani moduł',
+    !/segmentBloku:\s*null/.test(modulZywy) && !/segmentBloku:\s*null/.test(ekranZywy),
+    'sztywne `null` wróciło — rozwój znów jest zaniżony');
+}
+
+{
+  // ── P1-4: ⛔ OBCIĄŻENIE NIE RUSZA SIĘ ANI O SETNĄ ──
+  const zMapa = policzObciazenieZOdczytow(odczytyP1(), { dzis: DZIS_D1 });
+  const bezMapy = policzObciazenieZOdczytow(
+    odczytyP1({ bloki: { rodzaj: 'nie_odczytano', powod: 'RLS' } }), { dzis: DZIS_D1 });
+  const bezZwrotu = policzObciazenieZOdczytow(odczytyP1({ zwrot: null }), { dzis: DZIS_D1 });
+  const liczba = (x: ObciazenieWOknie) => (x.rodzaj === 'policzone' ? x.punkty : NaN);
+  check('⭐⭐⭐ (P1-4) TE SAME wiersze z mapą segmentów i bez niej → OBCIĄŻENIE IDENTYCZNE',
+    liczba(zMapa.okno) === liczba(bezMapy.okno)
+    && liczba(zMapa.odniesienie) === liczba(bezMapy.odniesienie)
+    && Number.isFinite(liczba(zMapa.okno)),
+    `${opisObciazeniaDoLogu(zMapa.okno)} VS ${opisObciazeniaDoLogu(bezMapy.okno)}`);
+  check('⭐⭐ (P1-4b) …i tak samo ze zwrotem obszarów i bez niego (zapadka D1-B3c nadal zielona)',
+    liczba(zMapa.okno) === liczba(bezZwrotu.okno),
+    `${opisObciazeniaDoLogu(zMapa.okno)} VS ${opisObciazeniaDoLogu(bezZwrotu.okno)}`);
+  // ⛔ WYCINEK, NIE CAŁY PLIK: „czy słowo pada gdziekolwiek" zapaliłoby się
+  // na komentarzu i gasło przy prawdziwym rozjeździe.
+  const od = zrodloModulu.indexOf('export function wejscieObciazeniaZOdczytow');
+  const wycinek = od < 0 ? '' : bezKomentarzy(zrodloModulu.slice(od, zrodloModulu.indexOf('\n}\n', od)));
+  check('⭐⛔ (P1-4c) wycinek `wejscieObciazeniaZOdczytow` ISTNIEJE i NIE ZNA słowa „segment"',
+    wycinek.length > 400 && !/segment/i.test(wycinek) && !/trafnos/i.test(wycinek),
+    `długość ${wycinek.length}; trafienia: ${(wycinek.match(/segment|trafnos/gi) ?? []).join(', ')}`);
+}
+
+{
+  // ── P1-5: MECZ — drugi rozjazd, znaleziony przez asercję główną ──
+  const tylkoMecz = odczytyP1({
+    wydarzenia: { rodzaj: 'jest', wiersze: [] },
+    dziennik: { rodzaj: 'jest', wiersze: [] },
+    odpowiedziKontrolne: { rodzaj: 'jest', wiersze: [] },
+  });
+  const profil = policzRozwojZOdczytow(tylkoMecz);
+  const dzis = policzNagrode(wejscieJakNaDzis(tylkoMecz, MAPA_P1));
+  // Stan sprzed pasa: surowy wiersz bazy udający `WierszMeczu` — `dlugoscMeczu`
+  // nigdy nie powstaje, więc `wagaMeczu()` podstawia 90 minut ZAWSZE.
+  const suma = (js: readonly JednostkaPracy[]) => js.reduce((a, j) => a + j.punkty, 0);
+  const przed = suma(jednostkiZMeczow(MECZE_P1 as unknown as Parameters<typeof jednostkiZMeczow>[0]));
+  const po = suma(jednostkiZMeczow(MECZE_P1.map(meczDlaNagrody)));
+  check('⭐⭐ (P1-5) mecz 60-minutowy rozegrany w całości daje na „Profilu" TYLE SAMO, co na „Dziś"',
+    profil.rodzaj === 'policzona' && dzis.rodzaj === 'policzona' && profil.punkty === dzis.punkty,
+    `Profil=${profil.rodzaj === 'policzona' ? profil.punkty : profil.rodzaj} `
+    + `vs Dziś=${dzis.rodzaj === 'policzona' ? dzis.punkty : dzis.rodzaj}`);
+  check('⭐⭐ (P1-5b) …a bez przemianowania `match_length_minutes → dlugoscMeczu` było MNIEJ',
+    przed < po, `bez mapowania ${przed} · z mapowaniem ${po}`);
+  check('⭐⛔ (P1-5c) ekran „Profil" czyta kolumny meczu z JEDNEJ listy (`SELECT_MECZOW`), nie z własnego napisu',
+    /SELECT_MECZOW/.test(ekranZywy) && !/select\('id,created_at,minutes_played,match_rpe'\)/.test(ekranZywy),
+    'lista kolumn meczu ma na „Profilu" drugą kopię — pierwsza poprawka je rozjedzie');
+}
+
+{
+  // ── P1-6: ⭐ BATERIA MUTACJI PASA P1 ──
+  // ⛔ NAJPIERW ASERCJA ODWROTNA: na PRAWDZIWYM kodzie zero zapaleń.
+  const o = odczytyP1();
+  const prawdziwe: Array<[string, () => boolean]> = [
+    ['R1 rozwój Profil == rozwój Dziś', () => {
+      const a = policzRozwojZOdczytow(o); const b = policzNagrode(wejscieJakNaDzis(o, MAPA_P1));
+      return a.rodzaj === 'policzona' && b.rodzaj === 'policzona' && a.punkty === b.punkty;
+    }],
+    ['R2 stan segmentów ma trzy osobne liczby', () => {
+      const st = stanSegmentowSesji(o);
+      return st.rodzaj === 'znam_mape' && st.zSegmentem + st.spozaBloku + st.blokNieznany === 3;
+    }],
+    ['R3 obciążenie nie zależy od mapy segmentów', () => {
+      const a = policzObciazenieZOdczytow(o, { dzis: DZIS_D1 }).okno;
+      const b = policzObciazenieZOdczytow(odczytyP1({ bloki: { rodzaj: 'nie_odczytano', powod: 'x' } }), { dzis: DZIS_D1 }).okno;
+      return a.rodzaj === 'policzone' && b.rodzaj === 'policzone' && a.punkty === b.punkty;
+    }],
+    ['R4 mecz przemianowany waży więcej niż nieprzemianowany', () => {
+      const s2 = (js: readonly JednostkaPracy[]) => js.reduce((a, j) => a + j.punkty, 0);
+      return s2(jednostkiZMeczow(MECZE_P1 as unknown as Parameters<typeof jednostkiZMeczow>[0]))
+        < s2(jednostkiZMeczow(MECZE_P1.map(meczDlaNagrody)));
+    }],
+  ];
+  const zapalone = prawdziwe.filter(([, f]) => !f()).map(([n]) => n);
+  check(`⭐⛔ (P1-6) ASERCJA ODWROTNA — na PRAWDZIWYM kodzie ${prawdziwe.length}/${prawdziwe.length} reguł trzyma, zero zapaleń`,
+    zapalone.length === 0, `zapaliły się: ${zapalone.join(' · ')}`);
+
+  type Mutacja = [string, () => boolean];
+  const mutacje: Mutacja[] = [
+    ['MP1 ⛔⛔ mapa segmentów wraca na `null` (defekt sprzed pasa P1)', () => {
+      const zmutowane = policzNagrode(wejscieJakNaDzis(o, null));
+      const prawda = policzRozwojZOdczytow(o);
+      // Zapala się, bo ta sama praca dostaje na dwóch ekranach dwie liczby.
+      return zmutowane.rodzaj === 'policzona' && prawda.rodzaj === 'policzona'
+        && zmutowane.punkty < prawda.punkty;
+    }],
+    ['MP2 ⛔ brak Bloku daje PO CICHU 1,0 — stan przestaje mieć nazwę', () => {
+      // Mutant: stan zawsze „znam mapę, wszystko rozpoznane".
+      const zmutowany = (): { rodzaj: 'znam_mape'; zSegmentem: number; spozaBloku: number; blokNieznany: number } =>
+        ({ rodzaj: 'znam_mape', zSegmentem: WYDARZENIA_P1.length, spozaBloku: 0, blokNieznany: 0 });
+      const prawda = stanSegmentowSesji(o);
+      return zdanieOSegmentachDoLogu(zmutowany()) === null
+        && prawda.rodzaj === 'znam_mape' && prawda.blokNieznany > 0
+        && zdanieOSegmentachDoLogu(prawda) !== null;
+    }],
+    ['MP3 ⛔ nieodczytane Bloki udają pustą listę Bloków', () => {
+      // Mutant: `?? []` zamiast `null` — awaria odczytu staje się twierdzeniem.
+      const zmutowana = new Map<string, string>();
+      const prawdziwaNull = mapaSegmentowBlokow({ rodzaj: 'nie_odczytano', powod: 'RLS' });
+      const stanZmutowany = zdanieOSegmentachDoLogu(
+        { rodzaj: 'znam_mape', zSegmentem: 0, spozaBloku: WYDARZENIA_P1.length, blokNieznany: 0 });
+      return zmutowana.size === 0 && prawdziwaNull === null && stanZmutowany === null;
+    }],
+    ['MP4 ⛔⛔ obciążenie zaczyna zależeć od trafności', () => {
+      const f = {
+        eventType: 'own_training', source: 'player', maSesjeTrenera: false,
+        minutyZmierzone: 60, minutyZPlanu: 60, rpeZmierzone: 7,
+      };
+      const mutantBaza = wagaSesji({ ...f, trafnosc: 1.0 }).punkty;
+      const mutantPremia = wagaSesji({ ...f, trafnosc: 1.5 }).punkty;
+      const prawdziwe2 = obciazenieSesji({ minuty: 60, ciezkosc: 7 });
+      return mutantBaza !== mutantPremia
+        && prawdziwe2.rodzaj === 'zmierzone' && prawdziwe2.surowe === mutantBaza;
+    }],
+    ['MP5 ⛔ mecz bez przemianowania — „Profil" znów niżej niż „Dziś"', () => {
+      const s2 = (js: readonly JednostkaPracy[]) => js.reduce((a, j) => a + j.punkty, 0);
+      return s2(jednostkiZMeczow(MECZE_P1 as unknown as Parameters<typeof jednostkiZMeczow>[0]))
+        < s2(jednostkiZMeczow(MECZE_P1.map(meczDlaNagrody)));
+    }],
+  ];
+  let nieZapalone: string | null = null;
+  for (const [nazwa, uruchom] of mutacje) {
+    const zapalila = uruchom();
+    console.log(`       ${nazwa}   →   ${zapalila ? 'ZAPALIŁA' : '⛔ CISZA'}`);
+    if (!zapalila && nieZapalone === null) nieZapalone = nazwa;
+  }
+  check(`⭐⭐ (P1-6b) KAŻDA z ${mutacje.length} mutacji pasa P1 zapala strażnika imiennie`,
+    nieZapalone === null, `nie zapaliła: ${nieZapalone}`);
+  const poBaterii = prawdziwe.filter(([, f]) => !f()).map(([n]) => n);
+  check('⭐ (P1-6c) …a prawdziwe reguły są PO baterii nietknięte',
+    poBaterii.length === 0, `zapaliły się: ${poBaterii.join(' · ')}`);
 }
 
 console.log('\n══ G. BATERIA MUTACJI ══════════════════════════════════════════');

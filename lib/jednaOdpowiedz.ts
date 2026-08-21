@@ -152,11 +152,46 @@ export const DLACZEGO_OSLONA =
 
 /**
  * „Dlaczego akurat to" przy pracy powiązanej z wąskim gardłem.
- * ⚠️ BRZMIENIE ISTNIEJĄCE: do 13.08.2026 stało w karcie rekomendacji jako
- * `headerSlot` („Pomaga Ci przy: …"). Przeniesione co do znaku.
+ *
+ * ⭐ BRZMIENIE ZMIENIONE 19.08.2026, PAS T2 — ⚠️ DO PRZEJRZENIA PRZEZ KUBĘ.
+ *
+ * 🪦 NAGROBEK (B3). Do 19.08.2026 stało tu:
+ *
+ *     return `Pomaga Ci przy: ${etykietaGardla}`;
+ *
+ * czyli — jak to nazwał pas W1 (pozycja W1-L2, defekt D-10) — sklejka
+ * „przyimek + etykieta obszaru", a nie zdanie. Zawodnik czytał nagłówek
+ * „Dlaczego akurat to", a pod nim dwukropek i rzeczownik. Kuba przyjął
+ * propozycję pasa W1 dnia 18.08.2026 i to jest ona.
+ *
+ * ⛔ STARA STAŁA NIE ZOSTAJE MARTWA — nie ma jej, jest ten nagrobek.
+ *
+ * ⚠️ ⭐ JEDNA RZECZ DO ROZSTRZYGNIĘCIA PRZEZ KUBĘ — WIELKA CZY MAŁA LITERA.
+ * Polecenie T2 podaje docelowe zdanie jako „Bo to jest dziś Twój największy
+ * zwrot — **moc**." (mała litera), a etykieta obszaru w bazie brzmi „Moc"
+ * (wielka). Nota pasa W1 proponowała `${etykieta}` bez zmiany. Stoi tu
+ * WERSJA Z POLECENIA: pierwsza litera etykiety schodzi do małej, bo nazwa
+ * obszaru stoi w środku zdania, a nie na jego początku. ⛔ To jest jedyne
+ * miejsce tego pasa, w którym musiałem wybrać za Kubę — jedno jego słowo
+ * odwraca `zEtykietyWZdaniu` na zwykłe `${etykietaGardla}`.
  */
 export function dlaczegoZGardla(etykietaGardla: string): string {
-  return `Pomaga Ci przy: ${etykietaGardla}`;
+  return `Bo to jest dziś Twój największy zwrot — ${zEtykietyWZdaniu(etykietaGardla)}.`;
+}
+
+/**
+ * Etykieta obszaru wstawiana W ŚRODEK zdania — pierwsza litera schodzi do małej.
+ *
+ * ⚠️ `toLocaleLowerCase('pl-PL')`, nie `toLowerCase()`: pierwsza litera etykiety
+ * bywa polska (np. „Śmiałość podania"), a odwzorowanie wielkości liter dla
+ * polszczyzny należy podać wprost — tak samo jak robi to `zWielkiej`
+ * w `lib/widokTygodnia.ts`. Jedna choroba, jedno lekarstwo.
+ *
+ * ⛔ Zmieniana jest WYŁĄCZNIE pierwsza litera. `slice(1)` zostaje nietknięty,
+ * więc etykieta w rodzaju „Skok dosiężny CMJ" nie traci swojego skrótu.
+ */
+function zEtykietyWZdaniu(etykieta: string): string {
+  return etykieta.length === 0 ? etykieta : etykieta[0].toLocaleLowerCase('pl-PL') + etykieta.slice(1);
 }
 
 // ─────────────────────────────────────────────────────────────────────

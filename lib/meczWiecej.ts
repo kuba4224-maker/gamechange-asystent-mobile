@@ -391,6 +391,14 @@ export const PUSTE_WIECEJ_O_MECZU: WiecejOMeczu = {
 export type WierszKontekstuMeczu = {
   user_id: string;
   game_type: string;
+  /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026 — WYSTĄPIENIE, KTÓREGO TEN WIERSZ DOTYCZY.
+   * Kolumna założona na produkcji 19.08.2026 (`bigint`, FK → `calendar_events(id)`
+   * `on delete set null`, unikalny indeks częściowy po `calendar_event_id`).
+   * ⛔ `null` = nie wiem, z którego wystąpienia to jest. Wtedy licznik pracy
+   * policzy ten wiersz OSOBNO, bo nie ma czym go z wydarzeniem zestawić.
+   */
+  calendar_event_id: number | null;
   minutes_played: number | null;
   match_length_minutes: number | null;
   match_rpe: number | null;
@@ -404,6 +412,81 @@ export type WierszKontekstuMeczu = {
 };
 
 /** Co ekran wie o wierszu meczu w TEJ wizycie. ⛔ Trzy wartości, nie dwie. */
+/**
+ * ⭐ PLAN-D-D2 — CO WOLNO ZMIENIĆ W ISTNIEJĄCYM WIERSZU.
+ * ⛔ `calendar_event_id` jest OPCJONALNE i nigdy nie idzie jako `null`:
+ * dokładanie do wiersza NIE MA PRAWA skasować wiązania, które ten wiersz
+ * już ma. Odebranie wiązania przywróciłoby podwójne liczenie po cichu.
+ */
+export type ZmianyKontekstuMeczu =
+  Omit<WierszKontekstuMeczu, 'user_id' | 'game_type' | 'calendar_event_id'>
+  & { calendar_event_id?: number };
+
+/**
+ * ⭐⭐ PLAN-D-D2 19.08.2026 — CZY WOLNO ZWIĄZAĆ TEN WIERSZ Z TYM WYSTĄPIENIEM.
+ *
+ * ⛔ GRANICA, KTÓREJ KLUCZ OBCY NIE PILNUJE (§3 polecenia D2). FK sprawdza,
+ * że `calendar_events.id` ISTNIEJE — ⛔ nie sprawdza, że należy do TEGO
+ * zawodnika. Wiersz meczu z cudzym wystąpieniem przeszedłby przez bazę bez
+ * mrugnięcia i pochłonąłby cudzą jednostkę pracy.
+ */
+export type WiazanieZWydarzeniem =
+  | { rodzaj: 'jest'; idWydarzenia: number }
+  | { rodzaj: 'brak'; powod: string };
+
+export function ustalWiazanieMeczu(w: {
+  /** `calendar_events.id` wystąpienia, z którego kafla wyszedł zapis. */
+  idWydarzenia: number | null;
+  /**
+   * ⛔ Wystąpienia, KTÓRE ZAWODNIK MA NA SWOIM EKRANIE. `null` znaczy
+   * „nie znam tej listy" i jest TRZECIM STANEM (R5), nie pustym zbiorem:
+   * przy nieznanej liście NIE wiążemy, bo nie mamy czym sprawdzić właściciela.
+   */
+  wydarzeniaZawodnika: ReadonlySet<number> | null;
+}): WiazanieZWydarzeniem {
+  const id = w.idWydarzenia;
+  if (typeof id !== 'number' || !Number.isFinite(id)) {
+    return { rodzaj: 'brak', powod: 'ekran nie podał wystąpienia — wiersz zostaje niezwiązany' };
+  }
+  if (w.wydarzeniaZawodnika === null) {
+    return {
+      rodzaj: 'brak',
+      powod: '⛔ nie znam listy wydarzeń tego zawodnika — nie wiążę wiersza '
+        + 'z wystąpieniem, którego właściciela nie umiem sprawdzić',
+    };
+  }
+  if (!w.wydarzeniaZawodnika.has(id)) {
+    return {
+      rodzaj: 'brak',
+      powod: `⛔ wystąpienie ${id} NIE JEST na ekranie tego zawodnika — `
+        + 'klucz obcy tego nie pilnuje, więc pilnuję tutaj',
+    };
+  }
+  return { rodzaj: 'jest', idWydarzenia: id };
+}
+
+/**
+ * ⭐⭐ PLAN-D-D2 19.08.2026 — DRUGI WIERSZ NA TO SAMO WYSTĄPIENIE.
+ *
+ * Unikalny indeks częściowy `match_contexts_jeden_wiersz_na_wydarzenie`
+ * zamienia cichy duplikat w BŁĄD. ⛔ Zawodnikowi nie wolno pokazać kodu
+ * `23505` — ekran ma powiedzieć zdanie (§4.3 polecenia D2).
+ */
+export const INDEKS_JEDEN_WIERSZ_NA_WYDARZENIE = 'match_contexts_jeden_wiersz_na_wydarzenie';
+
+export const MECZ_JUZ_MA_WIERSZ =
+  'Ten mecz jest już u nas zapisany — pociągnij ekran w dół, a dołożę to do tego, co masz.';
+
+/** ⛔ Rozpoznajemy PO KODZIE `23505` albo po nazwie indeksu, nie po zgadywaniu. */
+export function toJestDrugiWierszNaMecz(blad: unknown): boolean {
+  if (blad === null || typeof blad !== 'object') return false;
+  const b = blad as { code?: unknown; message?: unknown; details?: unknown };
+  const kod = typeof b.code === 'string' ? b.code : '';
+  const tekst = `${typeof b.message === 'string' ? b.message : ''} `
+    + `${typeof b.details === 'string' ? b.details : ''}`;
+  return kod === '23505' || tekst.includes(INDEKS_JEDEN_WIERSZ_NA_WYDARZENIE);
+}
+
 export type StanKontekstuMeczu =
   /** nie zapisaliśmy jeszcze nic — pierwszy zapis będzie wstawieniem */
   | { rodzaj: 'brak' }
@@ -412,7 +495,7 @@ export type StanKontekstuMeczu =
 
 export type DecyzjaZapisuMeczu =
   | { rodzaj: 'wstaw'; wiersz: WierszKontekstuMeczu; powod: string }
-  | { rodzaj: 'aktualizuj'; id: number; zmiany: Omit<WierszKontekstuMeczu, 'user_id' | 'game_type'>; powod: string }
+  | { rodzaj: 'aktualizuj'; id: number; zmiany: ZmianyKontekstuMeczu; powod: string }
   | { rodzaj: 'nie_zapisuj'; powod: string; zdanie: string | null };
 
 function liczbaAlbo(x: number | null, min: number, max: number): number | null {
@@ -451,6 +534,14 @@ export function zdecydujOZapisieMeczu(w: {
   stan: StanKontekstuMeczu;
   ocena: OcenaMeczu;
   wiecej: WiecejOMeczu;
+  /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026 — wystąpienie, z którego kafla wyszedł zapis.
+   * ⛔ Nieobowiązkowe wyłącznie po to, żeby stary wołający nie przestał się
+   * kompilować; produkcyjny ekran PODAJE JE ZAWSZE i pilnuje tego strażnik.
+   */
+  idWydarzenia?: number | null;
+  /** ⛔ Wystąpienia zawodnika. `null` = nie znam listy → nie wiążę. */
+  wydarzeniaZawodnika?: ReadonlySet<number> | null;
 }): DecyzjaZapisuMeczu {
   if (typeof w.idZawodnika !== 'string' || w.idZawodnika.trim() === '') {
     return { rodzaj: 'nie_zapisuj', powod: 'brak identyfikatora zawodnika', zdanie: null };
@@ -461,7 +552,13 @@ export function zdecydujOZapisieMeczu(w: {
     return { rodzaj: 'nie_zapisuj', powod: 'minuty na boisku > długość meczu', zdanie: MECZ_MINUTY_PONAD_DLUGOSC };
   }
 
-  const pola: Omit<WierszKontekstuMeczu, 'user_id' | 'game_type'> = {
+  // ⭐⭐ PLAN-D-D2 — WIĄZANIE LICZY SIĘ PRZED ZAPISEM, nie po nim.
+  const wiazanie = ustalWiazanieMeczu({
+    idWydarzenia: w.idWydarzenia ?? null,
+    wydarzeniaZawodnika: w.wydarzeniaZawodnika ?? null,
+  });
+
+  const pola: ZmianyKontekstuMeczu = {
     minutes_played: liczbaAlbo(w.ocena.minutyNaBoisku, 0, 130),
     match_length_minutes: liczbaAlbo(w.ocena.dlugoscMeczu, 1, 150),
     match_rpe: liczbaAlbo(w.ocena.rpe, 0, 10),
@@ -483,14 +580,26 @@ export function zdecydujOZapisieMeczu(w: {
     return {
       rodzaj: 'aktualizuj',
       id: w.stan.id,
-      zmiany: pola,
-      powod: `dokładam do wiersza ${w.stan.id} — ⛔ drugi wiersz liczyłby ten sam mecz drugi raz`,
+      // ⛔ Wiązanie DOKŁADAMY, gdy je mamy, i NIGDY nie kasujemy, gdy go nie mamy.
+      zmiany: wiazanie.rodzaj === 'jest'
+        ? { ...pola, calendar_event_id: wiazanie.idWydarzenia }
+        : pola,
+      powod: `dokładam do wiersza ${w.stan.id} — ⛔ drugi wiersz liczyłby ten sam mecz drugi raz`
+        + ` · wiązanie: ${wiazanie.rodzaj === 'jest' ? `wydarzenie ${wiazanie.idWydarzenia}` : wiazanie.powod}`,
     };
   }
   return {
     rodzaj: 'wstaw',
-    wiersz: { user_id: w.idZawodnika, game_type: RODZAJ_MECZU_Z_KAFLA, ...pola },
-    powod: 'pierwszy zapis tego meczu w tej wizycie',
+    wiersz: {
+      user_id: w.idZawodnika,
+      game_type: RODZAJ_MECZU_Z_KAFLA,
+      // ⭐⭐ PLAN-D-D2 §4.1 — TO JEST TA JEDNA KOLUMNA. Bez niej licznik pracy
+      // nie ma czym zestawić wiersza meczu z wydarzeniem i liczy oba.
+      calendar_event_id: wiazanie.rodzaj === 'jest' ? wiazanie.idWydarzenia : null,
+      ...pola,
+    },
+    powod: 'pierwszy zapis tego meczu w tej wizycie'
+      + ` · wiązanie: ${wiazanie.rodzaj === 'jest' ? `wydarzenie ${wiazanie.idWydarzenia}` : wiazanie.powod}`,
   };
 }
 

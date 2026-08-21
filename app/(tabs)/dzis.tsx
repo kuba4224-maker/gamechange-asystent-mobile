@@ -358,6 +358,9 @@ import {
   MINUTY_NA_BOISKU, DLUGOSCI_MECZU,
   POLE_MINUTY_NA_BOISKU, POLE_DLUGOSC_MECZU,
   wynikMeczu, zdecydujOZapisieMeczu, opisZapisuMeczuDoLogu,
+  // ⭐⭐ PLAN-D-D2 19.08.2026 — drugi wiersz na to samo wystąpienie ma być
+  // ZDANIEM, a nie kodem `23505`.
+  toJestDrugiWierszNaMecz, MECZ_JUZ_MA_WIERSZ,
   SKALA_OCENY, POLE_SAMOOCENA, POLE_STAN_MENTALNY, POLE_WARUNKI,
   POLE_POZYCJA, POLE_WYNIK, POLE_NOTATKA,
   WARUNKI_TAK, WARUNKI_NIE, WYNIK_MY, WYNIK_ONI,
@@ -432,6 +435,8 @@ import {
   // 90 minut ZAWSZE. ⛔ Rzutka przez `unknown` wyłącza kompilator, a testy
   // widziały właściwość, której w czasie wykonania nie było.
   meczDlaNagrody,
+  // ⭐⭐ PLAN-D-D2 — odnalezienie WŁASNEGO wiersza meczu po restarcie aplikacji.
+  mapaWierszyMeczuPoWydarzeniu,
   type WierszMeczuWgl,
   TABELA_MECZOW, SELECT_MECZOW,
   TABELA_PROFILU, SELECT_PROFILU,
@@ -899,72 +904,47 @@ const KARTA_ZAKRES_TYDZIEN = 'Tydzień';
 // pyta od dziś o kopię ŻYWĄ.
 
 // ═══════════════════════════════════════════════════════════════════
-// ⭐ PLAN-D-C4 — BRZMIENIA NAGRODY ZA PRACĘ.
-// ⚠️ WSZYSTKIE PONIŻSZE SĄ NOWE I WSZYSTKIE SĄ **DO PRZEJRZENIA PRZEZ KUBĘ**.
-// Komplet zebrany w jednym bloku noty `PRZEKAZANIE_PAS_C4_15_08_2026.md` §9.
+// ⭐⭐ PLAN-D-D2 19.08.2026 (§4.4) — NAGROBEK: DWANAŚCIE MARTWYCH STAŁYCH
+// BLOKU „TWÓJ DOROBEK" USUNIĘTYCH Z TEGO PLIKU.
 //
-// ⛔ CZEGO W TYCH ZDANIACH NIE MA I NIE BĘDZIE: dni z rzędu · passy · serii ·
-// „nie przerwij" · „wróć jutro" · „zaloguj się codziennie" · jakiegokolwiek
-// słowa, które nagradza obecność zamiast pracy (N1).
+// CO STAŁO W TYM MIEJSCU (mierzone uruchomieniem 19.08.2026, każda z nich
+// miała w pliku DOKŁADNIE JEDNO wystąpienie, czyli była martwa):
+//   `BRZMIENIE_DO_PRZEJRZENIA_C4_EKRAN` · `NAGRODA_NAGLOWEK` ·
+//   `NAGRODA_PUNKTY` · `NAGRODA_JESZCZE_NIC` · `NAGRODA_NIE_POLICZONA` ·
+//   `NAGRODA_ODZNAKI_NAGLOWEK` · `NAGRODA_ODZNAKA` · `NAGRODA_NASTEPNY` ·
+//   `NAGRODA_MIARA` · `NAGRODA_WSZYSTKO` · `NAGRODA_NIEUMIEM` ·
+//   `NAGRODA_ROBOTA_ZAPISZ`.
+//
+// ⚠️ POLECENIE D2 §4.4 MÓWIŁO O SZEŚCIU. ⛔ ZMIERZONE JEST DWANAŚCIE i tę
+// liczbę podaję, bo policzyłem ją, a tamtej nie. Zgodne co do znaku jest to,
+// co polecenie mówiło o SŁOWIE: zakazane „punktów pracy" niosły TRZY
+// wystąpienia w DWÓCH stałych — `NAGRODA_PUNKTY` (raz) i `NAGRODA_MIARA`
+// (dwa razy: „punktów pracy" i „punktów pracy nad tym, co sam nazwałeś
+// celem"). Tak też liczył je inwentarz strażnika `lib/zdobyczeRundy.selftest.ts`.
+//
+// ⛔ DLACZEGO USUNIĘTE, SKORO MARTWE NIKOGO NIE OSZUKUJĄ. Bo pierwsza osoba,
+// która zechce odbudować dorobek na ekranie 1, podepnie je z powrotem — i tego
+// dnia zawodnik zobaczy „punktów pracy", czyli walutę uśmierconą decyzją
+// D4/O92. Stała czekająca na podpięcie jest zaproszeniem, nie neutralnością.
+//
+// ⭐ GDZIE TA WIEDZA ŻYJE DALEJ — NIC NIE ZNIKŁO Z PRODUKTU (B3):
+//   • licznik i jego brzmienia: `components/PracaWLiczbach.tsx`
+//     (Profil → „Skąd to wiemy") — jedyne miejsce, które je RYSUJE;
+//   • nazwa miary i jednostka: `lib/ekranProfilu.ts`
+//     (`NAZWA_ROZWOJU`, `JEDNOSTKA_ROZWOJU_WIELE` = „punktów rozwoju");
+//   • progi, odznaki i ich zdania „za jaką pracę": `PROGI`
+//     w `lib/nagrodaZaPrace.ts`;
+//   • rachunek dorobku: `policzNagrode()` — ⛔ NADAL WOŁANY z tego pliku
+//     (`useMemo` niżej) i nadal logowany przez `opisNagrodyDoLogu`.
+//
+// ⛔ STRAŻNIK ZOSTAŁ PRZECELOWANY, NIE OSŁABIONY. `lib/zdobyczeRundy.selftest.ts`
+// pytał dotąd „czy MARTWE stałe są policzone i nazwane" (wymagał ich ≥ 1).
+// Od 19.08 pyta o rzecz MOCNIEJSZĄ: czy w `dzis.tsx` nie ma zakazanego słowa
+// ANI RAZU — ani w żywej stałej, ani w martwej. Predykat `42d` (żywa stała
+// z tym słowem = czerwień) stoi nietknięty, a mutacja `S3-M13` przywraca
+// teraz stałą RAZEM z jej podpięciem, czyli robi dokładnie to, co zrobiłby
+// człowiek odbudowujący kartę. Uzgodnione imiennie w nocie pasa D2.
 // ═══════════════════════════════════════════════════════════════════
-const BRZMIENIE_DO_PRZEJRZENIA_C4_EKRAN = 'DO PRZEJRZENIA PRZEZ KUBĘ (PLAN-D-C4, 15.08.2026)';
-
-/** Nagłówek bloku. Ten sam kształt, co pozostałe nadtytuły tej karty. */
-const NAGRODA_NAGLOWEK = 'TWÓJ DOROBEK';
-
-/**
- * ⭐ ŁĄCZNA WYKONANA PRACA — liczba, która NIGDY NIE MALEJE.
- *
- * ⚠️ TRZECIA OSOBA, tak samo jak w liczniku pasa B5: produkt opisuje SWOJĄ
- * WIEDZĘ o pracy, a nie wystawia zawodnikowi ocenę.
- * ⛔ ŚWIADOMIE BEZ ZAKRESU CZASU. Zdanie „w ostatnich N dniach" jest tym, co
- * pozwala liczbie zmaleć — a ta liczba zmaleć nie może.
- */
-const NAGRODA_PUNKTY = (punkty: number, jednostki: number) =>
-  `${punkty} punktów pracy · ${jednostki} zapisanych rzeczy`;
-
-/**
- * ⭐ STAN „JESZCZE NIC" — ⛔ INNA STAŁA NIŻ „NIE UDAŁO SIĘ POLICZYĆ" (R5).
- * To jest pomiar: policzyłem i wyszło zero. Tamto jest awarią odczytu.
- */
-const NAGRODA_JESZCZE_NIC =
-  'Jeszcze nic tu nie ma. Pierwszy zapisany trening albo wpis w Dzienniku zaczyna liczyć.';
-
-/**
- * ⭐ STAN „NIE UDAŁO SIĘ POLICZYĆ" — ⛔ TU NIE MA I NIE MOŻE BYĆ ZERA.
- * Zero podane po nieudanym odczycie mówi dziecku, że nic nie zrobiło.
- */
-const NAGRODA_NIE_POLICZONA = (powod: string) =>
-  `Nie udało mi się policzyć Twojego dorobku (${powod}). To nie znaczy, że go nie masz — pociągnij w dół.`;
-
-/** Nadtytuł listy odznak. */
-const NAGRODA_ODZNAKI_NAGLOWEK = 'Zdobyte';
-/** ⭐ M4 — przy każdej odznace stoi zdanie, ZA JAKĄ PRACĘ. Bez niego to naklejka. */
-const NAGRODA_ODZNAKA = (nazwa: string, zaJakaPrace: string) => `${nazwa} — ${zaJakaPrace}`;
-
-/**
- * ⭐ NASTĘPNY PRÓG WYRAŻONY W PRACY, NIGDY W DNIACH.
- * ⛔ Nie ma tu „jeszcze 3 dni", „do końca tygodnia" ani „codziennie przez X".
- */
-const NAGRODA_NASTEPNY = (nazwa: string, brakuje: number, miara: string) =>
-  `Do „${nazwa}" brakuje Ci ${brakuje} ${miara}.`;
-
-/** Nazwy miar w dopełniaczu, do zdania wyżej. ⚠️ BRZMIENIA — DO PRZEJRZENIA. */
-const NAGRODA_MIARA: Record<string, string> = {
-  punkty: 'punktów pracy',
-  odpowiedzi_kontrolne: 'rzeczy domkniętych odpowiedzią (RPE, czas trwania albo odpowiedź na pytanie Bloku)',
-  punkty_w_celu: 'punktów pracy nad tym, co sam nazwałeś celem',
-};
-
-/** Wszystkie progi zdobyte — ⛔ i mówimy to wprost, zamiast milczeć. */
-const NAGRODA_WSZYSTKO = 'Masz wszystko, co ta skala ma do zdobycia. Kolejne progi dołożymy.';
-
-/** ⭐ R5 — odznaka, której NIE UMIEM policzyć, ma własne zdanie i własny powód. */
-const NAGRODA_NIEUMIEM = (nazwa: string, powod: string) =>
-  `„${nazwa}" — nie umiem tego policzyć (${powod}).`;
-
-/** ⭐ M4 — dorobek kończy się rzeczą do zrobienia, nie samą liczbą. */
-const NAGRODA_ROBOTA_ZAPISZ = 'Zapisz dzisiejszy trening w Dzienniku →';
 
 /** Dzień tygodnia bez pozycji w skróconym tygodniu na karcie. */
 const KARTA_TYDZIEN_DZIEN_PUSTY = '—';
@@ -1209,7 +1189,11 @@ type StanArkusza =
   // „powiedz więcej" nie wie, do którego wiersza `match_contexts` dokłada,
   // więc każdy zapis wstawiałby nowy wiersz i licznik pracy liczyłby ten
   // sam mecz tyle razy, ile razy zawodnik dotknął „Zapisz".
-  | { rodzaj: 'meczWiecej'; tytul: string; klucz: string }
+  // ⭐⭐ PLAN-D-D2 19.08.2026 — `idWydarzenia` DOSZŁO i też nie jest wygodą:
+  // bez niego arkusz nie ma czym związać wiersza `match_contexts`
+  // z wystąpieniem, więc mecz liczyłby się DWA RAZY (raz jako wydarzenie,
+  // raz jako wiersz) — 7 punktów zamiast 4.
+  | { rodzaj: 'meczWiecej'; tytul: string; klucz: string; idWydarzenia: number }
   | { rodzaj: 'plus' }
   | { rodzaj: 'kolizja' }
   // ⭐ PAS W1 (D-1 + decyzja D-B Kuby): cały materiał jednej odpowiedzi.
@@ -1329,6 +1313,18 @@ export default function DzisScreen() {
    * i jest wypisane w nocie pasa jako dług, a nie przemilczane.
    */
   const [kontekstyMeczu, setKontekstyMeczu] = useState<Record<string, number>>({});
+  /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026 — TA SAMA MAPA, TYLKO Z BAZY I PO WYSTĄPIENIU.
+   * ⛔ `calendar_events.id` → `match_contexts.id`, zbudowana przy KAŻDYM
+   * odczycie z kolumny `calendar_event_id`. To ona domyka dziurę opisaną
+   * wyżej: po zamknięciu aplikacji `kontekstyMeczu` jest puste, a ta mapa
+   * wraca z bazy — więc ponowna ocena DOKŁADA do istniejącego wiersza
+   * zamiast zakładać drugi.
+   * ⚠️ Wiersze bez `calendar_event_id` (sprzed migracji) w niej nie leżą
+   * i to nie jest przeoczenie — nie ma po czym ich odnaleźć.
+   */
+  const [wierszeMeczuPoWydarzeniu, setWierszeMeczuPoWydarzeniu] =
+    useState<ReadonlyMap<number, number>>(new Map());
   /** ⛔ Osobny od `bladWerdyktu`: zapis meczu może się nie udać przy udanej ocenie. */
   const [bladMeczu, setBladMeczu] = useState<string | null>(null);
   const [zapisanoMecz, setZapisanoMecz] = useState<string | null>(null);
@@ -2235,6 +2231,17 @@ export default function DzisScreen() {
     };
     // ⬆⬆⬆ WEJŚCIA NAGRODY ZA PRACĘ — KONIEC ⬆⬆⬆
 
+    // ⭐⭐ PLAN-D-D2 19.08.2026 (§4.3) — MAPA „WYSTĄPIENIE → WIERSZ MECZU".
+    // ⛔ Stawiamy ją TYLKO przy udanym odczycie. Nieudany odczyt zostawia
+    // poprzednią mapę — wyczyszczenie jej znaczyłoby „ten mecz nie ma wiersza",
+    // czyli zaproszenie do założenia drugiego (Z0, ten sam wzorzec, co
+    // `wydarzeniaTygodnia`).
+    if (!meczeRes.error && Array.isArray(meczeRes.data)) {
+      setWierszeMeczuPoWydarzeniu(
+        mapaWierszyMeczuPoWydarzeniu(meczeRes.data as unknown as WierszMeczuWgl[]),
+      );
+    }
+
     // ⭐ PLAN-D-F1 15.08.2026 — postać FUNKCYJNA `setDane`, i to nie jest styl.
     // Gałąź nieudanego odczytu wydarzeń przepisuje `wydarzeniaDnia`
     // z POPRZEDNIEGO stanu, czyli lista sprzed nieudanego ODŚWIEŻENIA zostaje
@@ -2463,6 +2470,27 @@ export default function DzisScreen() {
   }, [dane]);
 
   /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026 — WYSTĄPIENIA, KTÓRE ZAWODNIK MA NA SWOIM EKRANIE.
+   *
+   * ⛔ PO CO TO ISTNIEJE (§3 polecenia D2). Klucz obcy `match_contexts
+   * → calendar_events` sprawdza, że wydarzenie ISTNIEJE — ⛔ NIE sprawdza,
+   * że należy do tego samego zawodnika. Ten zbiór jest jedynym miejscem,
+   * w którym da się to sprawdzić przed zapisem.
+   *
+   * ⛔ `null` ≠ pusty zbiór i to jest cała ostrożność tej stałej: nieudany
+   * odczyt wydarzeń daje `null` („nie wiem, co ma na ekranie"), a wtedy
+   * `ustalWiazanieMeczu` NIE WIĄŻE. Pusty zbiór znaczyłby „sprawdziłem
+   * i nie ma nic" — dwa różne fakty, dwa różne stany (R5).
+   */
+  const wydarzeniaZawodnika: ReadonlySet<number> | null = useMemo(() => {
+    const surowe = dane === null ? null : dane.wydarzeniaTygodnia;
+    if (surowe === null) return null;
+    const zbior = new Set<number>();
+    for (const w of surowe) if (typeof w.id === 'number' && Number.isFinite(w.id)) zbior.add(w.id);
+    return zbior;
+  }, [dane]);
+
+  /**
    * ⛔ WARTOWNIK PRZY BRAKU WIERSZA JEST CELOWO NAJOSTROŻNIEJSZY, JAKI MOŻE BYĆ:
    * `eventType: null` daje rozpoznanie „nie wiem", a „nie wiem" nie ma ścieżki
    * usunięcia. Pozycja, której nie odczytaliśmy, ma zostać w planie.
@@ -2651,7 +2679,7 @@ export default function DzisScreen() {
     // dziennika zostawiłby wiersz meczu bez ciężkości i bez bólu, a zawodnik
     // zobaczyłby błąd po tym, jak połowa odpowiedzi już się zapisała.
     if (faktyPozycji(p.idWydarzenia).eventType === 'match') {
-      await zapiszKontekstMeczu(p.klucz);
+      await zapiszKontekstMeczu(p.klucz, p.idWydarzenia);
     }
 
     console.log(`dzis: [PLAN-D-O1] ${opisOcenyDoLogu({
@@ -2690,14 +2718,25 @@ export default function DzisScreen() {
   // NIC nie zapisał (pusty formularz nie jest awarią). Porażką jest wyłącznie
   // odrzucony zapis, i tylko ona ustawia `bladMeczu`.
   // ═══════════════════════════════════════════════════════════════════
-  async function zapiszKontekstMeczu(klucz: string): Promise<boolean> {
+  async function zapiszKontekstMeczu(klucz: string, idWydarzenia: number): Promise<boolean> {
     if (!currentUser) return false;
     const ocena: OcenaMeczu = { minutyNaBoisku, dlugoscMeczu, rpe: rpeWybrane };
-    const stan: StanKontekstuMeczu = kontekstyMeczu[klucz] === undefined
+    // ⭐⭐ PLAN-D-D2 19.08.2026 (§4.3) — DWA ŹRÓDŁA STANU, W TEJ KOLEJNOŚCI.
+    //   1. `kontekstyMeczu` — wiersz założony W TEJ WIZYCIE, po kluczu wystąpienia.
+    //   2. `wierszeMeczuPoWydarzeniu` — wiersz założony KIEDYKOLWIEK, odczytany
+    //      z bazy po `calendar_event_id`.
+    // ⛔ To drugie źródło jest całą różnicą wobec 18.08: bez niego po restarcie
+    // aplikacji ten sam mecz oceniony ponownie zakładał DRUGI wiersz.
+    const idZBazy = wierszeMeczuPoWydarzeniu.get(idWydarzenia);
+    const idWiersza = kontekstyMeczu[klucz] ?? idZBazy;
+    const stan: StanKontekstuMeczu = idWiersza === undefined
       ? { rodzaj: 'brak' }
-      : { rodzaj: 'zapisany', id: kontekstyMeczu[klucz] };
+      : { rodzaj: 'zapisany', id: idWiersza };
     const decyzja = zdecydujOZapisieMeczu({
       idZawodnika: currentUser.id, stan, ocena, wiecej: wiecejOMeczu,
+      idWydarzenia,
+      // ⛔ `null` przy nieodczytanych wydarzeniach — patrz `wydarzeniaZawodnika`.
+      wydarzeniaZawodnika,
     });
     console.log(`dzis: [PLAN-D-D8] ${opisZapisuMeczuDoLogu(decyzja)}`);
 
@@ -2737,20 +2776,36 @@ export default function DzisScreen() {
       .insert(decyzja.wiersz)
       .select('id');
     if (bladW) {
-      setBladMeczu(toJestBrakDostepu(bladW)
-        ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
-        : 'Nie udało się zapisać meczu: ' + bladW.message);
+      // ⭐⭐ PLAN-D-D2 19.08.2026 (§4.3) — UNIKALNY INDEKS CZĘŚCIOWY ZAMIENIA
+      // CICHY DUPLIKAT W BŁĄD, a ekran zamienia ten błąd w ZDANIE.
+      // ⛔ Zawodnikowi nie wolno pokazać `23505`: kod bazy nie mówi mu nic
+      // o jego meczu, a mówi wszystko o tym, że produkt się nie pozbierał.
+      setBladMeczu(toJestDrugiWierszNaMecz(bladW)
+        ? MECZ_JUZ_MA_WIERSZ
+        : (toJestBrakDostepu(bladW)
+          ? ZAPIS_ODRZUCONY_BRAK_DOSTEPU
+          : 'Nie udało się zapisać meczu: ' + bladW.message));
       return false;
     }
-    const idWiersza = Array.isArray(wstawione) && wstawione.length > 0
+    // ⚠️ PLAN-D-D2 — przemianowane z `idWiersza`, bo ta nazwa niesie już wyżej
+    // wiersz ODNALEZIONY (w wizycie albo w bazie). Dwie różne rzeczy pod jedną
+    // nazwą to dokładnie ten rodzaj pomyłki, który ten pas usuwa.
+    const idWstawionego = Array.isArray(wstawione) && wstawione.length > 0
       ? Number(wstawione[0].id) : null;
-    if (idWiersza === null || !Number.isFinite(idWiersza)) {
+    if (idWstawionego === null || !Number.isFinite(idWstawionego)) {
       setBladMeczu('Nie udało się zapisać meczu: baza nie przyjęła tego wiersza.');
       console.warn('[PLAN-D-D8] insert match_contexts dotknął ZERO wierszy — najpewniej RLS.');
       return false;
     }
     // ⭐ OD TEJ CHWILI KOLEJNE ZAPISY DOKŁADAJĄ, ZAMIAST WSTAWIAĆ.
-    setKontekstyMeczu((poprzednie) => ({ ...poprzednie, [klucz]: idWiersza }));
+    setKontekstyMeczu((poprzednie) => ({ ...poprzednie, [klucz]: idWstawionego }));
+    // ⭐⭐ PLAN-D-D2 — i ta sama wiedza pod kluczem WYSTĄPIENIA, żeby przetrwała
+    // zamknięcie arkusza. Trwałym nośnikiem jest kolumna w bazie; to jest
+    // wyłącznie skrót do najbliższego odczytu.
+    if (decyzja.wiersz.calendar_event_id !== null) {
+      const e = decyzja.wiersz.calendar_event_id;
+      setWierszeMeczuPoWydarzeniu((poprzednie) => new Map(poprzednie).set(e, idWstawionego));
+    }
     setBladMeczu(null);
     setZapisanoMecz(klucz);
     return true;
@@ -3784,7 +3839,9 @@ export default function DzisScreen() {
               {mecz ? (
                 <TouchableOpacity
                   style={styles.inlineLink}
-                  onPress={() => setArkusz({ rodzaj: 'meczWiecej', tytul: p.tytul, klucz: p.klucz })}
+                  onPress={() => setArkusz({
+                    rodzaj: 'meczWiecej', tytul: p.tytul, klucz: p.klucz, idWydarzenia: p.idWydarzenia,
+                  })}
                 >
                   <Text style={styles.cardAction}>{MECZ_WIECEJ_OTWORZ}</Text>
                 </TouchableOpacity>
@@ -3935,6 +3992,8 @@ export default function DzisScreen() {
       // ⛔ Do dziś ten arkusz wypisywał sześć NAPISÓW i odsyłał do pełnej karty
       // meczu. Napis, który nic nie zapisuje, jest obietnicą, nie funkcją (R1).
       const klaczM = arkusz.klucz;
+      // ⭐⭐ PLAN-D-D2 — wystąpienie, z którego ten arkusz został otwarty.
+      const wydarzenieM = arkusz.idWydarzenia;
       const ustaw = (zmiana: Partial<WiecejOMeczu>) =>
         setWiecejOMeczu((poprzednie) => ({ ...poprzednie, ...zmiana }));
       const liczbaZPola = (t: string): number | null => {
@@ -4037,7 +4096,7 @@ export default function DzisScreen() {
             onChangeText={(t) => ustaw({ notatka: t })}
           />
 
-          <TouchableOpacity style={styles.pytanieBtn} onPress={() => zapiszKontekstMeczu(klaczM)}>
+          <TouchableOpacity style={styles.pytanieBtn} onPress={() => zapiszKontekstMeczu(klaczM, wydarzenieM)}>
             <Text style={styles.pytanieBtnTxt}>{MECZ_WIECEJ_ZAPISZ}</Text>
           </TouchableOpacity>
           {bladMeczu !== null ? <Text style={styles.pytanieBlad}>{bladMeczu}</Text> : null}

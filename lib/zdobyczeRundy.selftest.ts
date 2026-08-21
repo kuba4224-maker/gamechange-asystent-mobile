@@ -493,11 +493,17 @@ const MUTACJE: Mutacja[] = [
       "export const JEDNOSTKA_ROZWOJU_WIELE = 'punktów pracy';") }),
   },
   {
-    nazwa: '⭐⭐ S3-M13 ⛔ MARTWA stała „punktów pracy" wraca na ekran 1',
-    coPsuje: '42 — `NAGRODA_PUNKTY` leży w `dzis.tsx` po zdjętej karcie „TWÓJ DOROBEK" '
-      + 'i mówi „punktów pracy". Dopóki nikt jej nie woła, nikogo nie oszukuje. '
-      + '⛔ Ta mutacja podpina ją z powrotem pod `Text` — czyli robi dokładnie to, '
-      + 'co zrobi pierwsza osoba, która zechce odbudować dorobek na ekranie 1.',
+    nazwa: '⭐⭐ S3-M13 ⛔ stała „punktów pracy" WRACA na ekran 1 razem z podpięciem',
+    coPsuje: '42 — ⭐ PRZECELOWANE 19.08.2026 PRZEZ PAS D2, imiennie i z powodem. '
+      + 'Do 19.08 `NAGRODA_PUNKTY` LEŻAŁA w `dzis.tsx` jako martwa stała po zdjętej '
+      + 'karcie „TWÓJ DOROBEK", więc mutacji wystarczyło ją PODPIĄĆ pod `Text`. '
+      + 'Pas D2 §4.4 usunął dwanaście martwych stałych tego bloku — od tego dnia '
+      + 'wstrzyknięcie samego wywołania nie niosłoby już zakazanego słowa i mutacja '
+      + 'zgasłaby po cichu, chociaż strażnik działa. ⛔ Dlatego mutacja przywraca '
+      + 'teraz STAŁĄ RAZEM Z PODPIĘCIEM — czyli robi dokładnie to, co zrobi pierwsza '
+      + 'osoba, która zechce odbudować dorobek na ekranie 1. To jest przecelowanie, '
+      + 'NIE osłabienie: warunek zapalenia (żywa stała mówiąca „punktów pracy") '
+      + 'jest ten sam, zmieniła się wyłącznie droga, którą mutacja go osiąga.',
     // ⚠️ KOTWICA WSTRZYKNIĘCIA CELOWO LEŻY WE WŁASNYM PODWÓRKU (znak „+"),
     // a nie przy przypisie „Ocena należy do rzeczy". Pierwsza wersja brała
     // przypis — i wtedy zdjęcie CUDZEJ rzeczy, pilnowanej przez
@@ -506,7 +512,14 @@ const MUTACJE: Mutacja[] = [
     zastosuj: (z) => ({ ...z, dzis: z.dzis.replace(
       '        <Text style={styles.fabZnak}>+</Text>',
       '        <Text style={styles.fabZnak}>+</Text>\n'
-      + '        <Text style={styles.licznikPodpis}>{NAGRODA_PUNKTY(12, 3)}</Text>') }),
+      + '        <Text style={styles.licznikPodpis}>{NAGRODA_PUNKTY(12, 3)}</Text>')
+      // ⛔ …i DEFINICJA, bez której powyższe wywołanie byłoby tylko nazwą.
+      // Kotwica: pierwsza linia pliku po dyrektywach — `const` na poziomie modułu.
+      .replace(
+        'const KARTA_ZAKRES_DZIS =',
+        'const NAGRODA_PUNKTY = (punkty: number, jednostki: number) =>\n'
+        + '  `${punkty} punktów pracy · ${jednostki} zapisanych rzeczy`;\n'
+        + 'const KARTA_ZAKRES_DZIS =') }),
   },
   {
     nazwa: 'S3-M14 ⛔ zdanie o trafności przestaje otwierać arkusz „skąd bierze się trafność"',
@@ -595,18 +608,41 @@ check('⛔ (42) dwie miary NADAL mają dwie różne nazwy',
 }
 
 {
-  // ⭐ Inwentarz martwych stałych z zakazanym słowem — ⛔ NAZWANY, nie ukryty.
-  const martwe: string[] = [];
+  // ⭐⭐ PRZECELOWANE 19.08.2026 PRZEZ PAS D2 (§4.4), IMIENNIE I Z POWODEM.
+  //
+  // CO TU STAŁO DO 19.08: inwentarz MARTWYCH stałych z zakazanym słowem
+  // i asercja `martwe.length >= 1` — czyli „niech ktoś je policzy i nazwie".
+  // Jej własny komunikat mówił wprost: „jeżeli spadło do zera — ktoś je usunął
+  // i to dobra wiadomość: popraw tę asercję". Pas D2 usunął dwanaście martwych
+  // stałych bloku „TWÓJ DOROBEK" (nagrobek w `app/(tabs)/dzis.tsx`), więc
+  // inwentarz spadł do zera i stara asercja świeciłaby na czerwono ZA NAPRAWĘ.
+  //
+  // ⛔ TO NIE JEST OSŁABIENIE — nowa asercja jest ŚCIŚLE MOCNIEJSZA.
+  // Stara dopuszczała stałe z zakazanym słowem, dopóki były martwe (i wymagała,
+  // żeby co najmniej jedna taka była!). Nowa nie dopuszcza ANI JEDNEJ — ani
+  // żywej, ani martwej. Każdy stan, który zapalał starą asercję jako defekt,
+  // zapala i tę; dochodzi stan, którego stara nie umiała zobaczyć: zakazane
+  // słowo wracające do pliku jako świeża stała jeszcze niepodpięta.
+  // ⭐ Predykat `42d` (żywa stała = czerwień) stoi NIETKNIĘTY — pilnuje
+  // pięciu plików naraz i to on jest głównym strażnikiem tej obietnicy.
   const s = bezKomentarzy(dzis);
-  for (const m of s.matchAll(new RegExp(ZAKAZ_WALUTY.source, 'gi'))) {
+  const trafienia = [...s.matchAll(new RegExp(ZAKAZ_WALUTY.source, 'gi'))].map((m) => {
     const przed = s.slice(0, m.index ?? 0);
     const i = przed.lastIndexOf('const ');
     const nazwa = i < 0 ? null : (/^const ([A-Za-z_$][A-Za-z0-9_$]*)/.exec(przed.slice(i))?.[1] ?? null);
-    if (nazwa !== null && s.split(new RegExp(`\\b${nazwa}\\b`)).length - 1 === 1) martwe.push(nazwa);
-  }
-  console.log(`   martwe stałe z zakazanym słowem w dzis.tsx: ${martwe.join(', ') || '(brak)'}`);
-  check('⭐ (42) MARTWE stałe po zdjętej karcie „TWÓJ DOROBEK" są policzone i nazwane, nie przemilczane',
-    martwe.length >= 1, 'jeżeli spadło do zera — ktoś je usunął i to dobra wiadomość: popraw tę asercję');
+    const uzyc = nazwa === null ? 0 : s.split(new RegExp(`\\b${nazwa}\\b`)).length - 1;
+    return `${nazwa ?? '(poza stałą)'} („${m[0]}") — ${uzyc > 1 ? 'ŻYWA' : 'martwa'}`;
+  });
+  console.log(`   stałe z zakazanym słowem w dzis.tsx: ${trafienia.join(', ') || '(ani jednej)'}`);
+  check('⛔⛔ (42) w `dzis.tsx` NIE MA zakazanego słowa ANI RAZU — ani w żywej stałej, ani w martwej',
+    trafienia.length === 0,
+    `${trafienia.length}: ${trafienia.join(' | ')} — ⛔ jeżeli liczba WZROSŁA, ktoś wniósł `
+    + '„punktów pracy" z powrotem na ekran 1. Martwa stała nie jest wyjątkiem: '
+    + 'pierwsza osoba odbudowująca dorobek podepnie ją pod `Text`.');
+  // ⛔ STRAŻNIK STRAŻNIKA — bez tego powyższe zero byłoby nieodróżnialne
+  // od pustego pliku albo od zjedzonego wycinka.
+  check('⛔ …i mierzone źródło NIE JEST puste (inaczej zero wyżej nic nie znaczy)',
+    s.length > 10000 && s.includes('styles.fabZnak'), `${s.length} znaków`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

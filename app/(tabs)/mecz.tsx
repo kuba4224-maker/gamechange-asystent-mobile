@@ -75,6 +75,38 @@ import {
   RODZAJ_MECZ,
   type WierszKalendarzaDoDecyzji,
 } from '../../lib/meczWKalendarzu';
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ PLAN-D-M2 19.08.2026 — EKRAN MECZU CHUDNIE DO MAKIETY
+//
+// CO BYŁO ZŁE — ZMIERZONE, NIE PRZYPUSZCZONE. `zmierzEkran` (miara
+// `lib/wysokoscEkranu.ts`) oddawał dla tego ekranu **5 863 dp** przy linii
+// zgięcia **808 dp** — siedem ekranów w pionie. Pas A1 zdjął temu ekranowi
+// zakładkę, więc wejście prowadzi dziś z arkusza „powiedz więcej o tym
+// meczu": rzecz została PRZENIESIONA ZA DOTKNIĘCIE, a nie WCHŁONIĘTA.
+// Decyzja Kuby z 18.08 (punkt 3) brzmi: „ścieżka meczu chudnie do makiety".
+//
+// ⭐ CZYM TO ZOSTAŁO ZAŁATWIONE. Tym samym wzorcem, którym pas A1 zdjął
+// 5 862 dp z ekranu „Dziś": `components/Arkusz.tsx` jest `Modal`-em, czyli
+// osobnym drzewem NAD ekranem, więc jego treść NIE WCHODZI do przewijania
+// ekranu pod spodem i kosztuje **0 dp**. ⛔ To jest przeniesienie, nie
+// kasowanie: ani jedno pytanie nie znika, każde ma imienne miejsce, a tabela
+// „co gdzie wylądowało" stoi w `claude/PRZEKAZANIE_PAS_M2_19_08_2026.md`.
+//
+// ⛔ KOLEJNOŚĆ, KTÓRA NIE PODLEGA NEGOCJACJI (§4.3 polecenia): najpierw
+// wejście zastępcze, potem zdjęcie rzeczy z ekranu. W tym pliku obie rzeczy
+// stoją w JEDNYM stanie — `arkusz` — i pole bez wejścia nie ma jak się
+// narysować, bo `trescArkusza()` rysuje WYŁĄCZNIE to, co ma otwarty rodzaj.
+// ═══════════════════════════════════════════════════════════════════
+import Arkusz from '../../components/Arkusz';
+import { naglowekArkusza, type NaglowekArkusza } from '../../lib/arkusz';
+// ⭐ PLAN-D-D8 → M2: reguła sprzeczności minut i podpis arkusza meczu mają
+// DOKŁADNIE JEDNO miejsce — `lib/meczWiecej.ts` (pas D2). Ten ekran ich
+// UŻYWA. ⛔ Drugie brzmienie tej samej reguły byłoby drugim słownikiem (O92).
+import {
+  minutyPonadDlugosc,
+  MECZ_MINUTY_PONAD_DLUGOSC,
+  podpisArkuszaMeczu,
+} from '../../lib/meczWiecej';
 
 const GAME_TYPE_LABELS: Record<string, string> = {
   official_match: 'Mecz oficjalny', friendly: 'Sparing',
@@ -155,6 +187,45 @@ type SegmentSlot = SegmentSelection & {
   followupAnswerCode: string | null;
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// ⭐ M2 — CZTERY ARKUSZE TEGO EKRANU I ICH NAGŁÓWKI
+// ═══════════════════════════════════════════════════════════════════
+// ⛔ ZERO NOWYCH SŁÓW WIDOCZNYCH DLA ZAWODNIKA. Tytuł każdego arkusza to
+// DOKŁADNIE ten sam napis, który stał nad tą sekcją, kiedy leżała na ekranie
+// („Stan przed meczem", „Boli Cię dziś coś?", „Historia meczów", „Tryb
+// kontuzji — co jest teraz dostępne"). Jedyny arkusz z tytułem spoza tego
+// pliku — `meczWiecej` — bierze go z `lib/arkusz.ts`, gdzie stoi od pasa A1.
+//
+// ⚠️ `RODZAJE_ARKUSZA` w `lib/arkusz.ts` jest listą ZAMKNIĘTĄ i pilnuje jej
+// strażnik, który wymaga wejścia Z EKRANU „DZIŚ" dla każdej pozycji. ⛔ Tego
+// ekranu tam nie ma, więc dopisanie tu czterech nowych rodzajów zapaliłoby
+// CUDZĄ zapadkę. Dlatego rodzaje arkuszy MECZU żyją tutaj, a wspólny jest
+// KOMPONENT i wspólna jest reguła („nakładka nie zabiera z ekranu").
+type RodzajArkuszaMeczu = 'stan' | 'wiecej' | 'bol' | 'historia' | 'kontuzja';
+
+function naglowekArkuszaMeczu(rodzaj: RodzajArkuszaMeczu, tytulMeczu: string): NaglowekArkusza {
+  switch (rodzaj) {
+    case 'stan':
+      return {
+        kicker: 'Mecz',
+        tytul: 'Stan przed meczem',
+        // ⛔ Zdanie przeniesione CO DO ZNAKU z ekranu — do 19.08 stało tam
+        // jako `styles.hint` pod pustą listą pytań segmentowych.
+        podpis: 'Pytania o dzisiejszy mecz pojawią się po zaznaczeniu stanu regeneracji powyżej.',
+      };
+    case 'wiecej':
+      // ⭐ Tytuł i kicker z `lib/arkusz.ts` (pas A1), podpis z `lib/meczWiecej.ts`
+      // (pas D8). ⛔ Ani jedno słowo nie powstaje w tym pliku.
+      return { ...naglowekArkusza('meczWiecej', tytulMeczu), podpis: podpisArkuszaMeczu() };
+    case 'bol':
+      return { kicker: 'Mecz', tytul: 'Boli Cię dziś coś?', podpis: '' };
+    case 'historia':
+      return { kicker: 'Mecz', tytul: 'Historia meczów', podpis: '' };
+    case 'kontuzja':
+      return { kicker: 'Mecz', tytul: 'Tryb kontuzji — co jest teraz dostępne', podpis: '' };
+  }
+}
+
 export default function MeczScreen() {
   const { currentUser } = useAuth();
 
@@ -213,6 +284,9 @@ export default function MeczScreen() {
   const [history, setHistory] = useState<MatchRow[]>([]);
   // ⭐ PLAN-D-C3 15.08.2026 — trzy wartości, nie dwie. `null` = jeszcze nie czytałem.
   const [odczytHistoriiUdanySie, setOdczytHistoriiUdanySie] = useState<boolean | null>(null);
+
+  // ⭐ M2 — KTÓRY ARKUSZ JEST OTWARTY. `null` = ekran, nic nad nim.
+  const [arkusz, setArkusz] = useState<RodzajArkuszaMeczu | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -373,6 +447,17 @@ export default function MeczScreen() {
     tekstBrakuDanych: 'Brak zapisanych meczów — dodaj pierwszy powyżej.',
   });
 
+  // ⭐⭐ PLAN-D-M2 19.08.2026 — SPRZECZNOŚĆ DWÓCH LICZB, ZATRZYMANA NA EKRANIE.
+  // ⛔ Rachunek jest CUDZY i taki ma zostać: `minutyPonadDlugosc` z
+  // `lib/meczWiecej.ts` ma selftest i baterię mutacji w pasie D2. Ten ekran go
+  // WYKONUJE. ⛔ Sprzeczność jest możliwa TYLKO przy dwóch znanych liczbach —
+  // brak jednej z nich to „nie wiemy", a „nie wiemy" nie jest błędem zawodnika.
+  const sprzecznoscMinut = minutyPonadDlugosc({
+    minutyNaBoisku: minutes.trim() === '' ? null : Number(minutes),
+    dlugoscMeczu: dlugoscMeczu.trim() === '' ? null : Number(dlugoscMeczu),
+    rpe: matchRpe === undefined ? null : matchRpe,
+  });
+
   const resetForm = () => {
     setOwnScore(''); setOpponentScore(''); setRole(''); setMinutes(''); setDlugoscMeczu(''); setMatchRpe(undefined);
     setGodzinaMeczu('');
@@ -481,6 +566,15 @@ export default function MeczScreen() {
       setError('Wybierz pozycję, na której dziś grałeś (albo odznacz pole wyżej).');
       return;
     }
+    // ⭐⭐ PLAN-D-M2 19.08.2026 — ZNALEZISKO PASA D8, DOMKNIĘTE (§3 polecenia).
+    // ⛔ `match_contexts` ma CHECK `minutes_played <= match_length_minutes`.
+    // Bez tej bramki zawodnik, który wyklika 90 minut w meczu 60-minutowym,
+    // dostaje kod `23514` z bazy zamiast zdania po polsku — a kod bazy nie mówi
+    // mu, KTÓRĄ z dwóch liczb ma poprawić.
+    // ⛔ ZDANIE NIE POWSTAJE TUTAJ: stoi w `lib/meczWiecej.ts` jako
+    // `MECZ_MINUTY_PONAD_DLUGOSC`, a decyduje `minutyPonadDlugosc` — ten sam
+    // rachunek, którym idzie ścieżka oceny z kafla (pas D2).
+    if (sprzecznoscMinut) { setError(MECZ_MINUTY_PONAD_DLUGOSC); return; }
     // PLAN-D-A7 — godzina rozstrzyga się PRZED jakimkolwiek zapisem. Gdyby ta
     // bramka stała niżej, mecz byłby już w bazie, a zawodnik dostałby błąd
     // o godzinie — czyli komunikat porażki po udanym zapisie.
@@ -496,6 +590,16 @@ export default function MeczScreen() {
         opponent_score: opponentScore !== '' ? Number(opponentScore) : null,
         role: role.trim() || null,
         minutes_played: minutes !== '' ? Number(minutes) : null,
+        // ⭐⭐ PLAN-D-M2 19.08.2026 — JEDNA LINIA, KTÓREJ BRAKOWAŁO (§3 polecenia).
+        // ⛔ CO BYŁO ZŁE. Pole „ile trwał cały mecz" istnieje na tym ekranie od
+        // pasa W2, ale jechało WYŁĄCZNIE do `calendar_events.planned_minutes`.
+        // Kolumna `match_contexts.match_length_minutes` powstała później (18.08,
+        // pas D8) i ten ekran o niej nie wiedział — więc pełna karta meczu do
+        // dziś NIE ZAPISYWAŁA długości tam, gdzie liczą się punkty za mecz
+        // (`punktyMeczu` w `lib/nagrodaZaPrace.ts` czyta `match_length_minutes`).
+        // ⛔ Pusto zostaje pustem: nie podstawiamy 90, bo zmyślona długość
+        // weszłaby do wagi pracy jako pomiar (Z0, R5).
+        match_length_minutes: dlugoscMeczu.trim() !== '' ? Number(dlugoscMeczu) : null,
         match_rpe: matchRpe !== undefined ? matchRpe : null,
         self_rating: selfRating !== undefined ? selfRating : null,
         mental_state: mentalState !== undefined ? mentalState : null,
@@ -561,6 +665,10 @@ export default function MeczScreen() {
       // PLAN-D-A7 — porażka kalendarza NIE jest cicha i NIE jest awarią.
       // Mecz jest zapisany; zdanie mówi obie te rzeczy naraz i daje wyjście.
       setOk(bladKalendarza ? MECZ_ZAPISANY_BEZ_KALENDARZA : 'Mecz zapisany.');
+      // ⭐ M2 — po zapisie zamykamy nakładkę, żeby potwierdzenie („Mecz
+      // zapisany.") stało tam, gdzie zawodnik patrzy: na ekranie, a nie pod
+      // arkuszem, którego już nie ma po co trzymać otwartego.
+      setArkusz(null);
       resetForm();
       await loadMecz();
     } catch (e: any) {
@@ -695,67 +803,121 @@ export default function MeczScreen() {
     );
   }
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-    <ScrollView
-      contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
-    >
-      <Text style={styles.title}>Mecz</Text>
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐ M2 — TREŚĆ ARKUSZA. Cztery gałęzie, każda z imiennym rodzajem.
+  // ⛔ To jest CAŁE „gdzie to wylądowało": pole, którego nie ma tu ani
+  // w ciele `ScrollView` niżej, nie istnieje w produkcie — i taką rzecz
+  // zapala bateria mutacji w `lib/wysokoscEkranu.selftest.ts`.
+  // ═════════════════════════════════════════════════════════════════
+  function trescArkusza() {
+    if (arkusz === 'kontuzja') return renderRoutingBlock();
 
-      {error && <Text style={styles.error}>{error}</Text>}
-      {ok && <Text style={styles.ok}>{ok}</Text>}
+    if (arkusz === 'stan') {
+      return (
+        <>
+          {/* Regeneracja przed meczem — pytanie rdzenia kaskady.
+              ⛔ STOI PIERWSZE I TO NIE JEST KOSMETYKA: dopóki zawodnik na nie
+              nie odpowie, `matchCascade` uznaje segment `regeneracja` za
+              niedostępny i pytania segmentowe nie mają się z czego policzyć. */}
+          <Text style={styles.label}>
+            Czy wchodziłeś dziś w mecz w pełni zregenerowany, czy ciało wciąż czuło zmęczenie z ostatnich dni?
+          </Text>
+          <View style={styles.answerList}>
+            {RECOVERY_STATE_OPTIONS.map((opt) => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.answerBtn, enteredRecoveryState === opt.value && styles.answerBtnActive]}
+                onPress={() => handleRecoveryStateChange(opt.value)}
+              >
+                <Text style={[styles.answerBtnText, enteredRecoveryState === opt.value && styles.answerBtnTextActive]}>{opt.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-      {renderRoutingBlock()}
-
-      {/* AUDYT 06.08.2026 — KOLEJNOŚĆ ODWRÓCONA.
-          Wcześniej "Stan przed meczem" leżał w połowie formularza, a pytania
-          segmentowe DOPIERO na czwartym ekranie scrolla, pod wynikiem, golami,
-          minutami i całym blokiem bólu — i pojawiały się dopiero po odpowiedzi
-          o regeneracji. Tymczasem walidacja zapisu (`hasSignal`) przepuszcza mecz
-          już po samym RPE, więc zawodnik, który po meczu chciał "szybko zapisać",
-          nigdy tych pytań nie widział. A to jedyne dane, dla których ten ekran
-          został przeprojektowany: `match_context_answers` karmi silnik rekomendacji
-          i meczowy wymiar Gotowości. Teraz są pierwsze. Wynik, minuty, RPE i ból
-          zostają — tylko niżej. */}
-      {/* Regeneracja przed meczem */}
-      <View style={styles.block}>
-        <Text style={styles.sectionLabel}>Stan przed meczem</Text>
-        <Text style={styles.label}>
-          Czy wchodziłeś dziś w mecz w pełni zregenerowany, czy ciało wciąż czuło zmęczenie z ostatnich dni?
-        </Text>
-        <View style={styles.answerList}>
-          {RECOVERY_STATE_OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[styles.answerBtn, enteredRecoveryState === opt.value && styles.answerBtnActive]}
-              onPress={() => handleRecoveryStateChange(opt.value)}
-            >
-              <Text style={[styles.answerBtnText, enteredRecoveryState === opt.value && styles.answerBtnTextActive]}>{opt.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* Pytania segmentowe z kaskady */}
-      {segmentSlots.length > 0 && (
-        <View style={{ marginTop: 8 }}>
-          <Text style={styles.sectionLabel}>Kilka pytań o dzisiejszy mecz</Text>
-          {segmentSlots.map(renderSegmentSlot)}
-          {!thirdQuestionOffered && (
-            <TouchableOpacity style={styles.btnSecondary} onPress={loadThirdQuestion}>
-              <Text style={styles.btnSecondaryText}>Pokaż dodatkowe pytanie (opcjonalnie)</Text>
-            </TouchableOpacity>
+          {/* Pytania segmentowe z kaskady */}
+          {segmentSlots.length > 0 && (
+            <View style={{ marginTop: 20 }}>
+              <Text style={styles.sectionLabel}>Kilka pytań o dzisiejszy mecz</Text>
+              {segmentSlots.map(renderSegmentSlot)}
+              {!thirdQuestionOffered && (
+                <TouchableOpacity style={styles.btnSecondary} onPress={loadThirdQuestion}>
+                  <Text style={styles.btnSecondaryText}>Pokaż dodatkowe pytanie (opcjonalnie)</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
-        </View>
-      )}
-      {segmentSlots.length === 0 && enteredRecoveryState === null && (
-        <Text style={styles.hint}>Pytania o dzisiejszy mecz pojawią się po zaznaczeniu stanu regeneracji powyżej.</Text>
-      )}
+        </>
+      );
+    }
 
-      <View style={styles.block}>
-        <Text style={styles.sectionLabel}>Zapisz mecz</Text>
+    if (arkusz === 'bol') {
+      /* Ból — reuse 1:1 wzorca z Dziennika. */
+      return (
+        <>
+          <TouchableOpacity style={styles.checkboxRow} onPress={() => setHasPain((v) => !v)}>
+            <Checkbox value={hasPain} onValueChange={setHasPain} />
+            <Text style={styles.checkboxLabel}>Boli Cię dziś coś?</Text>
+          </TouchableOpacity>
+          {hasPain && (
+            <>
+              <Text style={styles.label}>Lokalizacja</Text>
+              <View style={styles.pickerWrap}>
+                <Picker selectedValue={painLocation} onValueChange={setPainLocation}>
+                  {BODY_LOCATIONS.map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
+                </Picker>
+              </View>
+              {!NON_LATERAL_LOCATIONS.has(painLocation) && (
+                <>
+                  <Text style={styles.label}>Strona</Text>
+                  <View style={styles.pickerWrap}>
+                    <Picker selectedValue={painSide} onValueChange={setPainSide}>
+                      <Picker.Item label="—" value="" />
+                      <Picker.Item label="Lewa" value="left" />
+                      <Picker.Item label="Prawa" value="right" />
+                    </Picker>
+                  </View>
+                </>
+              )}
+              <Text style={styles.label}>Intensywność (0 = ledwo wyczuwalny, 10 = nie do zniesienia)</Text>
+              <ScalePicker value={painIntensity} onChange={setPainIntensity} />
+              <TouchableOpacity style={styles.checkboxRow} onPress={() => setPainExcludes((v) => !v)}>
+                <Checkbox value={painExcludes} onValueChange={setPainExcludes} />
+                <Text style={styles.checkboxLabel}>To wyklucza mnie z treningu</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </>
+      );
+    }
 
+    if (arkusz === 'historia') {
+      return (
+        <>
+          {/* ⭐ PLAN-D-C3 15.08.2026 — brzmienie „Brak zapisanych meczów — dodaj
+              pierwszy powyżej." idzie CO DO ZNAKU (zakaz 4), razem z krokiem,
+              który już w nim siedzi. ⚠️ M2 19.08: zmienia się MIEJSCE, nie
+              zdanie — „powyżej" wskazuje dziś ekran pod tą nakładką. */}
+          {pustkaHistorii ? (
+            <>
+              <Text style={styles.empty}>{pustkaHistorii.tekst}</Text>
+              {pustkaHistorii.krokWTekscie ? null : (
+                <Text style={styles.empty}>{pustkaHistorii.cta}</Text>
+              )}
+            </>
+          ) : null}
+          {history.map(renderMatchCard)}
+        </>
+      );
+    }
+
+    /* arkusz === 'wiecej' — sześć rzeczy z `RZECZY_O_MECZU`, plus rola
+       i godzina rozpoczęcia, które do 19.08 stały w bloku „Zapisz mecz". */
+    return (
+      <>
+        {/* ⭐ M2 — RODZAJ MECZU. `RZECZY_O_MECZU` (lib/meczWiecej.ts) stawia
+            `game_type` w miejscu `pelna_karta` — czyli tutaj, w karcie meczu.
+            ⛔ Zeszedł z pierwszego widoku razem z wynikiem, bo obie rzeczy
+            mówią, JAKI to był mecz, a nie ILE zawodnik w nim przepracował. */}
         <Text style={styles.label}>Rodzaj</Text>
         <View style={styles.pickerWrap}>
           <Picker selectedValue={gameType} onValueChange={setGameType}>
@@ -763,6 +925,7 @@ export default function MeczScreen() {
           </Picker>
         </View>
 
+        {/* Wynik */}
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={styles.label}>Twój zespół — gole</Text>
@@ -776,15 +939,6 @@ export default function MeczScreen() {
 
         <Text style={styles.label}>Twoja rola (opcjonalnie)</Text>
         <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} value={role} onChangeText={setRole} placeholder="np. w podstawowym składzie" />
-
-        <Text style={styles.label}>Minuty na boisku</Text>
-        <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={minutes} onChangeText={setMinutes} placeholder="np. 90" />
-
-        {/* ⭐ PLAN-D-W2 — długość CAŁEGO meczu. Dwie różne liczby i muszą
-            stać obok siebie, żeby nikt ich nie pomylił: „ile grałeś"
-            i „ile trwał mecz". Pusto jest poprawne. */}
-        <Text style={styles.label}>Ile trwał cały mecz (opcjonalnie)</Text>
-        <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={dlugoscMeczu} onChangeText={setDlugoscMeczu} placeholder="np. 60 przy młodszych rocznikach" />
 
         {/* PLAN-D-A7 08.2026 — GODZINA ROZPOCZĘCIA, WYŁĄCZNIE DO KALENDARZA.
             To NIE jest kolejne pole ankiety meczowej: nie idzie do
@@ -801,10 +955,8 @@ export default function MeczScreen() {
           onChangeText={setGodzinaMeczu}
           placeholder="np. 11:00 — trafi do Twojego kalendarza"
         />
-      </View>
 
-      {/* Pozycja dziś */}
-      <View style={styles.block}>
+        {/* Pozycja dziś */}
         <TouchableOpacity style={styles.checkboxRow} onPress={() => setPlayedDifferentPosition((v) => !v)}>
           <Checkbox value={playedDifferentPosition} onValueChange={setPlayedDifferentPosition} />
           <Text style={styles.checkboxLabel}>Dziś grałem na innej pozycji niż zwykle</Text>
@@ -823,93 +975,131 @@ export default function MeczScreen() {
             </View>
           </>
         )}
-      </View>
 
-      {/* Warunki meczu */}
-      <View style={styles.block}>
+        {/* Warunki meczu */}
         <TouchableOpacity style={styles.checkboxRow} onPress={() => setDemandingConditions((v) => !v)}>
           <Checkbox value={demandingConditions} onValueChange={setDemandingConditions} />
           <Text style={styles.checkboxLabel}>Warunki dziś były wymagające (upał, zimno, deszcz, ciężka murawa)</Text>
         </TouchableOpacity>
-      </View>
 
-      {/* RPE / samoocena / stan mentalny */}
-      <View style={styles.block}>
+        {/* Samoocena i stan mentalny */}
         <Text style={styles.sectionLabel}>Jak oceniasz dzisiejszy występ</Text>
-        <Text style={styles.label}>RPE meczowe (0 = brak wysiłku, 10 = maksymalny)</Text>
-        <ScalePicker value={matchRpe} onChange={setMatchRpe} />
         <Text style={styles.label}>Samoocena gry (0 = bardzo słabo, 10 = doskonale)</Text>
         <ScalePicker value={selfRating} onChange={setSelfRating} />
         <Text style={styles.label}>Stan mentalny / pewność siebie (0-10)</Text>
         <ScalePicker value={mentalState} onChange={setMentalState} />
-      </View>
 
-      {/* Ból — reuse 1:1 z Dziennika */}
-      <View style={styles.block}>
-        <TouchableOpacity style={styles.checkboxRow} onPress={() => setHasPain((v) => !v)}>
-          <Checkbox value={hasPain} onValueChange={setHasPain} />
-          <Text style={styles.checkboxLabel}>Boli Cię dziś coś?</Text>
-        </TouchableOpacity>
-        {hasPain && (
-          <>
-            <Text style={styles.label}>Lokalizacja</Text>
-            <View style={styles.pickerWrap}>
-              <Picker selectedValue={painLocation} onValueChange={setPainLocation}>
-                {BODY_LOCATIONS.map(([id, label]) => <Picker.Item key={id} label={label} value={id} />)}
-              </Picker>
-            </View>
-            {!NON_LATERAL_LOCATIONS.has(painLocation) && (
-              <>
-                <Text style={styles.label}>Strona</Text>
-                <View style={styles.pickerWrap}>
-                  <Picker selectedValue={painSide} onValueChange={setPainSide}>
-                    <Picker.Item label="—" value="" />
-                    <Picker.Item label="Lewa" value="left" />
-                    <Picker.Item label="Prawa" value="right" />
-                  </Picker>
-                </View>
-              </>
-            )}
-            <Text style={styles.label}>Intensywność (0 = ledwo wyczuwalny, 10 = nie do zniesienia)</Text>
-            <ScalePicker value={painIntensity} onChange={setPainIntensity} />
-            <TouchableOpacity style={styles.checkboxRow} onPress={() => setPainExcludes((v) => !v)}>
-              <Checkbox value={painExcludes} onValueChange={setPainExcludes} />
-              <Text style={styles.checkboxLabel}>To wyklucza mnie z treningu</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-
-      {/* Wolna notatka */}
-      <View style={styles.block}>
+        {/* Wolna notatka */}
         <Text style={styles.label}>Wolna notatka (opcjonalnie)</Text>
         <TextInput
           style={[styles.input, styles.textarea]} placeholderTextColor={colors.textSecondary} value={freeNote} onChangeText={setFreeNote}
           multiline placeholder="Coś jeszcze warto zapisać o dzisiejszym meczu?"
         />
+      </>
+    );
+  }
+
+  /**
+   * ⭐ M2 — JEDNO WEJŚCIE DO ARKUSZA, JEDEN KSZTAŁT.
+   * ⛔ Strzałka „→" jest w tym produkcie afordancją dotknięcia, więc każdy
+   * taki wiersz MUSI być `TouchableOpacity` z `onPress` — napis ze strzałką
+   * bez akcji to fałszywy przycisk (pilnuje tego `pustkaWCalymRepo`).
+   */
+  function wejscieArkusza(rodzaj: RodzajArkuszaMeczu, napis: string, podpis: string) {
+    return (
+      <TouchableOpacity
+        style={styles.wejscie}
+        accessibilityRole="button"
+        onPress={() => setArkusz(rodzaj)}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.wejscieNapis}>{napis} →</Text>
+          <Text style={styles.wejsciePodpis}>{podpis}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
+  const tytulMeczu = GAME_TYPE_LABELS[gameType] || 'Mecz';
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+    <ScrollView
+      contentContainerStyle={{ padding: 20, paddingBottom: 60 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brand} />}
+    >
+      <Text style={styles.title}>Mecz</Text>
+
+      {error && <Text style={styles.error}>{error}</Text>}
+      {ok && <Text style={styles.ok}>{ok}</Text>}
+
+      {/* ⭐ M2 — TRYB KONTUZJI: na ekranie stoi JEDEN wiersz, cała lista
+          trzynastu obszarów otwiera się nakładką. ⛔ Nic nie zniknęło:
+          `renderRoutingBlock()` rysuje dokładnie tę samą treść, tyle że
+          w arkuszu (koszt 0 dp). */}
+      {routing && wejscieArkusza('kontuzja', 'Tryb kontuzji — co jest teraz dostępne', routing.label)}
+
+      {/* ⭐⭐ M2 — RDZEŃ MECZU. Cztery rzeczy, które makieta v3 stawia
+          w ścieżce oceny meczu: rodzaj, dwie liczby minut i ciężkość.
+          ⛔ Dwie liczby stoją w JEDNYM bloku, bo bez siebie nic nie znaczą:
+          45 minut w meczu 60-minutowym to nie to samo, co 45 minut w meczu
+          90-minutowym (`lib/meczWiecej.ts`). */}
+      <View style={styles.block}>
+        <Text style={styles.sectionLabel}>Zapisz mecz</Text>
+
+        {/* ⭐ PLAN-D-W2 → M2 — DWIE LICZBY, JEDEN WIERSZ. Do 19.08 stały jedna
+            pod drugą i kosztowały 204 dp; obok siebie kosztują 102 i mówią to
+            samo — a nawet więcej, bo widać od razu, że są PARĄ. „Ile grałeś"
+            bez „ile trwał mecz" nie znaczy nic (`lib/meczWiecej.ts`).
+            ⛔ Pusto jest poprawne przy obu. */}
+        <View style={styles.wiersz}>
+          <View style={styles.kolumna}>
+            <Text style={styles.label}>Minuty na boisku</Text>
+            <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={minutes} onChangeText={setMinutes} placeholder="np. 90" />
+          </View>
+          <View style={styles.kolumna}>
+            <Text style={styles.label}>Ile trwał cały mecz</Text>
+            <TextInput style={styles.input} placeholderTextColor={colors.textSecondary} keyboardType="number-pad" value={dlugoscMeczu} onChangeText={setDlugoscMeczu} placeholder="np. 60" />
+          </View>
+        </View>
+
+        {/* ⛔ ZERO CZERWIENI (Z2): sprzeczność dwóch liczb NIE JEST bólem ani
+            stanem ochronnym, więc nie ma prawa nosić barwy ostrzeżenia.
+            ⭐ K4 — informację niesie ZDANIE, nie kolor: zawodnik, który nie
+            rozróżnia części barw, czyta dokładnie to samo, co każdy inny. */}
+        {sprzecznoscMinut && <Text style={styles.uwaga}>{MECZ_MINUTY_PONAD_DLUGOSC}</Text>}
+
+        <Text style={styles.label}>RPE meczowe (0 = brak wysiłku, 10 = maksymalny)</Text>
+        <ScalePicker value={matchRpe} onChange={setMatchRpe} />
       </View>
 
       <TouchableOpacity style={[styles.btn, saving && styles.btnDisabled]} disabled={saving} onPress={submitMatchContext}>
         <Text style={styles.btnText}>{saving ? 'Zapisuję...' : 'Zapisz mecz'}</Text>
       </TouchableOpacity>
 
-      <View style={{ marginTop: 40 }}>
-        <Text style={styles.sectionLabel}>Historia meczów</Text>
-        {/* ⭐ PLAN-D-C3 15.08.2026 — brzmienie „Brak zapisanych meczów — dodaj
-            pierwszy powyżej." idzie CO DO ZNAKU (zakaz 4), razem z krokiem,
-            który już w nim siedzi. Zmienia się wyłącznie to, KIEDY zawodnik
-            je czyta: nie wtedy, gdy odczyt padł. */}
-        {pustkaHistorii ? (
-          <>
-            <Text style={styles.empty}>{pustkaHistorii.tekst}</Text>
-            {pustkaHistorii.krokWTekscie ? null : (
-              <Text style={styles.empty}>{pustkaHistorii.cta}</Text>
-            )}
-          </>
-        ) : null}
-        {history.map(renderMatchCard)}
+      {/* ⭐⭐ M2 — CZTERY WEJŚCIA ZASTĘPCZE. ⛔ TO JEST WARUNEK 3 POLECENIA:
+          nie ma stanu tego pliku, w którym pytania już nie ma na ekranie,
+          a wejścia do niego jeszcze nie ma. Każdy wiersz otwiera arkusz
+          z DOKŁADNIE tą treścią, która do 19.08 leżała na ekranie. */}
+      <View style={styles.wejscia}>
+        {wejscieArkusza('stan', 'Stan przed meczem', 'regeneracja i pytania dobrane do Twojej pozycji')}
+        {wejscieArkusza('wiecej', 'Powiedz więcej o tym meczu', 'rodzaj, wynik, rola, godzina, pozycja, warunki, samoocena, notatka')}
+        {wejscieArkusza('bol', 'Boli Cię dziś coś?', 'miejsce, strona, natężenie')}
+        {wejscieArkusza('historia', 'Historia meczów', 'ostatnie zapisane mecze')}
       </View>
     </ScrollView>
+
+    {/* ── ARKUSZ ────────────────────────────────────────────────────
+        ⛔ STOI POZA `ScrollView`: to jest NAKŁADKA nad ekranem, a nie
+        kolejna rzecz na nim. Dlatego zdejmuje wysokość, zamiast ją
+        przesuwać — i dlatego miara ekranu liczy go na zero. */}
+    <Arkusz
+      widoczny={arkusz !== null}
+      naglowek={arkusz === null ? null : naglowekArkuszaMeczu(arkusz, tytulMeczu)}
+      naZamkniecie={() => setArkusz(null)}
+    >
+      {arkusz === null ? null : trescArkusza()}
+    </Arkusz>
     </SafeAreaView>
   );
 }
@@ -935,6 +1125,43 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.4 },
   btnText: { ...typography.bodySemiBold, color: colors.white, fontSize: 15, letterSpacing: 0.5 },
   btnSecondary: { minHeight: minTouchHeight, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, alignItems: 'center', marginTop: 4, marginBottom: 20 },
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐ PLAN-D-M2 19.08.2026 — WIERSZ WEJŚCIA DO ARKUSZA (makieta v3: `prow`).
+  // ⛔ ZERO NOWYCH BARW: `surface`, `border` i `brand` były w tym pliku
+  // wcześniej. ⛔ Zero czerwieni (Z2) — to nie jest ostrzeżenie.
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐ M2 — DWIE LICZBY OBOK SIEBIE. ⛔ Styl stoi w `StyleSheet`, a nie
+  // w atrybucie: miara `lib/wysokoscEkranu.ts` czyta z atrybutu WYŁĄCZNIE
+  // wartości liczbowe, więc `style={{ flexDirection: 'row' }}` wpisany wprost
+  // byłby policzony jako kolumna — i liczba na zapadce mówiłaby o innym
+  // ekranie niż ten, który widzi zawodnik.
+  wiersz: { flexDirection: 'row', gap: 12 },
+  kolumna: { flex: 1 },
+  wejscia: { marginTop: 28 },
+  wejscie: {
+    minHeight: minTouchHeight,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: 10,
+  },
+  wejscieNapis: { ...typography.bodySemiBold, fontSize: 14, color: colors.textPrimary },
+  wejsciePodpis: { ...typography.body, fontSize: 11.5, color: colors.textSecondary, marginTop: 2, lineHeight: 16 },
+  // ⛔ UWAGA, KTÓRA NIE JEST OSTRZEŻENIEM. Sprzeczność dwóch liczb podanych
+  // przez zawodnika to fakt do poprawienia, nie ból i nie stan ochronny —
+  // dlatego NIE MA tu `colors.error` (Z2). Nośnikiem jest zdanie (K4).
+  uwaga: {
+    ...typography.body,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textPrimary,
+    backgroundColor: colors.surfaceElevated,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.textPrimary,
+    borderRadius: radii.sm,
+    padding: 10,
+    marginBottom: 8,
+  },
   btnSecondaryText: { ...typography.bodyMedium, color: colors.textPrimary, fontSize: 13, letterSpacing: 0.3 },
   error: { color: colors.error, fontSize: 13, marginBottom: 12 },
   ok: { color: colors.success, fontSize: 13, marginBottom: 12 },

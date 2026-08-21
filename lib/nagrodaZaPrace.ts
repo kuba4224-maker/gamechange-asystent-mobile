@@ -548,6 +548,26 @@ export type JednostkaPracy = {
    * nie czyta tego pola i nie przyjmuje żadnego parametru okna.
    */
   kiedy: DataPracy;
+  /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026 — `calendar_events.id`, KTÓREGO TA JEDNOSTKA DOTYCZY.
+   *
+   * ⛔ PO CO TO ISTNIEJE. Do 19.08 `jednostkiZSesji` i `jednostkiZMeczow` nie
+   * wiedziały o sobie nawzajem: jeden mecz wchodził DWA RAZY — raz jako
+   * `sesja:501@2026-08-15` (wydarzenie `event_type='match'`), raz jako
+   * `mecz:77` (wiersz `match_contexts`) — i dawał 7 punktów zamiast 4.
+   * Klucze były RÓŻNE, więc odsiew po kluczu ich nie łączył. ⛔ Odsiew
+   * potrzebuje wspólnej TOŻSAMOŚCI, a nie wspólnego napisu.
+   *
+   * ⚠️ `null` / brak pola znaczy „ta jednostka nie dotyczy żadnego wystąpienia
+   * w kalendarzu" — wpis w Dzienniku, odpowiedź kontrolna, stary wiersz meczu
+   * bez `calendar_event_id`. ⛔ To NIE JEST „zero" i NIE odbiera jednostce
+   * punktów: praca bez wskazanego wystąpienia liczy się normalnie (R5).
+   *
+   * ⛔ Pole jest OPCJONALNE świadomie: `lib/ekranProfilu.selftest.ts` (pas P1)
+   * buduje `JednostkaPracy` własnym pomocnikiem i nie jest moim plikiem.
+   * Wymóg obowiązkowy wywróciłby `npx tsc --noEmit` w cudzym pasie.
+   */
+  wydarzenie?: number | null;
 };
 
 /**
@@ -653,6 +673,9 @@ export function jednostkiZSesji(wiersze: readonly WierszSesji[]): JednostkaPracy
     out.push({
       klucz: `sesja:${w.idWydarzenia}@${w.dzien.slice(0, 10)}`,
       rodzaj: 'sesja_z_dowodem',
+      // ⭐ PLAN-D-D2 — TOŻSAMOŚĆ WYSTĄPIENIA. Po niej `policzNagrode` rozpozna,
+      // że ten sam mecz przyszedł drugą drogą, jako wiersz `match_contexts`.
+      wydarzenie: w.idWydarzenia,
       punkty: waga.punkty,
       pochodzenieWagi: waga.pochodzenie,
       segment: typeof w.segment === 'string' && w.segment.length > 0 ? w.segment : null,
@@ -802,6 +825,17 @@ export type WierszMeczu = {
    * czyli mecz jest dziś NAJBLIŻEJ pełnego pomiaru `minuty × RPE`.
    */
   match_rpe?: number | null;
+  /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026 — `match_contexts.calendar_event_id`. Kolumna
+   * założona na produkcji 19.08.2026 razem z unikalnym indeksem częściowym
+   * `match_contexts_jeden_wiersz_na_wydarzenie` (jeden wiersz na wydarzenie)
+   * i kluczem obcym `→ calendar_events(id) on delete set null`.
+   *
+   * ⛔ `null` NIE JEST ZEREM: dwa wiersze, które istniały przed migracją,
+   * nie mają wydarzenia, do którego mogłyby wskazać — i MAJĄ SIĘ NADAL LICZYĆ.
+   * Migracja nie kasuje historii.
+   */
+  calendar_event_id?: number | null;
 };
 
 export function jednostkiZMeczow(wiersze: readonly WierszMeczu[]): JednostkaPracy[] {
@@ -817,6 +851,11 @@ export function jednostkiZMeczow(wiersze: readonly WierszMeczu[]): JednostkaPrac
     out.push({
       klucz: `mecz:${w.id}`,
       rodzaj: 'mecz',
+      // ⭐ PLAN-D-D2 — wystąpienie, które ten wiersz OPISUJE. Jeżeli je zna,
+      // pochłonie jednostkę wydarzenia; jeżeli nie zna (stary wiersz), nie
+      // pochłania niczego i liczy się tak jak dotąd.
+      wydarzenie: typeof w.calendar_event_id === 'number'
+        && Number.isFinite(w.calendar_event_id) ? w.calendar_event_id : null,
       punkty: waga.punkty,
       pochodzenieWagi: waga.pochodzenie,
       segment: null,
@@ -1039,6 +1078,20 @@ export type NastepnyProg = {
 /** Odznaka, której NIE UMIEM policzyć — z powodem. ⛔ To nie jest „niezdobyta". */
 export type BrakPomiaru = { id: OdznakaId; nazwa: string; powod: string };
 
+/**
+ * ⭐⭐ PLAN-D-D2 19.08.2026 — jedno wchłonięcie: co zniknęło i co je zjadło.
+ * ⛔ `wydarzenie` jest w tym rekordzie, bo bez niego zdanie w logu brzmiałoby
+ * „coś zjadło coś", a nie „wiersz meczu 77 zjadł wystąpienie 501".
+ */
+export type PochlonietaJednostka = {
+  /** Klucz jednostki, która NIE WESZŁA do sumy. */
+  klucz: string;
+  /** Klucz jednostki, która ją pochłonęła. */
+  przez: string;
+  /** `calendar_events.id`, na którym obie się spotkały. */
+  wydarzenie: number;
+};
+
 export type NagrodaZaPrace =
   | {
       rodzaj: 'policzona';
@@ -1055,6 +1108,13 @@ export type NagrodaZaPrace =
       nastepnyProg: NastepnyProg | null;
       /** ⭐ Progi, których nie umiem policzyć — z powodem. Nie milczą. */
       nieumiemPoliczyc: readonly BrakPomiaru[];
+      /**
+       * ⭐⭐ PLAN-D-D2 — JEDNOSTKI POCHŁONIĘTE, NAZWANE Z IMIENIA.
+       * ⛔ Odsiewanie ma być JAWNE (§4.2 pkt 4 polecenia D2): log mówi, KTÓRY
+       * klucz został pochłonięty PRZEZ KTÓRY. Cicha różnica w sumie jest
+       * nieodróżnialna od defektu liczenia — a tego pasa dotyczy właśnie to.
+       */
+      pochloniete: readonly PochlonietaJednostka[];
     }
   | {
       rodzaj: 'nie_policzona';
@@ -1079,6 +1139,12 @@ export type ZasadyNagrody = {
   progWolnoDacBezPracy: boolean;
   /** ⛔ Zawsze `false`. Gdy `true` — niepełny zbiór celów liczy się jak pełny. */
   niepelneCeleLiczaSieJakPelne: boolean;
+  /**
+   * ⭐⭐ PLAN-D-D2 19.08.2026. ⛔ Zawsze `true`. Gdy `false` — wydarzenie,
+   * które MA wiersz `match_contexts`, liczy się DRUGI RAZ obok tego wiersza.
+   * To jest dokładnie defekt zmierzony 19.08: jeden mecz = 7 punktów zamiast 4.
+   */
+  meczPochlaniaSwojeWydarzenie: boolean;
 };
 
 export const ZASADY_NAGRODY_PRAWDZIWE: ZasadyNagrody = {
@@ -1086,6 +1152,7 @@ export const ZASADY_NAGRODY_PRAWDZIWE: ZasadyNagrody = {
   odsiewajDuplikaty: true,
   progWolnoDacBezPracy: false,
   niepelneCeleLiczaSieJakPelne: false,
+  meczPochlaniaSwojeWydarzenie: true,
 };
 
 /**
@@ -1151,6 +1218,86 @@ export function policzNagrode(
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // ⭐⭐ PLAN-D-D2 19.08.2026 — KONIEC PODWÓJNEGO LICZENIA MECZU.
+  //
+  // ⛔ CO BYŁO ZEPSUTE, ZMIERZONE DWA RAZY NIEZALEŻNIE (pas D8 §7.1
+  // i sesja nawigująca 19.08 o 01:20 UTC): mecz z wierszem `match_contexts`
+  // wchodził DWIEMA drogami — jako `sesja:501@2026-08-15` (wydarzenie
+  // `event_type='match'`, waga zobowiązania = 3) i jako `mecz:77` (wiersz
+  // z minutami i RPE, waga = 4). Klucze RÓŻNE, więc odsiew po kluczu ich nie
+  // łączył. SUMA = 7 za jeden mecz, przy górnym pułapie meczu = 4.
+  //
+  // ⛔ DEFEKT BYŁ UŚPIONY DO 18.08: `match_contexts` miało DWA wiersze w całej
+  // bazie i żadna ścieżka nie zakładała nowych. Pas D8 podpiął tworzenie
+  // wierszy z kafla — od tego dnia licznik zaczynał kłamać u KAŻDEGO zawodnika,
+  // który ocenił mecz.
+  //
+  // ⭐ KTÓRE ŹRÓDŁO WYGRYWA I DLACZEGO — decyzja, nie zgadywanie (§4.2 D2):
+  // wygrywa WIERSZ `match_contexts`, bo ma minuty na boisku i RPE, czyli
+  // WIĘCEJ FAKTÓW o tej samej pracy. Wydarzenie znika z listy jednostek,
+  // nie odwrotnie.
+  //
+  // ⛔ CZEGO TO NIE ROBI I ROBIĆ NIE MOŻE:
+  //   • mecz BEZ wiersza `match_contexts` liczy się dalej, raz, jako
+  //     zobowiązanie — zawodnik nie traci punktu za to, że nie wypełnił karty;
+  //   • wiersz meczu BEZ `calendar_event_id` (stary, sprzed migracji) nie
+  //     pochłania niczego i liczy się dalej — migracja nie kasuje historii;
+  //   • pochłaniana jest WYŁĄCZNIE jednostka `sesja_z_dowodem`. Wpis
+  //     w Dzienniku i odpowiedź kontrolna z tego samego dnia zostają, bo to
+  //     jest INNA praca, a nie ten sam mecz policzony dwa razy.
+  // ══════════════════════════════════════════════════════════════════
+  const meczNaWydarzeniu = new Map<number, string>();
+  for (const j of jednostki) {
+    if (j.rodzaj !== 'mecz') continue;
+    const e = j.wydarzenie;
+    if (typeof e !== 'number' || !Number.isFinite(e)) continue;
+    // ⛔ Pierwszy wygrywa. Unikalny indeks częściowy w bazie pilnuje, że drugi
+    // wiersz na to samo wydarzenie w ogóle nie powstanie.
+    if (!meczNaWydarzeniu.has(e)) meczNaWydarzeniu.set(e, j.klucz);
+  }
+  const pochloniete: PochlonietaJednostka[] = [];
+  const zostaje: JednostkaPracy[] = [];
+  // ⭐⭐ OŚ JAKOŚCI DZIEDZICZY SIĘ RAZEM Z PRACĄ — ⛔ ZMIERZONE, NIE ZAŁOŻONE.
+  // Pierwsze podejście tego pasa (19.08.2026, pomiar na danych produkcyjnych)
+  // dało dorobek 7 → 4 poprawnie, ale RAZEM z tym `domkniętych 3 → 2`: wpis
+  // w Dzienniku wskazujący ten mecz znikał razem z pochłoniętą jednostką
+  // i zawodnik tracił jedną „rzecz domkniętą odpowiedzią", czyli miarę progu
+  // `odpowiedzi_kontrolne`. ⛔ To byłaby dokładnie ta strata, której zakazuje
+  // §4.2 pkt 3 — tyle że na drugiej osi i po cichu. Dlatego wiersz meczu
+  // PRZEJMUJE domknięcie po jednostce, którą pochłonął.
+  const meczDziedziczyDomkniecie = new Set<string>();
+  // ⭐⭐ …I TA SAMA REGUŁA DLA SEGMENTU (trzecia oś: `punkty_w_celu`).
+  // ⛔ `jednostkiZMeczow` daje `segment: null`, bo `match_contexts` nie ma
+  // kolumny segmentu. Wydarzenie ją ma — przez Blok Skupienia. Gdyby wiersz
+  // meczu pochłonął wydarzenie i NIE przejął segmentu, praca nad własnym celem
+  // zniknęłaby z miary „punkty w celu", chociaż zawodnik ją wykonał.
+  const meczDziedziczySegment = new Map<string, string>();
+  for (const j of jednostki) {
+    const e = j.wydarzenie;
+    if (zasady.meczPochlaniaSwojeWydarzenie
+      && j.rodzaj === 'sesja_z_dowodem'
+      && typeof e === 'number' && Number.isFinite(e)) {
+      const przez = meczNaWydarzeniu.get(e);
+      if (przez !== undefined) {
+        pochloniete.push({ klucz: j.klucz, przez, wydarzenie: e });
+        if (j.zOdpowiedziaKontrolna) meczDziedziczyDomkniecie.add(przez);
+        if (j.segment !== null && !meczDziedziczySegment.has(przez)) {
+          meczDziedziczySegment.set(przez, j.segment);
+        }
+        continue;
+      }
+    }
+    zostaje.push(j);
+  }
+  const doLiczenia: JednostkaPracy[] = zostaje.map((j) => {
+    const domkniecie = meczDziedziczyDomkniecie.has(j.klucz) ? true : j.zOdpowiedziaKontrolna;
+    const segment = j.segment === null ? (meczDziedziczySegment.get(j.klucz) ?? null) : j.segment;
+    return domkniecie === j.zOdpowiedziaKontrolna && segment === j.segment
+      ? j
+      : { ...j, zOdpowiedziaKontrolna: domkniecie, segment };
+  });
+
   let punkty = 0;
   let odpowiedziKontrolne = 0;
   let punktyWCelu = 0;
@@ -1159,7 +1306,7 @@ export function policzNagrode(
     ? we.segmentyCelow.segmenty
     : new Set<string>();
 
-  for (const j of jednostki) {
+  for (const j of doLiczenia) {
     // ⭐ PLAN-D-W1 (O100): waga jest WŁASNOŚCIĄ JEDNOSTKI, nie jej rodzaju.
     // ⛔ Jednostka bez policzonej wagi spada do wartości awaryjnej rodzaju —
     // nie do zera, bo zero znaczyłoby „tej pracy nie było".
@@ -1213,12 +1360,15 @@ export function policzNagrode(
   return {
     rodzaj: 'policzona',
     punkty,
-    jednostki: jednostki.length,
+    // ⭐ PLAN-D-D2 — liczba rzeczy POLICZONYCH, a nie odczytanych. Jednostka
+    // pochłonięta nie jest „zapisaną rzeczą" drugi raz.
+    jednostki: doLiczenia.length,
     odpowiedziKontrolne,
     punktyWCelu: celePelne ? punktyWCelu : null,
     odznaki,
     nastepnyProg,
     nieumiemPoliczyc,
+    pochloniete,
   };
 }
 
@@ -1236,5 +1386,12 @@ export function opisNagrodyDoLogu(n: NagrodaZaPrace): string {
   return `nagroda za pracę: ${n.punkty} pkt z ${n.jednostki} jednostek `
     + `· domkniętych ${n.odpowiedziKontrolne} · w celu ${n.punktyWCelu === null ? 'NIE WIEM' : n.punktyWCelu} `
     + `· odznak ${n.odznaki.length} · ${nast}`
-    + (n.nieumiemPoliczyc.length > 0 ? ` · nie umiem policzyć: ${n.nieumiemPoliczyc.map((b) => b.id).join(',')}` : '');
+    + (n.nieumiemPoliczyc.length > 0 ? ` · nie umiem policzyć: ${n.nieumiemPoliczyc.map((b) => b.id).join(',')}` : '')
+    // ⭐⭐ PLAN-D-D2 §4.2 pkt 4 — ODSIEWANIE JEST JAWNE. Zdanie nazywa
+    // POCHŁONIĘTY klucz, POCHŁANIAJĄCY klucz i wydarzenie, na którym się
+    // spotkały. ⛔ Bez tego różnica w sumie jest nieodróżnialna od defektu.
+    + (n.pochloniete.length > 0
+      ? ` · pochłonięte przez wiersz meczu: ${n.pochloniete
+        .map((x) => `${x.klucz} → ${x.przez} (wydarzenie ${x.wydarzenie})`).join(' | ')}`
+      : ' · pochłoniętych 0');
 }

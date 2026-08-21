@@ -92,6 +92,8 @@ import {
   odczytTabeli,
   podpisNaglowka,
   policzRozwojZOdczytow,
+  stanSegmentowSesji,
+  zdanieOSegmentachDoLogu,
   trafnoscZawodnika,
   zbudujModelProfilu,
   zdanieOPracyDodatkowej,
@@ -100,6 +102,10 @@ import {
   type ModelProfilu,
   type OdczytyDoRozwoju,
 } from '../../lib/ekranProfilu';
+// ⭐ PAS P1 19.08.2026 — nazwa tabeli i lista kolumn meczu CZYTANE, nie
+// przepisane. Druga kopia listy kolumn to dokładnie ten defekt, który ten pas
+// naprawia: pole zapisane w bazie i nigdy nieodczytane przez jeden z ekranów.
+import { SELECT_MECZOW, TABELA_MECZOW } from '../../lib/wejsciaWgladow';
 import ArkuszeProfilu from '../../components/ArkuszeProfilu';
 
 /** Jedno miejsce, w którym nieudany odczyt trafia do konsoli. */
@@ -177,7 +183,14 @@ export default function JaScreen() {
       supabase.from('daily_logs').select('id,entry_type,payload,created_at,calendar_event_id')
         .eq('user_id', currentUser.id),
       supabase.from('focus_block_checkins').select('id,focus_block_id,answered_at'),
-      supabase.from('match_contexts').select('id,created_at,minutes_played,match_rpe')
+      // ⭐⭐ PAS P1 19.08.2026 — LISTA KOLUMN MECZU MA JEDNO MIEJSCE
+      // (`SELECT_MECZOW` w `lib/wejsciaWgladow.ts`), a nie dwa napisy obok
+      // siebie. ⛔ ZMIERZONE: ta lista NIE MIAŁA `match_length_minutes`,
+      // więc `wagaMeczu()` podstawiała 90 minut ZAWSZE i mecz 60-minutowy
+      // rozegrany w całości dawał na „Profilu" 3 punkty zamiast 4.
+      // ⛔ OBCIĄŻENIE NIE DRGNIE: liczy je `minutes_played` × `match_rpe`,
+      // a obie kolumny były i są w zapytaniu.
+      supabase.from(TABELA_MECZOW).select(SELECT_MECZOW)
         .eq('user_id', currentUser.id),
       // ⛔ BEZ FILTRA `status` — cel domknięty to sukces, nie utrata odznaki.
       // ⭐ PLAN-D-S2 — `is_priority` DOŁOŻONE, filtra statusu NADAL NIE MA
@@ -276,8 +289,21 @@ export default function JaScreen() {
       odpowiedziKontrolne: odczytTabeli(checkinyRes.error, checkinyRes.data, 'odpowiedzi kontrolnych Bloku', zaloguj),
       mecze: odczytTabeli(meczeRes.error, meczeRes.data, 'meczów', zaloguj),
       cele: odczytTabeli(celeRes.error, celeRes.data, 'listy celów', zaloguj),
+      // ⭐⭐ PAS P1 19.08.2026 — BLOKI SKUPIENIA WCHODZĄ DO ROZWOJU.
+      // ⛔ TE SAME WIERSZE, KTÓRE EKRAN JUŻ CZYTAŁ (`blokiRes`, niżej dają
+      // `aktywneBloki`) — zero nowych zapytań, jedna linia. Do 19.08.2026
+      // `wejscieNagrodyZOdczytow` podawało `segmentBloku: null` na sztywno,
+      // więc TU, na „Profilu", każda sesja dostawała trafność 1,0 — także ta,
+      // która na „Dziś" dostaje 1,5. ⛔ Zawodnik widział MNIEJ rozwoju, niż
+      // naprawdę ma, a dwa ekrany mówiły o tej samej pracy dwie różne liczby.
+      // ⛔ BEZ FILTRA `status`: Blok domknięty to praca wykonana, nie utracona.
+      bloki: odczytTabeli(blokiRes.error, blokiRes.data, 'Bloków Skupienia', zaloguj),
       zwrot: t.zwrot,
     };
+    // ⛔ NIEWIEDZA O SEGMENCIE MA NAZWĘ I WYCHODZI DO LOGU (R5). Bez tej linii
+    // nieodczytana tabela Bloków po cichu zaniża rozwój i wygląda jak pomiar.
+    const zdanieOSegmentach = zdanieOSegmentachDoLogu(stanSegmentowSesji(odczyty));
+    if (zdanieOSegmentach !== null) console.warn(zdanieOSegmentach);
     const nagroda = policzRozwojZOdczytow(odczyty);
     // ⛔ TE SAME `odczyty`, BEZ `zwrot` w środku wzoru: obciążenie liczy się
     // z minut i ciężkości, a trafność nie ma jak do niego wejść — funkcja

@@ -326,10 +326,27 @@ const ZAPADKI_POZOSTALE = [
     ustawiona: '17.08.2026',
     powod: 'pas M2 — historia wpisów rysuje do 20 wierszy (`.limit(20)` w tym ekranie), '
       + 'a liczyła się jako jeden; 1 570 → 3 712 dp' },
-  { ekran: 'mecz', pozycji: 20, widocznych: 6, przecietych: 1, wysokoscDp: 5863,
-    ustawiona: '17.08.2026',
-    powod: 'pas M2 — cztery listy naraz: pytania segmentowe, opcje stanu, historia meczów '
-      + 'i wiersze urazów; 3 229 → 5 761 dp' },
+  // ⭐⭐ PRZESTAWIONA 19.08.2026 (PAS M2) — 5 863 → 785 dp, czyli −5 078 dp,
+  // i 20 → 10 rzeczy. ⛔ To jest DRUGIE przestawienie zapadki W DÓŁ w tym
+  // projekcie (pierwsze zrobił pas A1 na „Dziś") i jedyne zdanie, jakie tu
+  // pasuje, brzmi: ekran meczu przestał wymagać przewijania.
+  // JEDNYM ZDANIEM, CO GO ZDJĘŁO: pięć rzeczy zeszło z ekranu do arkusza
+  // (`components/Arkusz.tsx` jest `Modal`-em, więc kosztuje 0 dp) — stan przed
+  // meczem z pytaniami segmentowymi, „powiedz więcej o tym meczu", ból,
+  // historia meczów i lista trybu kontuzji — a dwie liczby minut stanęły
+  // w jednym wierszu zamiast jedna pod drugą.
+  // ⛔ NIC NIE ZNIKNĘŁO: każda z tych pięciu rzeczy ma wejście NA EKRANIE
+  // (wiersz ze strzałką „→"), a tabela „co gdzie wylądowało" stoi w nocie
+  // `claude/PRZEKAZANIE_PAS_M2_19_08_2026.md`.
+  // ⭐ 785 < 808: ekran mieści się nad zgięciem W CAŁOŚCI, `przecietych`
+  // spadło z 1 na 0, a cel z makiety v3 dla ścieżki meczu wynosił 803 dp.
+  { ekran: 'mecz', pozycji: 10, widocznych: 10, przecietych: 0, wysokoscDp: 785,
+    ustawiona: '19.08.2026',
+    powod: 'pas M2 — ekran meczu chudnie do makiety (decyzja Kuby 18.08, punkt 3): '
+      + 'stan przed meczem z pytaniami segmentowymi, „powiedz więcej o tym meczu", ból, '
+      + 'historia meczów i lista trybu kontuzji zeszły z ekranu do arkusza (0 dp), '
+      + 'a minuty na boisku i długość meczu stanęły w jednym wierszu; 5 863 → 785 dp, '
+      + 'zero rzeczy pod zgięciem, zero przeciętych' },
   { ekran: 'kalendarz', pozycji: 16, widocznych: 4, przecietych: 1, wysokoscDp: 2802,
     ustawiona: '17.08.2026',
     powod: 'pas M2 — ekran, od którego ten pas się zaczął: 536 → 2 650 dp. Mierzona jest '
@@ -637,12 +654,21 @@ const ZAPADKA_NIEWYPROWADZALNE = {
   // jednej listy — razem ubyło pięć różnych konstrukcji z pięciu ekranów.
   // ⛔ Zapadka zostaje NA RÓWNOŚĆ: kto DOŁOŻY ekranowi konstrukcję, której
   // miara nie zna, zobaczy czerwień tak samo jak dotąd.
-  ile: 13,
-  ustawiona: '18.08.2026',
-  powod: 'pas S1 — 18 → 13 po przebudowie obu ekranów produktu (pasy A1 i A3): '
-    + 'z „Dziś" zeszła kolejka czterech pozycji, oś pomiarów wglądu i lista kroków oceny, '
-    + 'a ekran „Ja" nie ma dziś ani jednej listy. 11 z 13 pozycji to listy o długości '
-    + 'zależnej od danych zawodnika, dwie to klocki spoza repozytorium',
+  // ⭐ PRZESTAWIONA 19.08.2026 (pas M2): 13 → 10. Liczba SPADŁA O TRZY i to jest
+  // dobra wiadomość, ale ⚠️ NIE ZNACZY, że miara nauczyła się trzech nowych
+  // konstrukcji. JEDNYM ZDANIEM, CO JĄ ZMIENIŁO: `Checkbox` oraz trzy listy
+  // odpowiedzi na pytania segmentowe (`bank.answers.map(…)` i dwa warianty
+  // pogłębienia) zeszły z ekranu meczu do arkusza, czyli POZA `ScrollView`,
+  // więc miara ekranu ich już nie widzi — bo i zawodnik nie widzi ich na ekranie.
+  // ⛔ Te cztery konstrukcje NIE ZNIKNĘŁY z produktu: pilnuje ich osobna
+  // zapadka „listy w arkuszu" w sekcji 13 tego pliku.
+  ile: 10,
+  ustawiona: '19.08.2026',
+  powod: 'pas M2 — 13 → 10: `Checkbox` i trzy listy odpowiedzi na pytania segmentowe '
+    + 'zeszły z ekranu meczu do arkusza (Modal, poza przewijaniem ekranu), więc miara '
+    + 'ekranu ich nie widzi. ⛔ Nie zniknęły z produktu — stoją w zapadce „listy '
+    + 'w arkuszu" w sekcji 13. Wszystkie 10 pozostałych pozycji to listy o długości '
+    + 'zależnej od danych zawodnika albo klocki spoza repozytorium',
 };
 {
   const ramka = (srodek: string) => `
@@ -909,10 +935,51 @@ const styles = StyleSheet.create({
     return null;
   };
 
+  // ═════════════════════════════════════════════════════════════════
+  // ⭐⭐ PLAN-D-M2 19.08.2026 — CZWARTE MIEJSCE: „W ARKUSZU".
+  // ═════════════════════════════════════════════════════════════════
+  // ⛔ DLACZEGO TO NIE JEST POLUZOWANIE STRAŻNIKA. Trzy miejsca wypisane
+  // wyżej powstały 17.08, kiedy produkt nie miał ANI JEDNEGO arkusza
+  // (`grep -rn "Modal" app/(tabs)` wracał pusty). Od 18.08 ma: nakładka jest
+  // `Modal`-em, czyli OSOBNYM DRZEWEM nad ekranem, więc jej treść naprawdę
+  // NIE WCHODZI do przewijania ekranu pod spodem — i miara ma rację, że jej
+  // nie liczy. ⛔ Ale „miara ma rację, że nie liczy" to nie to samo, co
+  // „wolno o tym nie mówić": lista, która przeniosła się do arkusza, znika
+  // z pomiaru tak samo cicho jak lista, którą ktoś skasował.
+  //
+  // ⭐ CO ROBI TO MIEJSCE. Nie ucisza pytania — ZAMIENIA CISZĘ NA LICZBĘ.
+  // Lista wolno jest „w arkuszu" tylko wtedy, gdy DOWIEDZIONE są trzy rzeczy:
+  //   1. plik montuje `<Arkusz>` POZA `ScrollView` (inaczej nakładka
+  //      podnosiłaby ekran i wykręcenie się nią byłoby kłamstwem),
+  //   2. lista leży w ciele procedury, którą ten `<Arkusz>` dostaje jako
+  //      dzieci — a nie gdziekolwiek w pliku,
+  //   3. jest wymieniona Z NAZWY w zapadce na RÓWNOŚĆ niżej.
+  // ⛔ Bez punktu 3 „przeniosłem to do arkusza" byłoby zdaniem, którym da się
+  // wyprowadzić z pomiaru dowolną rzecz, raz na zawsze i bez śladu.
+
+  /** Nazwy procedur, których wynik trafia do `<Arkusz>` jako dzieci. */
+  const procedurArkusza = (src: string): string[] => {
+    const iScroll = src.indexOf('</ScrollView>');
+    const iArkusz = src.indexOf('<Arkusz');
+    // ⛔ Arkusz WEWNĄTRZ przewijania nie zdejmuje ani jednego dp — wtedy to
+    // miejsce nie istnieje i lista wraca do trzech pozostałych.
+    if (iArkusz === -1 || iScroll === -1 || iScroll > iArkusz) return [];
+    const koniec = src.indexOf('</Arkusz>', iArkusz);
+    if (koniec === -1) return [];
+    const wnetrze = src.slice(src.indexOf('>', iArkusz), koniec);
+    return [...wnetrze.matchAll(/([A-Za-z_$][\w$]*)\s*\(\s*\)/g)].map((m) => m[1]);
+  };
+
+  /** Co naprawdę leży w arkuszach — zbierane po drodze, sprawdzane zapadką. */
+  const listyWArkuszu: string[] = [];
+
   let listPoNazwie = 0;
   for (const e of ['dzis', 'ja', 'dziennik', 'mecz', 'kalendarz']) {
     const src = readFileSync(join(kat, `${e}.tsx`), 'utf8');
     const r = zmierzEkranZTekstu(e, src, kat);
+    const zakresyArkusza = procedurArkusza(src)
+      .map((n) => cialoProcedury(src, n))
+      .filter((x): x is [number, number] => x !== null);
 
     const znane = new Set<string>();
     for (const p of [...r.pozycje, ...r.pozycje.flatMap((x) => x.czesci)]) {
@@ -938,6 +1005,13 @@ const styles = StyleSheet.create({
       const lista = m[1];
       if (znane.has(lista) || [...znane].some((n) => n.endsWith(`.${lista.split('.').pop()}`) || lista.endsWith(n))) continue;
       if (zakresyPominiete.some(([a, b]) => m.index > a && m.index < b)) continue;
+      // ⭐ M2 — CZWARTE MIEJSCE: lista leży w treści arkusza, czyli poza
+      // przewijaniem ekranu. ⛔ NIE jest przez to „załatwiona" — jest
+      // POLICZONA I NAZWANA w zapadce niżej.
+      if (zakresyArkusza.some(([a, b]) => m.index > a && m.index < b)) {
+        listyWArkuszu.push(`${e}: ${lista}.map(${m[2]})`);
+        continue;
+      }
       zgubione.push(`${lista}.map(${m[2]})`);
     }
 
@@ -945,6 +1019,44 @@ const styles = StyleSheet.create({
       zgubione.length === 0,
       `zgubione bez śladu: ${zgubione.join(', ')} — miara ma je policzyć, wpisać na listę `
       + 'nieznanych albo powiedzieć, w której pominiętej gałęzi leżą');
+  }
+
+  // ═════════════════════════════════════════════════════════════════
+  // ⛔ ZAPADKA NA RÓWNOŚĆ — CO DOKŁADNIE LEŻY W ARKUSZACH (M2, 19.08.2026)
+  // ═════════════════════════════════════════════════════════════════
+  // ⚠️ ZMIERZONE 19.08.2026, nie przepisane z pamięci. Zapadka jest NA
+  // RÓWNOŚĆ, a nie na „co najwyżej tyle": gdyby wolno było dokładać, to
+  // miejsce zamieniłoby się w worek, do którego wpada wszystko, czego nie
+  // chce się mieć w pomiarze. Kto przeniesie SZÓSTĄ listę do arkusza,
+  // zobaczy czerwień i dopisze ją tutaj świadomie — z datą i powodem.
+  const LISTY_W_ARKUSZU_19_08_2026 = [
+    'mecz: history.map(renderMatchCard)',
+    'mecz: segmentSlots.map(renderSegmentSlot)',
+  ].sort();
+  const wArkuszu = [...listyWArkuszu].sort();
+  console.log(`   list rysowanych procedurą PO NAZWIE, które leżą W ARKUSZU: ${wArkuszu.length}`);
+  for (const l of wArkuszu) console.log(`   • ${l}`);
+  check('⛔ (M2-13, O97, O73) ZAPADKA: listy przeniesione do arkusza to DOKŁADNIE te, '
+    + 'co 19.08.2026 — nie „co najwyżej tyle"',
+    wArkuszu.length === LISTY_W_ARKUSZU_19_08_2026.length
+    && wArkuszu.every((n, i) => n === LISTY_W_ARKUSZU_19_08_2026[i]),
+    `jest [${wArkuszu.join(' · ') || '—'}], zapadka [${LISTY_W_ARKUSZU_19_08_2026.join(' · ')}] — `
+    + 'doszło: ktoś wyprowadził kolejną rzecz z pomiaru przez arkusz, dopisz ją tu z powodem; '
+    + 'ubyło: rzecz wróciła na ekran albo ZNIKŁA z produktu — sprawdź które');
+
+  // ⛔ STRAŻNIK STRAŻNIKA: „w arkuszu" ma znaczyć „POZA `ScrollView`".
+  // Bez tej asercji wystarczyłoby wpiąć `<Arkusz>` do przewijania, żeby
+  // czwarte miejsce zaczęło uciszać listy, które NAPRAWDĘ podnoszą ekran.
+  {
+    const mecz = readFileSync(join(kat, 'mecz.tsx'), 'utf8');
+    check('⛔ (M2-13) arkusz ekranu meczu stoi POZA `ScrollView` — inaczej nic nie zdejmuje',
+      mecz.indexOf('</ScrollView>') < mecz.indexOf('<Arkusz')
+      && mecz.indexOf('<Arkusz') > 0,
+      'arkusz wpięty do przewijania ekranu — wtedy „przeniesione do arkusza" jest nieprawdą');
+    check('⛔ (M2-13) …i procedura treści arkusza NIE JEST wołana w ciele `ScrollView`',
+      !/\{\s*trescArkusza\(\)\s*\}/.test(
+        mecz.slice(mecz.indexOf('<ScrollView'), mecz.indexOf('</ScrollView>'))),
+      'treść arkusza wróciła na ekran');
   }
 
   // ⛔ Sam wzorzec musi coś znajdować — asercja, która nie ma czego sprawdzać,
@@ -963,6 +1075,239 @@ const styles = StyleSheet.create({
   check('(M2-13, O97) i narzędzie wypisuje te gałęzie w raporcie',
     /pominięt/i.test(readFileSync(join(root, NARZEDZIE), 'utf8')),
     'raport nie mówi, której zakładki liczba nie opisuje');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ⭐⭐ 14. PLAN-D-M2 19.08.2026 — BATERIA MUTACJI EKRANU MECZU
+// ═══════════════════════════════════════════════════════════════════
+// ⛔ PO CO TA SEKCJA ISTNIEJE. Ten pas zdjął z ekranu meczu 5 078 dp — i to
+// jest dokładnie ten rodzaj zmiany, którą najłatwiej zrobić ŹLE i pokazać
+// jako sukces: wystarczy skasować pytania zamiast je przenieść, a zapadka
+// wysokości zaświeci na zielono TYM MOCNIEJ. Liczba spadła, obietnica zginęła.
+//
+// ⭐ DLATEGO KOLEJNOŚĆ JEST ODWROTNA NIŻ INTUICYJNA: najpierw ASERCJA
+// ODWROTNA (na prawdziwym pliku bateria ma dać ZERO zapaleń), a dopiero potem
+// mutacje. Bateria, która na zdrowym kodzie coś zapala, nie dowodzi niczego —
+// mierzy własny błąd.
+//
+// ⭐ MUTUJEMY TEKST WCZYTANY Z DYSKU, NIE PLIK NA DYSKU. To nie jest
+// ustępstwo: pomiar (`zmierzEkranZTekstu`) i wszystkie predykaty niżej biorą
+// ŹRÓDŁO JAKO NAPIS, więc mutacja nie musi dotykać dysku. ⛔ Skutek uboczny
+// jest ważniejszy od wygody: przerwanie procesu w dowolnym momencie
+// (SIGTERM, `Ctrl-C`, padnięcie kontenera) NIE MA CZEGO zepsuć — nie ma stanu
+// do przywrócenia, więc nie ma też przywracania, które mogłoby się nie udać.
+{
+  const KAT_EKRANOW = join(root, 'app', '(tabs)');
+  const meczPrawdziwy = readFileSync(join(KAT_EKRANOW, 'mecz.tsx'), 'utf8');
+
+  /** Wycinek ciała `ScrollView` — czyli to, co NAPRAWDĘ stoi na ekranie. */
+  const cialoEkranu = (src: string): string => {
+    const a = src.indexOf('<ScrollView');
+    const b = src.indexOf('</ScrollView>');
+    return a >= 0 && b > a ? src.slice(a, b) : '';
+  };
+
+  /** Rodzaje arkusza wymienione w typie — czyli WSZYSTKO, co zeszło z ekranu. */
+  const rodzajeZTypu = (src: string): string[] => {
+    const m = /type RodzajArkuszaMeczu =([^;]*);/.exec(src);
+    return m === null ? [] : [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]).sort();
+  };
+
+  /** Rodzaje, do których NA EKRANIE stoi wiersz wejścia ze strzałką. */
+  const rodzajeZWejsciem = (src: string): string[] =>
+    [...new Set([...cialoEkranu(src).matchAll(/wejscieArkusza\('([a-z]+)'/g)].map((x) => x[1]))].sort();
+
+  /** Styl `uwaga` — zdanie o sprzeczności dwóch liczb. */
+  const stylUwagi = (src: string): string => {
+    const i = src.indexOf('  uwaga: {');
+    if (i < 0) return '';
+    const j = src.indexOf('\n  },', i);
+    return j < 0 ? src.slice(i) : src.slice(i, j);
+  };
+
+  type Predykat = { nazwa: string; sprawdz: (src: string) => boolean };
+
+  const BATERIA_M2: Predykat[] = [
+    {
+      // ⭐⭐ TO JEST WARUNEK 2 I 3 POLECENIA NARAZ (B3). Zbiór rodzajów arkusza
+      // i zbiór wejść na ekranie muszą być IDENTYCZNE. ⛔ Nie „wejść jest co
+      // najmniej tyle": arkusz bez wejścia to pytanie, którego zawodnik nigdy
+      // nie zobaczy, a wejście bez arkusza to przycisk donikąd.
+      nazwa: 'M2-B1 ⛔ KAŻDY arkusz meczu ma wejście NA EKRANIE — równość zbiorów, nie „co najmniej"',
+      sprawdz: (src) => {
+        const t = rodzajeZTypu(src);
+        const w = rodzajeZWejsciem(src);
+        return t.length > 0 && t.length === w.length && t.every((r, i) => r === w[i]);
+      },
+    },
+    {
+      nazwa: 'M2-B2 ⛔ długość całego meczu idzie do `match_contexts.match_length_minutes` (znalezisko D8)',
+      sprawdz: (src) => /match_length_minutes:\s*dlugoscMeczu\.trim\(\) !== ''/.test(bezKomentarzy(src)),
+    },
+    {
+      // ⛔ „Przed zapisem", a nie „gdziekolwiek": bramka postawiona PO
+      // `insert` zatrzymałaby sprzeczność dopiero po tym, jak baza już ją
+      // odrzuciła kodem 23514 — czyli nie zatrzymałaby niczego.
+      nazwa: 'M2-B3 ⛔ sprzeczność minut zatrzymana PRZED zapisem, nie kodem 23514 z bazy',
+      sprawdz: (src) => {
+        const z = bezKomentarzy(src);
+        const brama = z.indexOf('if (sprzecznoscMinut)');
+        const zapis = z.indexOf("from('match_contexts').insert(");
+        return brama > 0 && zapis > 0 && brama < zapis && /minutyPonadDlugosc\(/.test(z);
+      },
+    },
+    {
+      // ⛔ Brzmienie ma DOKŁADNIE JEDNO miejsce — `lib/meczWiecej.ts`.
+      // Wpisanie go tu drugi raz „żeby było widać" tworzy drugi słownik (O92),
+      // który rozjedzie się z pierwszym przy pierwszej poprawce.
+      nazwa: 'M2-B4 ⭐ zdanie o sprzeczności stoi NA EKRANIE i pochodzi z modułu, nie z literału',
+      sprawdz: (src) => {
+        const ekran = bezKomentarzy(cialoEkranu(src));
+        return /\{sprzecznoscMinut && <Text[^>]*>\{MECZ_MINUTY_PONAD_DLUGOSC\}<\/Text>\}/.test(ekran)
+          && !/Podałeś więcej minut na boisku/.test(bezKomentarzy(src));
+      },
+    },
+    {
+      nazwa: 'M2-B5 ⭐⭐ ekran meczu MIEŚCI SIĘ nad zgięciem w całości',
+      sprawdz: (src) =>
+        zmierzEkranZTekstu('mecz.tsx', src, KAT_EKRANOW).wysokoscRazemDp <= WIDOCZNE_NAD_ZGIECIEM_DP,
+    },
+    {
+      nazwa: 'M2-B6 ⛔ arkusz stoi POZA `ScrollView` — inaczej nie zdejmuje ani jednego dp',
+      sprawdz: (src) => {
+        const s = src.indexOf('</ScrollView>');
+        const a = src.indexOf('<Arkusz');
+        return a > 0 && s > 0 && s < a;
+      },
+    },
+    {
+      // ⛔ Z2 — czerwień jest w tym produkcie zarezerwowana dla bólu i stanu
+      // ochronnego. Dwie liczby, które się nie zgadzają, to rzecz do
+      // poprawienia, a nie ostrzeżenie o ciele.
+      // ⭐ K4 — i dlatego nośnikiem jest ZDANIE: jeden na dwunastu chłopców nie
+      // rozróżnia części barw i ma przeczytać dokładnie to samo, co reszta.
+      nazwa: 'M2-B7 ⛔ zdanie o sprzeczności NIE JEST czerwone (Z2) i niesie treść słowami (K4)',
+      sprawdz: (src) => {
+        const u = stylUwagi(src);
+        return u.length > 0 && !/colors\.error/.test(u);
+      },
+    },
+    {
+      // ⛔ ZAPADKA NA SKASOWANIE. Bez niej wszystkie predykaty wyżej spełnia
+      // także ekran, z którego pytania segmentowe po prostu USUNIĘTO —
+      // a wtedy „schudł o 5 078 dp" jest prawdą i katastrofą naraz.
+      nazwa: 'M2-B8 ⛔ pytania segmentowe są PRZENIESIONE, a nie skasowane',
+      sprawdz: (src) => /segmentSlots\.map\(renderSegmentSlot\)/.test(bezKomentarzy(src))
+        && /function renderSegmentSlot\(/.test(src),
+    },
+    {
+      nazwa: 'M2-B9 ⛔ historia meczów jest PRZENIESIONA, a nie skasowana',
+      sprawdz: (src) => /history\.map\(renderMatchCard\)/.test(bezKomentarzy(src)),
+    },
+    {
+      nazwa: 'M2-B10 ⛔ lista trybu kontuzji jest PRZENIESIONA, a nie skasowana',
+      sprawdz: (src) => /renderRoutingBlock\(\)/.test(bezKomentarzy(src))
+        && /function renderRoutingBlock\(/.test(src),
+    },
+  ];
+
+  // ── 14.1 ⭐⭐ ASERCJA ODWROTNA — NAJPIERW, NIE NA KOŃCU ──────────────
+  console.log('\n14.1 ⭐⭐ ASERCJA ODWROTNA — bateria M2 na PRAWDZIWYM pliku (musi dać 0 zapaleń)');
+  const zapaloneNaPrawdzie: string[] = [];
+  for (const p of BATERIA_M2) {
+    const ok = p.sprawdz(meczPrawdziwy);
+    check(p.nazwa, ok, 'predykat zapala się na NIEZMUTOWANYM pliku — bateria mierzy własny błąd');
+    if (!ok) zapaloneNaPrawdzie.push(p.nazwa);
+  }
+  check('⭐⭐ (M2-14) ASERCJA ODWROTNA: na prawdziwym `mecz.tsx` bateria ma ZERO zapaleń',
+    zapaloneNaPrawdzie.length === 0, zapaloneNaPrawdzie.join(' · '));
+
+  // ── 14.2 ⭐⭐ MUTACJE ───────────────────────────────────────────────
+  type Mutacja = { nazwa: string; coPsuje: string; zastosuj: (src: string) => string };
+  const MUTACJE_M2: Mutacja[] = [
+    {
+      nazwa: 'M2-M1 ⛔⛔ pytanie ZNIKA Z EKRANU BEZ WEJŚCIA ZASTĘPCZEGO',
+      coPsuje: 'B3 / warunek 3 polecenia — ból zostaje w kodzie arkusza, ale nie ma go '
+        + 'jak otworzyć: zawodnik nie zobaczy pytania o ból już nigdy',
+      zastosuj: (src) => src.replace(
+        "        {wejscieArkusza('bol', 'Boli Cię dziś coś?', 'miejsce, strona, natężenie')}\n", ''),
+    },
+    {
+      nazwa: 'M2-M2 ⛔⛔ długość meczu PRZESTAJE SIĘ ZAPISYWAĆ do `match_contexts`',
+      coPsuje: 'znalezisko D8 — mecz U13 na 60 minut liczy się jak 90, więc zawodnik '
+        + 'dostaje 3 punkty zamiast 4: karę za to, że jego mecz jest krótszy',
+      zastosuj: (src) => src.replace(
+        "        match_length_minutes: dlugoscMeczu.trim() !== '' ? Number(dlugoscMeczu) : null,\n", ''),
+    },
+    {
+      nazwa: 'M2-M3 ⛔⛔ SPRZECZNOŚĆ MINUT PRZEPUSZCZONA DO BAZY',
+      coPsuje: '§3 polecenia — zawodnik z 90 minutami w meczu 60-minutowym dostaje '
+        + 'kod `23514` zamiast zdania, z którego wynika, którą liczbę poprawić',
+      zastosuj: (src) => src.replace(
+        '    if (sprzecznoscMinut) { setError(MECZ_MINUTY_PONAD_DLUGOSC); return; }\n', ''),
+    },
+    {
+      nazwa: 'M2-M4 ⛔ zdanie o sprzeczności znika Z EKRANU (zostaje sama bramka zapisu)',
+      coPsuje: '§3 — zawodnik dowiaduje się o sprzeczności dopiero po dotknięciu '
+        + '„Zapisz mecz", zamiast widzieć ją w chwili, w której ją tworzy',
+      zastosuj: (src) => src.replace(
+        '        {sprzecznoscMinut && <Text style={styles.uwaga}>{MECZ_MINUTY_PONAD_DLUGOSC}</Text>}\n', ''),
+    },
+    {
+      nazwa: 'M2-M5 ⛔⛔ pytania segmentowe SKASOWANE zamiast przeniesione',
+      coPsuje: 'B3 — najtańszy sposób na „ekran schudł": zapadka wysokości świeci '
+        + 'mocniej niż przy poprawnej naprawie, a `match_context_answers` przestaje '
+        + 'dostawać cokolwiek — czyli kaskada meczowa traci jedyne wejście',
+      zastosuj: (src) => src.replace('{segmentSlots.map(renderSegmentSlot)}', '{null}'),
+    },
+    {
+      nazwa: 'M2-M6 ⛔ arkusz wpięty DO `ScrollView` — czyli nie zdejmuje ani jednego dp',
+      coPsuje: 'cała teza tego pasa: nakładka zdejmuje wysokość WYŁĄCZNIE dlatego, '
+        + 'że stoi poza przewijaniem ekranu',
+      zastosuj: (src) => src.replace('    </ScrollView>\n', '')
+        .replace('    </Arkusz>\n', '    </Arkusz>\n    </ScrollView>\n'),
+    },
+    {
+      nazwa: 'M2-M7 ⛔ zdanie o sprzeczności dostaje CZERWIEŃ (Z2)',
+      coPsuje: 'Z2 — czerwień przestaje znaczyć „ból albo stan ochronny" i zaczyna '
+        + 'znaczyć „pomyliłeś się"; ⭐ K4: kolor i tak nie niesie nic dla jednego '
+        + 'chłopca na dwunastu, więc jedyne, co ta zmiana robi, to psuje alfabet',
+      zastosuj: (src) => src.replace(
+        "    color: colors.textPrimary,\n    backgroundColor: colors.surfaceElevated,",
+        "    color: colors.error,\n    backgroundColor: colors.surfaceElevated,"),
+    },
+    {
+      nazwa: 'M2-M8 ⛔ dwie liczby minut wracają JEDNA POD DRUGĄ',
+      coPsuje: 'wysokość — ekran rośnie o 102 dp i wychodzi spod zgięcia; '
+        + '⭐ to jest mutacja na WRAŻLIWOŚĆ samej miary, nie na treść',
+      zastosuj: (src) => src.replace('<View style={styles.wiersz}>', '<View style={styles.kolumna}>'),
+    },
+  ];
+
+  console.log('\n14.2 ⭐⭐ BATERIA MUTACJI — osiem mutacji na prawdziwym `app/(tabs)/mecz.tsx`');
+  let niemeM2 = 0;
+  for (const m of MUTACJE_M2) {
+    const zmutowany = m.zastosuj(meczPrawdziwy);
+    const zmienil = zmutowany !== meczPrawdziwy;
+    const zapalone = BATERIA_M2.filter((p) => !p.sprawdz(zmutowany)).map((p) => p.nazwa);
+    console.log(`\n   ${m.nazwa}\n   co psuje: ${m.coPsuje}`);
+    console.log(`   zapalone predykaty: ${zapalone.length} / ${BATERIA_M2.length}`);
+    zapalone.forEach((n) => console.log(`      ↳ ${n}`));
+    check(`⭐ (M2-14) mutacja „${m.nazwa}" NAPRAWDĘ zmienia plik (inaczej bateria bada nic)`,
+      zmienil, 'wzorzec podmiany nie trafił — mutacja jest atrapą');
+    check(`⭐ (M2-14) mutacja „${m.nazwa}" ZAPALA strażnika imiennie`,
+      zapalone.length > 0, 'mutacja przeszła niezauważona — strażnika na tę regułę NIE MA');
+    if (zapalone.length === 0) niemeM2++;
+  }
+  check('⭐⭐ (M2-14) ANI JEDNA z ośmiu mutacji nie przeszła niezauważona',
+    niemeM2 === 0, `nieme mutacje: ${niemeM2}`);
+
+  // ── 14.3 ⛔ …I PRAWDZIWE ŹRÓDŁO JEST PO BATERII NIETKNIĘTE ──────────
+  // ⚠️ Asercja wygląda na zbędną, dopóki ktoś nie zamieni mutacji w pamięci
+  // na mutację na dysku. Wtedy przestaje być zbędna w tej samej sekundzie.
+  check('⛔ (M2-14) po całej baterii plik na dysku jest CO DO ZNAKU taki sam',
+    readFileSync(join(KAT_EKRANOW, 'mecz.tsx'), 'utf8') === meczPrawdziwy,
+    'bateria zostawiła po sobie zmieniony plik produktu');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

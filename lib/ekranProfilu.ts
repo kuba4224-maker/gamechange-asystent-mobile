@@ -53,7 +53,6 @@ import {
   type WejscieZrodla,
   type SegmentyCelow,
   type WierszDziennika,
-  type WierszMeczu,
   type WierszOdpowiedziKontrolnej,
   type WierszWydarzeniaDoNagrody,
   jednostkiZDziennika,
@@ -76,6 +75,11 @@ import {
   type ObciazenieWOknie,
   type WejscieObciazenia,
 } from './obciazenieOstatnichDni';
+// ⭐⭐ PAS P1 19.08.2026 — PRZEMIANOWANIE WIERSZA MECZU MA JEDNO MIEJSCE
+// W CAŁYM PRODUKCIE, i to nie jest ten plik. `lib/wejsciaWgladow.ts` jest
+// czytane, nie kopiowane — druga kopia rozjechałaby się przy pierwszej
+// poprawce i OBA miejsca wyglądałyby poprawnie.
+import { meczDlaNagrody, type WierszMeczuWgl } from './wejsciaWgladow';
 import { WERDYKTY_NIEPODANE } from './wykonanieSesji';
 import {
   MAPA_PRACY_WLASNEJ,
@@ -686,19 +690,170 @@ export function odczytTabeli<T>(
   return { rodzaj: 'jest', wiersze: dane as readonly T[] };
 }
 
+/**
+ * ⭐ PAS P1 19.08.2026 — WIERSZ `focus_blocks` TAK, JAK LEŻY W BAZIE.
+ * ⛔ `segment_id` bywa `null` i to jest STAN, nie błąd: Blok bez obszaru
+ * istnieje, tylko nie mówi, czego dotyczy praca.
+ */
+export type WierszBlokuSkupienia = { id: string; segment_id: string | null };
+
+/**
+ * ⭐ PAS P1 19.08.2026 — WIERSZ ODPOWIEDZI KONTROLNEJ TAK, JAK LEŻY W BAZIE.
+ * ⛔ BEZ pola `segment` — bo segmentu W TEJ TABELI NIE MA. Dokłada go TEN
+ * moduł z mapy Bloków. Do 19.08.2026 typ udawał, że ekran poda `segment`,
+ * a ekran podawał surowy wiersz z `focus_block_id` — więc `segment` schodził
+ * do `undefined` i każda odpowiedź kontrolna traciła przynależność do celu.
+ */
+export type WierszOdpowiedziKontrolnejZBazy = {
+  id: string;
+  answered_at: string | null;
+  focus_block_id?: string | null;
+};
+
 export type OdczytyDoRozwoju = {
   wydarzenia: OdczytTabeli<WierszWydarzeniaDoNagrody>;
   dziennik: OdczytTabeli<WierszDziennika & { calendar_event_id?: number | null }>;
-  odpowiedziKontrolne: OdczytTabeli<WierszOdpowiedziKontrolnej>;
-  mecze: OdczytTabeli<WierszMeczu>;
+  odpowiedziKontrolne: OdczytTabeli<WierszOdpowiedziKontrolnejZBazy>;
+  /**
+   * ⭐⭐ PAS P1 19.08.2026 — WIERSZ MECZU TAK, JAK LEŻY W BAZIE (`WierszMeczuWgl`),
+   * a nie `WierszMeczu`. ⛔ ZNALEZISKO GŁÓWNEJ ASERCJI TEGO PASA: ekran „Profil"
+   * podawał tu surowe wiersze `match_contexts` udające `WierszMeczu`, więc
+   * `dlugoscMeczu` NIGDY nie powstawało (w bazie kolumna nazywa się
+   * `match_length_minutes`) i `wagaMeczu()` podstawiała 90 minut ZAWSZE.
+   * ⛔ Skutek dla zawodnika U13, który zagrał pełne 60 minut meczu
+   * 60-minutowego: na „Dziś" 4 punkty, na „Profilu" 3. Ta sama praca, dwie
+   * liczby — dokładnie ten sam defekt, co `segmentBloku: null`.
+   * ⭐ Przemianowanie robi `meczDlaNagrody()`, jedno miejsce, uruchamiane.
+   * ⛔ OBCIĄŻENIA TO NIE RUSZA: liczy je `minutes_played` × `match_rpe`,
+   * czyli dwie kolumny, które w obu kształtach nazywają się tak samo.
+   */
+  mecze: OdczytTabeli<WierszMeczuWgl>;
   /** ⭐ Zbiór celów BEZ filtra po statusie — cel domknięty to sukces, nie utrata. */
   cele: OdczytTabeli<{ segment_id: string | null }>;
+  /**
+   * ⭐⭐ PAS P1 19.08.2026 — BLOKI SKUPIENIA TEGO ZAWODNIKA. To jest
+   * NOŚNIK TRAFNOŚCI: `calendar_events.focus_block_id` → `focus_blocks.id`
+   * → `segment_id` → „czy ta praca szła w obszar o wysokim zwrocie".
+   *
+   * ⛔ POLE JEST WYMAGANE, NIE OPCJONALNE, i to jest cała poprawka pasa P1.
+   * Do 19.08.2026 ekran „Profil" podawał do `zrodloSesji` `segmentBloku: null`
+   * na sztywno, więc KAŻDA sesja dostawała tu trafność 1,0 — także ta, która
+   * naprawdę jest trafna i na „Dziś" dostaje 1,5. Ta sama praca dawała dwie
+   * różne liczby na dwóch ekranach, a niższa stała pod słowem ROZWÓJ.
+   * ⛔ Gdyby pole było opcjonalne, następny ekran mógłby je PRZEOCZYĆ i wrócić
+   * do tego samego defektu bez ani jednego błędu kompilacji.
+   */
+  bloki: OdczytTabeli<WierszBlokuSkupienia>;
   /**
    * ⭐ Zwrot obszarów tego zawodnika — wchodzi do TRAFNOŚCI sesji własnej pracy.
    * ⛔ `null` NIE odbiera nikomu punktów: trafność spada wtedy do bazy 1,0.
    */
   zwrot: ZwrotObszarow | null;
 };
+
+// ═════════════════════════════════════════════════════════════════════
+// ⭐⭐ 6a. PAS P1 19.08.2026 — SEGMENT PRACY, CZYLI NOŚNIK TRAFNOŚCI
+// ═════════════════════════════════════════════════════════════════════
+//
+// ⛔ CO BYŁO ZEPSUTE. `wejscieNagrodyZOdczytow` podawało do `zrodloSesji`
+// `segmentBloku: null` NA SZTYWNO. Skutek zmierzony, nie założony: na ekranie
+// „Profil" każda sesja dostawała trafność 1,0, także ta, która na ekranie
+// „Dziś" dostaje 1,5. ⛔ Zawodnik widział pod słowem ROZWÓJ MNIEJ, niż
+// naprawdę zrobił — i ta sama praca dawała dwie różne liczby na dwóch
+// ekranach. To łamie zdanie, na którym stoi cały produkt:
+// ROZWÓJ = OBCIĄŻENIE × TRAFNOŚĆ. Liczba, która milczy o trafności, mówi
+// zawodnikowi, że celowanie w słabe strony nic nie daje.
+//
+// ⛔ OBCIĄŻENIA TO NIE DOTYKA I NIE MA PRAWA DOTKNĄĆ. `wejscieObciazeniaZOdczytow`
+// nie zna słowa „segment" i nie ma parametru, którym dałoby się trafność podać
+// (zapadki pasa D1: A2c „żaden plik obciążenia nie importuje trafności" i B3c
+// „te same wiersze z trafnością i bez → obciążenie identyczne").
+
+/**
+ * ⭐⭐ TRZY RÓŻNE RZECZY, KTÓRE DO 19.08.2026 DAWAŁY JEDNĄ LICZBĘ (1,0).
+ *
+ * ⛔ R5 — „nie wiem" nie ma prawa wyglądać jak „zmierzyłem i wyszło nisko".
+ *   • `nie_znam_mapy`  — odczyt Bloków padł. Wtedy trafność CAŁEJ pracy jest
+ *     NIEWIEDZĄ, a nie pomiarem. Zawodnik nie stracił punktów przez to, jak
+ *     trenował, tylko przez to, że nie odczytaliśmy jednej tabeli.
+ *   • `spozaBloku`     — sesja nie ma `focus_block_id`. Trafność 1,0 jest tu
+ *     POPRAWNA i ma powód: praca poza Blokiem nie deklaruje obszaru.
+ *   • `blokNieznany`   — sesja wskazuje Blok, którego w odczycie nie ma
+ *     (skasowany, cudzy, odcięty przez RLS). Trafność 1,0 jest tu NIEWIEDZĄ.
+ *
+ * ⛔ ŚWIADOMIE NIE ZMIENIAMY LICZBY, kiedy segmentu nie znamy. Podniesienie
+ * trafności „na wszelki wypadek" byłoby premią bez pokrycia, a obniżenie —
+ * karą za brak danych. Ten typ istnieje po to, żeby stan dało się NAZWAĆ
+ * i policzyć, a nie po to, żeby po cichu przesunąć liczbę.
+ */
+export type StanSegmentowSesji =
+  | { rodzaj: 'nie_znam_mapy'; powod: string; sesji: number }
+  | { rodzaj: 'znam_mape'; zSegmentem: number; spozaBloku: number; blokNieznany: number };
+
+/**
+ * ⭐ `focus_block_id` → `segment_id`, zbudowane z TYCH SAMYCH wierszy, które
+ * ekran już czyta (`focus_blocks`, kolumny `id,segment_id,status`).
+ * ⛔ BEZ FILTRA PO `status`: Blok domknięty to praca WYKONANA, a nie utracona.
+ * Zmierzone 15.08.2026 na produkcji — Blok `completed` ma wszystkie sesje
+ * w statusie `cancelled`, więc każdy filtr z osobna kasuje cztery tygodnie pracy.
+ * ⛔ `null` znaczy „nie odczytałem", nigdy „nie ma Bloków".
+ */
+export function mapaSegmentowBlokow(
+  o: OdczytTabeli<WierszBlokuSkupienia>,
+): ReadonlyMap<string, string> | null {
+  if (o.rodzaj === 'nie_odczytano') return null;
+  const mapa = new Map<string, string>();
+  for (const b of o.wiersze) {
+    if (!b || typeof b.id !== 'string' || b.id.length === 0) continue;
+    if (typeof b.segment_id !== 'string' || b.segment_id.length === 0) continue;
+    mapa.set(b.id, b.segment_id);
+  }
+  return mapa;
+}
+
+/**
+ * ⭐ STAN WIEDZY O SEGMENTACH, policzony na TYCH SAMYCH wierszach, z których
+ * powstaje rozwój. ⛔ Ekran ma to wypisać do logu, kiedy niewiedza istnieje —
+ * inaczej zaniżona liczba wraca po cichu przy pierwszym błędzie odczytu.
+ */
+export function stanSegmentowSesji(o: OdczytyDoRozwoju): StanSegmentowSesji {
+  const wiersze = o.wydarzenia.rodzaj === 'nie_odczytano' ? [] : o.wydarzenia.wiersze;
+  const mapa = mapaSegmentowBlokow(o.bloki);
+  if (mapa === null) {
+    return {
+      rodzaj: 'nie_znam_mapy',
+      powod: o.bloki.rodzaj === 'nie_odczytano' ? o.bloki.powod : 'nie odczytałem Bloków Skupienia',
+      sesji: wiersze.length,
+    };
+  }
+  let zSegmentem = 0;
+  let spozaBloku = 0;
+  let blokNieznany = 0;
+  for (const w of wiersze) {
+    const id = w?.focus_block_id;
+    if (typeof id !== 'string' || id.length === 0) { spozaBloku++; continue; }
+    if (mapa.has(id)) zSegmentem++; else blokNieznany++;
+  }
+  return { rodzaj: 'znam_mape', zSegmentem, spozaBloku, blokNieznany };
+}
+
+/**
+ * ⭐ ZDANIE DO KONSOLI, NIE NA EKRAN. ⛔ `null` = nie ma o czym mówić.
+ * ⚠️ Brzmienie widoczne dla zawodnika to OSOBNA decyzja Kuby — dołożenie
+ * zdania na ekran „Profil" ruszyłoby zapadkę wysokości (pas M2), a ten pas
+ * zmienia WARTOŚĆ, nie układ.
+ */
+export function zdanieOSegmentachDoLogu(s: StanSegmentowSesji): string | null {
+  if (s.rodzaj === 'nie_znam_mapy') {
+    return `profil: NIE ZNAM SEGMENTÓW ${s.sesji} sesji — ${s.powod}. `
+      + 'Trafność całej pracy spada do 1,0 z NIEWIEDZY, nie z pomiaru.';
+  }
+  if (s.blokNieznany > 0) {
+    return `profil: ${s.blokNieznany} sesji wskazuje Blok, którego nie ma w odczycie `
+      + '— ich trafność to 1,0 z NIEWIEDZY, nie z pomiaru.';
+  }
+  return null;
+}
 
 /**
  * ⭐ `calendar_events.id` → ZMIERZONA długość sesji i ZMIERZONE RPE, wyjęte
@@ -756,6 +911,16 @@ export function wejscieNagrodyZOdczytow(o: OdczytyDoRozwoju): WejscieNagrody {
 
   const pomiary = pomiaryZWpisow(o.dziennik);
 
+  // ⭐⭐ PAS P1 19.08.2026 — TU BYŁO `null`. Mapa powstaje z wierszy, które ekran
+  // JUŻ CZYTA (`focus_blocks`: `id,segment_id,status`) — zero nowych zapytań.
+  // ⛔ `null` zostaje TYLKO wtedy, gdy odczyt Bloków naprawdę padł, i wtedy
+  // ekran wypisuje o tym zdanie (`zdanieOSegmentachDoLogu`).
+  const segmentBloku = mapaSegmentowBlokow(o.bloki);
+  const segmentDlaBloku = (idBloku: unknown): string | null => {
+    if (segmentBloku === null || typeof idBloku !== 'string' || idBloku.length === 0) return null;
+    return segmentBloku.get(idBloku) ?? null;
+  };
+
   return {
     sesje: o.wydarzenia.rodzaj === 'nie_odczytano'
       ? zrodloNieczytane(`kalendarz: ${o.wydarzenia.powod}`)
@@ -765,15 +930,31 @@ export function wejscieNagrodyZOdczytow(o: OdczytyDoRozwoju): WejscieNagrody {
         // podawać pustą listę udającą „nie było żadnego".
         werdykty: WERDYKTY_NIEPODANE,
         wpisyDziennika,
-        segmentBloku: null,
+        segmentBloku,
         minutyZWpisow: pomiary.minuty,
         rpeZWpisow: pomiary.rpe,
         zwrot: o.zwrot,
       }),
     dziennik: zrodlo(o.dziennik, 'Dziennik', (w) => ({ rodzaj: 'jest', jednostki: jednostkiZDziennika(w) })),
+    // ⭐ PAS P1 — SEGMENT ODPOWIEDZI KONTROLNEJ DOKŁADA MODUŁ, NIE EKRAN.
+    // ⛔ Do 19.08.2026 typ żądał gotowego `segment`, a ekran „Profil" podawał
+    // surowy wiersz z `focus_block_id` — pole schodziło do `undefined`, więc
+    // odpowiedzi kontrolne traciły przynależność do celu (0 punktów wagi,
+    // ale odznaka „praca nad swoim celem" liczy jednostki, nie punkty).
     odpowiedziKontrolne: zrodlo(o.odpowiedziKontrolne, 'odpowiedzi kontrolne Bloku',
-      (w) => ({ rodzaj: 'jest', jednostki: jednostkiZOdpowiedziKontrolnych(w) })),
-    mecze: zrodlo(o.mecze, 'mecze', (w) => ({ rodzaj: 'jest', jednostki: jednostkiZMeczow(w) })),
+      (w) => ({
+        rodzaj: 'jest',
+        jednostki: jednostkiZOdpowiedziKontrolnych(w.map((c): WierszOdpowiedziKontrolnej => ({
+          id: c?.id,
+          answered_at: c?.answered_at ?? null,
+          segment: segmentDlaBloku(c?.focus_block_id),
+        }))),
+      })),
+    // ⭐ PAS P1 — `meczDlaNagrody` przemianowuje `match_length_minutes`
+    // na `dlugoscMeczu`. ⛔ Bez tego mecz 60-minutowy rozegrany w całości
+    // dawał na „Profilu" 3 punkty zamiast 4 — a na „Dziś" 4.
+    mecze: zrodlo(o.mecze, 'mecze',
+      (w) => ({ rodzaj: 'jest', jednostki: jednostkiZMeczow(w.map(meczDlaNagrody)) })),
     segmentyCelow,
   };
 }
