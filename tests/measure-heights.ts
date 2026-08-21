@@ -17,6 +17,19 @@
 //   • wysokość linii = `lineHeight` ze stylu, a gdy go nie ma → `fontSize × 1,25`
 //     (React Native dla Inter i BarlowCondensed daje 1,2–1,3; 1,25 to środek,
 //     świadomie nie optymistyczny) — ta sama reguła co w rundzie 3;
+//     ⚠️⚠️ PAS W2 21.08.2026 — TO ZAŁOŻENIE PRZESTAŁO BYĆ OSTROŻNE. Kroje
+//     zmieniły się na Bebas Neue + DM Sans, a ich zmierzona interlinia
+//     (odczytana z tablic `head`/`hhea` plików `.ttf`) wynosi 1,200 i **1,302**.
+//     ⛔ 1,25 jest więc NIŻSZE niż interlinia kroju tekstu — czyli po raz
+//     pierwszy model myli się w stronę OPTYMISTYCZNĄ, a to jest przy linii
+//     zgięcia kierunek błędu, którego popełniać nie wolno.
+//     ⛔ Pas W2 tej stałej NIE RUSZYŁ: mieszka w `lib/wysokoscEkranu.ts`,
+//     a to nie jest jego plik. Rozjazd jest PRZYBITY ZAPADKĄ (W2-11
+//     w `lib/wysokoscEkranu.selftest.ts`), więc nie ma jak zniknąć po cichu,
+//     a rachunek co do dp stoi w `claude/PRZEKAZANIE_PAS_W2_21_08_2026.md`.
+//     ⚠️ Stała `lh()` niżej ZOSTAJE na 1,25 celowo — ma być tą samą liczbą,
+//     którą liczy silnik; dwie różne interlinie w jednym pliku byłyby gorsze
+//     niż jedna znana i nazwana;
 //   • średnia szerokość znaku Inter Regular = 0,50 em (ostrożny GÓRNY szacunek;
 //     przy zaniżeniu wynik byłby zbyt optymistyczny, a to jest ten kierunek
 //     błędu, którego tu nie wolno popełnić);

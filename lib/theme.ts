@@ -21,6 +21,11 @@
 export {
   colors,
   typography,
+  // ⭐ PAS W2 21.08.2026 — nazwy krojów i ich zmierzona interlinia. Re-eksport
+  // jest tu po to, żeby wejście `lib/theme` oddawało DOKŁADNIE to samo co
+  // `constants/theme` (⛔ nie ma trzeciego miejsca z nazwą kroju).
+  KROJE,
+  INTERLINIA_KROJU,
   radii,
   spacing,
   minTouchHeight,

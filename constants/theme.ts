@@ -126,37 +126,105 @@ export function wysokoscObciazenia(wartosc: number): number {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ⚠️ TYPOGRAFIA — ZOSTAJE ARCHIVO + INTER, NIE BEBAS + DM SANS.
-// Makieta rysuje nagłówki w Bebas Neue, a treść w DM Sans. Zmiana
-// krojów wymaga nowych pakietów `@expo-google-fonts/*`, a `npm install`
-// jest w tym kontenerze zablokowany (403). ⛔ NIE UDAJEMY, że to jest
-// zrobione — pozycja stoi imiennie w nocie przekazania pasa W1.
-// Archivo jest krojem wąskim i wielkoliterowym tak samo jak Bebas, więc
-// RÓŻNICA JEST W ZNAKU, NIE W ROLI.
+// ⭐⭐ TYPOGRAFIA — PAS W2, 21.08.2026: BEBAS NEUE + DM SANS.
+//
+// DECYZJA KUBY z 18.08.2026, punkt 6: przyjęte. Pas W1 tego NIE ZROBIŁ,
+// bo w jego kontenerze `npm install` oddawał 403; od 19.08 działa.
+//
+// CO ZDJĘTE (B3 — nic nie znika po cichu):
+//   • `Archivo-Bold` / `Archivo-ExtraBold` (pas W1, 18.08) — nagłówki i liczby
+//   • `Inter-Regular` / `Inter-Medium` / `Inter-SemiBold` (od 07.2026) — tekst
+//   • wcześniej jeszcze: `BarlowCondensed` (28.07.2026, pierwszy motyw ciemny)
+// CO STOI W TYM MIEJSCU: `Bebas-Regular` (makieta: `'Bebas Neue'`)
+//   i `DMSans-Regular/Medium/SemiBold` (makieta: `body{font-family:'DM Sans'}`).
+//
+// ⭐ POLSKIE ZNAKI — SPRAWDZONE, NIE ZAŁOŻONE. Bebas Neue w wersji
+// podstawowej bywa bez `ĄĆĘŁŃÓŚŹŻ`. Pas W2 przeczytał tablice `cmap`,
+// `loca` i `glyf` z pliku `BebasNeue_400Regular.ttf` (paczka
+// `@expo-google-fonts/bebas-neue@0.4.1`, 497 glifów) i wyrenderował
+// wszystkie osiem par: ⭐ **KOMPLET JEST — wielkie i małe, każdy z własnym
+// glifem o niezerowej liczbie konturów.** To samo dla DM Sans (486 glifów).
+// ⚠️ Jedyny znak z korpusu produktu, którego Bebas NIE MA: `→` (U+2192).
+// Nie stoi to na przeszkodzie, bo strzałka pada wyłącznie w tekście ciągłym
+// (DM Sans ją ma) — pilnuje tego asercja w `lib/wysokoscEkranu.selftest.ts`.
+//
+// ⛔ BEBAS JEST KROJEM WERSALIKOWYM I WYŚWIETLANIOWYM. Nie wchodzi do
+// tekstu ciągłego ani do zdań dla zawodnika: nagłówki, etykiety, liczby.
+// W makiecie stoi dokładnie tam: `h1/h2/h3`, `.shd .t`, `.wd .dn`,
+// `.cnt .n`, `.cnt .two .v`, `.shead .st2`, `.meas h4` — wszystkie
+// z `text-transform:uppercase`. ⚠️ Małe litery Bebas TO WERSALIKI, więc
+// „Dziś" narysuje się jako „DZIŚ" nawet bez `textTransform`.
+//
+// ⚠️ `displayExtraBold` WSKAZUJE TEN SAM KROJ CO `display` — Bebas Neue
+// ma JEDNĄ grubość (400) i paczka Google Fonts nie ma innej. ⛔ To nie jest
+// przeoczenie: klucz zostaje, bo woła go kod ekranów, ale drugiego stopnia
+// nagłówka w kroju już nie ma. Wypisane w nocie pasa W2 jako strata.
+// ⛔ `fontWeight` schodzi na '400' przy obu: podanie '700'/'800' przy kroju,
+// który ma tylko 400, każe systemowi pogrubić syntetycznie albo (na
+// Androidzie) podmienić rodzinę na systemową — czyli stracić krój.
 // ═══════════════════════════════════════════════════════════════════
+
+/**
+ * ⭐ NAZWY RODZIN — jedyne miejsce w produkcie, w którym pada nazwa kroju.
+ * ⛔ `app/_layout.tsx` ładuje DOKŁADNIE te klucze; pilnuje tego asercja
+ * „klucze `useFonts` = wartości `typography`" w `lib/wysokoscEkranu.selftest.ts`.
+ * ⛔ Ani jeden plik ekranu nie ma prawa podać nazwy kroju wprost (osobna asercja).
+ */
+export const KROJE = {
+  wyswietlaniowy: 'Bebas-Regular',
+  tekstRegular: 'DMSans-Regular',
+  tekstMedium: 'DMSans-Medium',
+  tekstSemiBold: 'DMSans-SemiBold',
+} as const;
+
+/**
+ * ⭐ ZMIERZONA INTERLINIA DOMYŚLNA KROJU — `(ascender − descender + lineGap) / unitsPerEm`
+ * z tablic `head` i `hhea` plików TTF, odczytana przez pas W2 21.08.2026.
+ * ⛔ To NIE jest liczba przepisana z dokumentacji: policzył ją skrypt z bajtów
+ * paczek `@expo-google-fonts/bebas-neue@0.4.1` i `@expo-google-fonts/dm-sans@0.4.2`.
+ *
+ * ⚠️ PO CO TU STOI. `lib/wysokoscEkranu.ts` szacuje wysokość wiersza stałą
+ * `INTERLINIA = 1.25`, gdy styl nie podaje `lineHeight`. Dla starej pary
+ * (Archivo 1,088 · Inter 1,210) ta stała była GÓRNYM szacunkiem. Dla nowej
+ * pary DM Sans daje **1,302**, czyli 1,25 przestało być górnym szacunkiem
+ * i zaczęło być optymistyczne — a to jest kierunek błędu, którego przy
+ * linii zgięcia popełniać nie wolno.
+ * ⛔ Pas W2 tej stałej NIE RUSZYŁ: `lib/wysokoscEkranu.ts` nie jest jego
+ * plikiem. Skutek policzony co do dp i oddany jako kontrakt w nocie
+ * `claude/PRZEKAZANIE_PAS_W2_21_08_2026.md`.
+ */
+export const INTERLINIA_KROJU = {
+  /** Bebas Neue 400 — hhea (1000 upem). Było: Archivo 700/800 = 1,088. */
+  wyswietlaniowy: 1.2,
+  /** DM Sans 400–700 — hhea (1000 upem). Było: Inter 400–600 = 1,210. */
+  tekst: 1.302,
+} as const;
+
 export const typography = {
+  /** Nagłówki, etykiety i LICZBY. ⛔ Nigdy tekst ciągły ani zdanie dla zawodnika. */
   display: {
-    fontFamily: 'Archivo-Bold',
-    fontWeight: '700' as const,
+    fontFamily: KROJE.wyswietlaniowy,
+    fontWeight: '400' as const,
     fontVariant: ['tabular-nums'] as ['tabular-nums'],
   },
+  /** ⚠️ Ten sam krój co `display` — Bebas Neue ma jedną grubość. Patrz nagłówek. */
   displayExtraBold: {
-    fontFamily: 'Archivo-ExtraBold',
-    fontWeight: '800' as const,
+    fontFamily: KROJE.wyswietlaniowy,
+    fontWeight: '400' as const,
     fontVariant: ['tabular-nums'] as ['tabular-nums'],
   },
   body: {
-    fontFamily: 'Inter-Regular',
+    fontFamily: KROJE.tekstRegular,
     fontWeight: '400' as const,
     fontVariant: ['tabular-nums'] as ['tabular-nums'],
   },
   bodyMedium: {
-    fontFamily: 'Inter-Medium',
+    fontFamily: KROJE.tekstMedium,
     fontWeight: '500' as const,
     fontVariant: ['tabular-nums'] as ['tabular-nums'],
   },
   bodySemiBold: {
-    fontFamily: 'Inter-SemiBold',
+    fontFamily: KROJE.tekstSemiBold,
     fontWeight: '600' as const,
     fontVariant: ['tabular-nums'] as ['tabular-nums'],
   },

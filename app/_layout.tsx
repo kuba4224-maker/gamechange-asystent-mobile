@@ -58,18 +58,21 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
-// W1: 08.2026 — nagłówki przechodzą z Barlow Condensed na Archivo
-// (IDENTYFIKACJA_WIZUALNA_KONCEPCJA_08_2026: Archivo 700/800 nagłówki
-// i liczby, Inter reszta UI). Klucze fontów mapuje lib/theme.ts.
+// ⭐⭐ PAS W2 21.08.2026 — KROJE Z MAKIETY v3 (decyzja Kuby 18.08, punkt 6).
+// Historia w trzech krokach, żeby żaden stan nie zniknął po cichu (B3):
+//   28.07.2026 — Barlow Condensed + Inter (pierwszy motyw ciemny)
+//   18.08.2026 — pas W1: Archivo 700/800 + Inter (Bebas był zablokowany
+//                przez `npm install` → 403 w kontenerze tamtego pasa)
+//   21.08.2026 — pas W2: Bebas Neue 400 + DM Sans 400/500/600, czyli to,
+//                co rysuje `claude/MAKIETA_APLIKACJI_V3.html`
+// ⛔ Nazwy rodzin NIE stoją tutaj z ręki: klucze biorą się z `KROJE`
+// w `constants/theme.ts`, żeby umowa o kroju miała JEDNO miejsce.
+import { BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
 import {
-  Archivo_700Bold,
-  Archivo_800ExtraBold,
-} from '@expo-google-fonts/archivo';
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-} from '@expo-google-fonts/inter';
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_600SemiBold,
+} from '@expo-google-fonts/dm-sans';
 import { AuthProvider, useAuth } from '../lib/auth-context';
 import { usePushRegistration, usePushDeepLink } from '../lib/push-notifications';
 import { isBiometricLockEnabled } from '../lib/biometric-auth';
@@ -100,7 +103,7 @@ import OnboardingFlow from '../components/OnboardingFlow';
 // czytające flagę „ekran prawdy już był" to wyścig, w którym oba mogą go
 // otworzyć.
 import PunktPomocy from '../components/PunktPomocy';
-import { colors } from '../constants/theme';
+import { colors, KROJE } from '../constants/theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -241,41 +244,56 @@ function RootGate() {
   );
 }
 
+// ⭐⭐ PAS W2 21.08.2026 — TRZY STANY WCZYTANIA KROJÓW, NAZWANE.
+//
+// ⛔ WYMAGANIE §2.1 POLECENIA: „nie wolno pokazać ekranu w innym kroju,
+// a potem podmienić go w locie". Dlatego stan „jeszcze się nie wczytały"
+// ma WŁASNĄ gałąź, która ⛔ NIE RENDERUJE PRODUKTU — zamiast tego zostawia
+// widoczny ekran startowy. Produkt rusza dopiero, gdy krój jest gotowy
+// albo gdy wiadomo, że gotowy nie będzie.
+type StanKrojow = 'wczytuje' | 'gotowe' | 'nie_udalo_sie';
+
+/**
+ * ⚠️ AWARYJNY LIMIT CZASU — 4 s (AUDYT 28.07.2026, na urządzeniu Kuby).
+ * Bez niego `useFonts`, które nigdy nie rozstrzygnie, zawiesza appkę na
+ * zawsze na białym ekranie. ⛔ To NIE JEST stan „gotowe": to jest trzeci,
+ * osobno nazwany stan `nie_udalo_sie`, w którym appka DZIAŁA w kroju
+ * systemowym i wygląda gorzej.
+ */
+const LIMIT_WCZYTANIA_KROJOW_MS = 4000;
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    // W1: klucze zgodne z typography w lib/theme.ts
-    'Archivo-Bold': Archivo_700Bold,
-    'Archivo-ExtraBold': Archivo_800ExtraBold,
-    'Inter-Regular': Inter_400Regular,
-    'Inter-Medium': Inter_500Medium,
-    'Inter-SemiBold': Inter_600SemiBold,
+    // ⛔ Klucze biorą się z `KROJE` (constants/theme.ts), a nie z ręki — dzięki
+    // temu przemianowanie rodziny w umowie o wyglądzie nie ma jak rozjechać się
+    // z tym, co appka faktycznie wczytuje.
+    [KROJE.wyswietlaniowy]: BebasNeue_400Regular,
+    [KROJE.tekstRegular]: DMSans_400Regular,
+    [KROJE.tekstMedium]: DMSans_500Medium,
+    [KROJE.tekstSemiBold]: DMSans_600SemiBold,
   });
 
-  // AUDYT 28.07.2026: awaryjny limit czasu na ładowanie fontów. Bez tego,
-  // jeśli `useFonts` z jakiegokolwiek powodu nigdy nie rozstrzygnie (ani
-  // `fontsLoaded`, ani `fontError`) — co zaobserwowano na urządzeniu Kuby,
-  // appka utyka na zawsze na ekranie ładowania Expo Go (`return null`
-  // niżej nigdy się nie kończy, więc React Native nigdy nie renderuje
-  // pierwszej realnej klatki). Po 4s appka rusza dalej i tak, nawet bez
-  // fontów niestandardowych — React Native po cichu użyje fontu
-  // systemowego zamiast 'Archivo-Bold' itd., appka wygląda gorzej,
-  // ale DZIAŁA, zamiast wisieć w nieskończoność na białym ekranie.
-  const [fontTimedOut, setFontTimedOut] = useState(false);
+  const [limitMinal, setLimitMinal] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setFontTimedOut(true), 4000);
+    const t = setTimeout(() => setLimitMinal(true), LIMIT_WCZYTANIA_KROJOW_MS);
     return () => clearTimeout(t);
   }, []);
 
-  const fontsSettled = fontsLoaded || !!fontError || fontTimedOut;
+  const stanKrojow: StanKrojow = fontsLoaded
+    ? 'gotowe'
+    : (fontError || limitMinal) ? 'nie_udalo_sie' : 'wczytuje';
 
   useEffect(() => {
-    if (fontsSettled) {
+    if (stanKrojow !== 'wczytuje') {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [fontsSettled]);
+  }, [stanKrojow]);
 
-  if (!fontsSettled) {
-    return null; // splash zostaje widoczny, maks. 4s
+  // ⛔ STAN „JESZCZE SIĘ NIE WCZYTAŁY" — produkt NIE JEST rysowany.
+  // `null` zostawia widoczny ekran startowy (`SplashScreen.preventAutoHideAsync`
+  // wyżej), więc zawodnik nie widzi ani jednej litery w cudzym kroju.
+  if (stanKrojow === 'wczytuje') {
+    return null;
   }
 
   return (

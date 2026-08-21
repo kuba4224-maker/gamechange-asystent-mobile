@@ -53,6 +53,10 @@ import {
 // ⭐ PLAN-D-M2 (D3): strażnik pyta o TĘ SAMĄ stałą produktu, z której korzysta
 // miara — żeby „cztery pozycje kolejki" nie były dwiema różnymi czwórkami.
 import { DOMYSLNA_LICZBA } from './kolejkaPodania';
+// ⭐ PAS W2 21.08.2026 (W2-7, W2-9): strażnik pyta o TĘ SAMĄ umowę o wyglądzie,
+// z której korzysta produkt — żeby „tło aplikacji" nie było dwiema różnymi barwami,
+// a zadeklarowana interlinia kroju nie rozjechała się z plikiem `.ttf`.
+import { colors, INTERLINIA_KROJU } from '../constants/theme';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -1798,6 +1802,587 @@ const styles = StyleSheet.create({
     readFileSync(join(KAT_EKRANOW, 'dziennik.tsx'), 'utf8') === dziennikPrawdziwy
     && readFileSync(join(root, NARZEDZIE), 'utf8') === narzedziePrawdziwe,
     'bateria zostawiła po sobie zmieniony plik produktu');
+}
+
+
+// ═════════════════════════════════════════════════════════════════════
+// 16. ⭐⭐ PAS W2 21.08.2026 — UMOWA O KROJU I EKRAN STARTOWY
+// ═════════════════════════════════════════════════════════════════════
+// ⛔ PO CO TO STOI W TYM PLIKU, A NIE W NOWYM. Zmiana kroju rusza wysokość
+// KAŻDEGO wiersza tekstu, więc jej strażnik należy do pliku, w którym stoją
+// zapadki wysokości. Rozdzielenie ich na dwa pliki znaczyłoby, że da się
+// zmienić krój bez oglądania ani jednej liczby dp.
+//
+// CO PILNUJE — dziewięć rzeczy, każda z powodem:
+//  W2-1  nazwa kroju NIE PADA w żadnym pliku ekranu (§2.5 polecenia);
+//  W2-2  pada wyłącznie w `constants/theme.ts`, w stałej `KROJE` (§2.4);
+//  W2-3  `app/_layout.tsx` wczytuje DOKŁADNIE te rodziny, które deklaruje
+//        `KROJE` — na RÓWNOŚĆ zbiorów, i bierze je z `KROJE`, nie z ręki;
+//  W2-4  `typography.*` nie zna ani jednej nazwy spoza `KROJE`;
+//  W2-5  ⛔ krój wyświetlaniowy NIE WCHODZI do tekstu ciągłego (§2.3);
+//  W2-6  ⛔ jest jawny stan „kroje jeszcze się nie wczytały" i w tym stanie
+//        produkt NIE JEST rysowany (§2.1) — inaczej zawodnik zobaczyłby
+//        ekran w kroju systemowym, a potem podmianę w locie;
+//  W2-7  tło ekranu startowego i tło ikony = tło aplikacji, z JEDNEGO
+//        miejsca (§4.3) — trzy wpisy `app.json` kontra `colors.background`;
+//  W2-8  ⛔⛔ POLSKIE ZNAKI. Czytamy pliki `.ttf` z paczek i sprawdzamy,
+//        że każdy z ośmiu znaków `ĄĆĘŁŃÓŚŹŻ` (obie wielkości) ma WŁASNY
+//        glif o niezerowej liczbie konturów. ⚠️ Sama obecność w `cmap`
+//        nie wystarcza: wskazanie na pusty glif to kwadrat na ekranie;
+//  W2-9  zadeklarowana w `INTERLINIA_KROJU` interlinia zgadza się co do
+//        trzeciego miejsca z tym, co naprawdę stoi w tablicach `head`
+//        i `hhea` pliku kroju — deklaracja, której nikt nie sprawdza,
+//        starzeje się jak komentarz (O84).
+{
+  const KAT_EKRANOW = join(root, 'app', '(tabs)');
+  // ⚠️ NAZWA POLA ZAPADKI SKŁADANA Z DWÓCH CZĘŚCI — celowo. Ten sam plik
+  // przemiata SAM SIEBIE (W2-10), więc napis wpisany tu w całości byłby
+  // policzony jako szósta zapadka i strażnik strażnika świeciłby na czerwono
+  // na zdrowym kodzie. To ta sama pułapka co „napis pada gdziekolwiek w pliku".
+  const POLE_ZAPADKI = `wysokosc${'Dp'}`;
+  const PLIKI_EKRANOW = ['dzis.tsx', 'ja.tsx', 'mecz.tsx', 'dziennik.tsx',
+    'kalendarz.tsx', 'profil.tsx', 'cele.tsx', 'biblioteka.tsx'] as const;
+
+  const zrodloEkranu = (n: string) => bezKomentarzy(readFileSync(join(KAT_EKRANOW, n), 'utf8'));
+  const UMOWA = zrodlo(join('constants', 'theme.ts'));
+  const UMOWA_Z_KOMENTARZAMI = readFileSync(join(root, 'constants', 'theme.ts'), 'utf8');
+  const LAYOUT = zrodlo(join('app', '_layout.tsx'));
+  const APP_JSON = readFileSync(join(root, 'app.json'), 'utf8');
+  const SZPACHLA = zrodlo(join('lib', 'theme.ts'));
+
+  // ── W2-0 ⛔ STRAŻNIK STRAŻNIKA — wycinki NIE SĄ PUSTE ───────────────
+  // ⚠️ Pułapka zmierzona w tym projekcie: pusty wycinek przechodzi każdy
+  // predykat postaci „nie znajduję zakazanego". Bez tej asercji cała
+  // grupa 16 świeciłaby na zielono także wtedy, gdyby pliki zniknęły.
+  check('⛔ (W2-0) STRAŻNIK STRAŻNIKA — źródła umowy, korzenia i app.json NIE SĄ puste',
+    UMOWA.length > 500 && LAYOUT.length > 500 && APP_JSON.length > 200 && SZPACHLA.length > 50,
+    `theme ${UMOWA.length} · _layout ${LAYOUT.length} · app.json ${APP_JSON.length} · lib/theme ${SZPACHLA.length}`);
+  check('⛔ (W2-0) STRAŻNIK STRAŻNIKA — każdy z ośmiu plików ekranu jest na dysku i niepusty',
+    PLIKI_EKRANOW.every((n) => existsSync(join(KAT_EKRANOW, n)) && zrodloEkranu(n).length > 500),
+    PLIKI_EKRANOW.map((n) => `${n}:${existsSync(join(KAT_EKRANOW, n)) ? zrodloEkranu(n).length : 'BRAK'}`).join(' · '));
+
+  // ── W2-1 ⛔ ANI JEDEN PLIK EKRANU NIE PODAJE NAZWY KROJU ────────────
+  // ⛔ Predykat celuje w DEKLARACJĘ (`fontFamily: '…'`), a nie w napis
+  // „Inter" gdziekolwiek w pliku: komentarz historyczny wolno mieć, wpis
+  // do arkusza stylów — nie. To jest ten sam kształt co reguła §2.4:
+  // umowa o kroju stoi w jednym miejscu i tym miejscem nie jest ekran.
+  const deklaracjeKroju = (src: string) => [...src.matchAll(/fontFamily\s*:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  {
+    const winni = PLIKI_EKRANOW
+      .map((n) => [n, deklaracjeKroju(zrodloEkranu(n))] as const)
+      .filter(([, d]) => d.length > 0);
+    check('⛔⛔ (W2-1, §2.5) ŻADEN plik ekranu nie podaje nazwy kroju wprost',
+      winni.length === 0,
+      winni.map(([n, d]) => `${n}: ${d.join(', ')}`).join(' · ')
+      + ' — krój należy do `constants/theme.ts`, nie do ekranu');
+  }
+
+  // ── W2-2 NAZWA KROJU PADA W PRODUKCIE W JEDNYM MIEJSCU ─────────────
+  // ⚠️ `lib/theme.ts` re-eksportuje `KROJE`, więc SŁOWO `KROJE` tam stoi —
+  // ⛔ ale ani jedna WARTOŚĆ (napis z nazwą rodziny) nie ma prawa tam paść.
+  const NAZWY_RODZIN = [...UMOWA.matchAll(/^\s*(?:wyswietlaniowy|tekstRegular|tekstMedium|tekstSemiBold)\s*:\s*'([^']+)'/gm)].map((m) => m[1]);
+  check('⭐ (W2-2) `KROJE` w umowie deklaruje CZTERY rodziny, każdą raz',
+    NAZWY_RODZIN.length === 4 && new Set(NAZWY_RODZIN).size === 4,
+    `znalazłem: [${NAZWY_RODZIN.join(', ')}]`);
+  check('⛔ (W2-2, §2.4) `lib/theme.ts` tylko RE-EKSPORTUJE — nie ma w nim ani jednej nazwy rodziny',
+    NAZWY_RODZIN.every((n) => !SZPACHLA.includes(`'${n}'`)),
+    `w lib/theme.ts padły: ${NAZWY_RODZIN.filter((n) => SZPACHLA.includes(`'${n}'`)).join(', ')}`);
+
+  // ── W2-3 KORZEŃ WCZYTUJE DOKŁADNIE TE RODZINY, KTÓRE DEKLARUJE UMOWA ─
+  // ⛔ RÓWNOŚĆ ZBIORÓW (O73), nie „co najmniej": rodzina wczytana, a nieużywana,
+  // jest martwym megabajtem w paczce; rodzina używana, a niewczytana, jest
+  // ekranem w kroju systemowym.
+  const kluczeUseFonts = [...LAYOUT.matchAll(/\[KROJE\.([A-Za-z]+)\]\s*:/g)].map((m) => m[1]);
+  const kluczeUmowy = [...UMOWA.matchAll(/^\s*(wyswietlaniowy|tekstRegular|tekstMedium|tekstSemiBold)\s*:/gm)].map((m) => m[1]);
+  check('⛔⛔ (W2-3, §2.1) `useFonts` wczytuje DOKŁADNIE rodziny z `KROJE` — równość zbiorów',
+    kluczeUseFonts.length === 4
+    && [...new Set(kluczeUseFonts)].sort().join('|') === [...new Set(kluczeUmowy)].sort().join('|'),
+    `_layout: [${kluczeUseFonts.join(', ')}] · umowa: [${[...new Set(kluczeUmowy)].join(', ')}]`);
+  check('⛔ (W2-3) ani jedna rodzina NIE jest wpisana w `_layout.tsx` napisem — wszystkie przez `KROJE`',
+    deklaracjeKroju(LAYOUT).length === 0 && NAZWY_RODZIN.every((n) => !LAYOUT.includes(`'${n}'`)),
+    `napisy w _layout: ${NAZWY_RODZIN.filter((n) => LAYOUT.includes(`'${n}'`)).join(', ') || deklaracjeKroju(LAYOUT).join(', ')}`);
+
+  // ── W2-4 `typography` NIE ZNA NAZWY SPOZA `KROJE` ──────────────────
+  const rodzinyTypografii = [...UMOWA.matchAll(/fontFamily\s*:\s*KROJE\.([A-Za-z]+)/g)].map((m) => m[1]);
+  check('⭐ (W2-4) każdy z pięciu stopni `typography` bierze rodzinę z `KROJE`, nie z napisu',
+    rodzinyTypografii.length === 5 && deklaracjeKroju(UMOWA).length === 0,
+    `stopni z KROJE: ${rodzinyTypografii.length}, napisów wprost: ${deklaracjeKroju(UMOWA).length}`);
+
+  // ── W2-5 ⛔ KRÓJ WYŚWIETLANIOWY NIE WCHODZI DO TEKSTU CIĄGŁEGO ──────
+  // ⛔ REGUŁA, KTÓREJ TO PILNUJE (§2.3 polecenia W2): „Bebas Neue jest krojem
+  // wersalikowym i wyświetlaniowym — nie wchodzi do tekstu ciągłego ani do
+  // zdań dla zawodnika. Nagłówki, etykiety, liczby."
+  // ⭐ ZAKRES RZECZYWISTY (O101): asercja pilnuje TRZECH stopni tekstowych
+  // (`body`, `bodyMedium`, `bodySemiBold`) i ⛔ NICZEGO WIĘCEJ. Nie zabrania
+  // kroju wyświetlaniowego w `display` ani w `displayExtraBold`, bo reguła
+  // tego nie zabrania — tam jest jego miejsce.
+  {
+    const stopnieTekstowe = ['body', 'bodyMedium', 'bodySemiBold'];
+    const wycinek = (nazwa: string) => {
+      const i = UMOWA.indexOf(`\n  ${nazwa}: {`);
+      if (i < 0) return '';
+      const k = UMOWA.indexOf('},', i);
+      return k < 0 ? '' : UMOWA.slice(i, k);
+    };
+    check('⛔ (W2-5) STRAŻNIK STRAŻNIKA — wycinek każdego stopnia tekstowego NIE JEST pusty',
+      stopnieTekstowe.every((n) => wycinek(n).length > 20),
+      stopnieTekstowe.map((n) => `${n}:${wycinek(n).length}`).join(' · '));
+    const zlamane = stopnieTekstowe.filter((n) => /KROJE\.wyswietlaniowy/.test(wycinek(n)));
+    check('⛔⛔ (W2-5, §2.3) krój WYŚWIETLANIOWY nie stoi w ŻADNYM z trzech stopni tekstu ciągłego',
+      zlamane.length === 0,
+      `złamane: ${zlamane.join(', ')} — krój wersalikowy w zdaniu dla zawodnika`);
+    check('⭐ (W2-5) …a stopnie nagłówkowe biorą go NAPRAWDĘ (inaczej asercja wyżej jest o niczym)',
+      /display:\s*\{[^}]*KROJE\.wyswietlaniowy/.test(UMOWA)
+      && /displayExtraBold:\s*\{[^}]*KROJE\.wyswietlaniowy/.test(UMOWA),
+      'nagłówki nie używają kroju wyświetlaniowego — wtedy zakaz wyżej niczego nie kosztuje');
+  }
+
+  // ── W2-6 ⛔ JAWNY STAN „KROJE JESZCZE SIĘ NIE WCZYTAŁY" ─────────────
+  // ⛔ REGUŁA (§2.1): „nie wolno pokazać ekranu w innym kroju, a potem
+  // podmienić go w locie". Predykat pyta o DWIE rzeczy naraz, bo pierwsza
+  // bez drugiej nic nie znaczy: (a) stan jest nazwany, (b) w tym stanie
+  // funkcja korzenia KOŃCZY SIĘ zwrotem bez produktu.
+  {
+    const i = LAYOUT.indexOf("stanKrojow === 'wczytuje'");
+    const wycinek = i < 0 ? '' : LAYOUT.slice(i, i + 200);
+    check('⛔ (W2-6) STRAŻNIK STRAŻNIKA — wycinek gałęzi „wczytuje" NIE JEST pusty',
+      wycinek.length > 30, `długość wycinka: ${wycinek.length}`);
+    check('⛔⛔ (W2-6, §2.1) korzeń MA jawny stan „kroje się wczytują" i w nim NIE RYSUJE produktu',
+      /stanKrojow === 'wczytuje'\)\s*\{\s*return null;/.test(LAYOUT),
+      'gałąź „wczytuje" albo nie istnieje, albo nie kończy się `return null` — '
+      + 'wtedy ekran pada w kroju systemowym i podmienia się w locie');
+    check('⭐ (W2-6) trzy stany kroju są NAZWANE, nie zaszyte w warunku',
+      /'wczytuje'\s*\|\s*'gotowe'\s*\|\s*'nie_udalo_sie'/.test(LAYOUT)
+      && LAYOUT.includes("'nie_udalo_sie'"),
+      'brak nazwanego typu StanKrojow — „nie udało się" musi być osobnym stanem, nie „gotowe"');
+  }
+
+  // ── W2-7 TŁO EKRANU STARTOWEGO I IKONY = TŁO APLIKACJI ─────────────
+  // ⛔ REGUŁA (§4.3): „Kolor tła ekranu startowego = kolor tła aplikacji,
+  // z jednego miejsca. Dwie liczby w dwóch plikach rozjadą się przy pierwszej
+  // zmianie motywu." ⚠️ `app.json` to JSON — nie zaimportuje `constants/theme.ts`.
+  // Dlatego „jedno miejsce" jest tu WYMUSZONE ASERCJĄ, a nie importem: liczba
+  // stoi w dwóch plikach, ale nie ma prawa być inna.
+  {
+    const tlaAppJson = [...APP_JSON.matchAll(/"backgroundColor"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+    check('⛔ (W2-7) STRAŻNIK STRAŻNIKA — `app.json` ma DOKŁADNIE trzy tła (splash · adaptiveIcon · wtyczka)',
+      tlaAppJson.length === 3, `znalazłem ${tlaAppJson.length}: [${tlaAppJson.join(', ')}]`);
+    check('⛔⛔ (W2-7, §4.3) KAŻDE z trzech teł w `app.json` = `colors.background` co do znaku',
+      tlaAppJson.length === 3 && tlaAppJson.every((t) => t.toLowerCase() === colors.background.toLowerCase()),
+      `app.json: [${tlaAppJson.join(', ')}] · colors.background: ${colors.background}`);
+    check('⭐ (W2-7) motyw appki zadeklarowany w `app.json` jest JASNY — tak jak paleta',
+      /"userInterfaceStyle"\s*:\s*"light"/.test(APP_JSON),
+      'appka jest jasna od pasa W1; ciemna deklaracja daje przeskok przy starcie');
+    check('⭐ (W2-7) ekran startowy i ikona biorą logo Z PAMIĘCI PROJEKTU, nie z nowego rysunku',
+      /"image"\s*:\s*"\.\/assets\/splash\.png"/.test(APP_JSON)
+      && /"foregroundImage"\s*:\s*"\.\/assets\/adaptive-icon\.png"/.test(APP_JSON)
+      && existsSync(join(root, 'assets', 'splash.png'))
+      && existsSync(join(root, 'Logo Gamechange.png')),
+      'brak wskazania na logo albo brak pliku logo w repozytorium');
+  }
+
+  // ── W2-8 i W2-9 ⛔⛔ CO NAPRAWDĘ STOI W PLIKU KROJU ─────────────────
+  // ⚠️ Poniższy czytnik jest CELOWO minimalny: tablice `head`, `hhea`, `maxp`,
+  // `cmap` (format 4 i 12), `loca` i `glyf`. Tyle wystarcza, żeby odpowiedzieć
+  // na dwa pytania, których nie wolno przyjąć na wiarę:
+  //   (1) czy krój MA glif dla polskiego znaku i czy ten glif ma kontury,
+  //   (2) jaka jest jego domyślna interlinia.
+  // ⛔ Bez (1) nagłówek „ŚRODA" traci „Ś" i nikt tego nie zobaczy, dopóki
+  // ktoś nie uruchomi aplikacji — a to jest ten sam mechanizm, przez który
+  // ten projekt stracił już raz funkcję dodania meczu przy zielonej suicie.
+  type Krój = { glifow: number; interlinia: number; kontury: (z: string) => number | null };
+  const czytajKrój = (sciezka: string): Krój => {
+    const b = readFileSync(sciezka);
+    const tab: Record<string, number> = {};
+    const ile = b.readUInt16BE(4);
+    for (let i = 0; i < ile; i++) {
+      const o = 12 + i * 16;
+      tab[b.toString('ascii', o, o + 4)] = b.readUInt32BE(o + 8);
+    }
+    const upem = b.readUInt16BE(tab.head + 18);
+    const dlugaLoca = b.readInt16BE(tab.head + 50) !== 0;
+    const glifow = b.readUInt16BE(tab.maxp + 4);
+    const interlinia = (b.readInt16BE(tab.hhea + 4) - b.readInt16BE(tab.hhea + 6)
+      + b.readInt16BE(tab.hhea + 8)) / upem;
+
+    // cmap: bierzemy najlepszą podtablicę (3,10/format 12 › 3,1/format 4)
+    const c = tab.cmap;
+    let naj = { off: 0, fmt: 0, pkt: -1 };
+    for (let i = 0; i < b.readUInt16BE(c + 2); i++) {
+      const p = c + 4 + i * 8;
+      const plat = b.readUInt16BE(p); const enc = b.readUInt16BE(p + 2);
+      const off = c + b.readUInt32BE(p + 4); const fmt = b.readUInt16BE(off);
+      const pkt = (plat === 3 && enc === 10 && fmt === 12) ? 3
+        : (plat === 3 && enc === 1 && fmt === 4) ? 2 : (fmt === 4 || fmt === 12) ? 1 : 0;
+      if (pkt > naj.pkt) naj = { off, fmt, pkt };
+    }
+    const mapa = new Map<number, number>();
+    if (naj.fmt === 4) {
+      const o = naj.off; const segX2 = b.readUInt16BE(o + 6);
+      const koniecO = o + 14; const startO = koniecO + segX2 + 2;
+      const deltaO = startO + segX2; const zakresO = deltaO + segX2;
+      for (let s = 0; s < segX2 / 2; s++) {
+        const kon = b.readUInt16BE(koniecO + s * 2); const sta = b.readUInt16BE(startO + s * 2);
+        const del = b.readInt16BE(deltaO + s * 2); const zak = b.readUInt16BE(zakresO + s * 2);
+        if (sta === 0xffff) continue;
+        for (let z = sta; z <= kon && z !== 0x10000; z++) {
+          let g: number;
+          if (zak === 0) g = (z + del) & 0xffff;
+          else {
+            const gi = zakresO + s * 2 + zak + (z - sta) * 2;
+            if (gi + 1 >= b.length) continue;
+            g = b.readUInt16BE(gi);
+            if (g !== 0) g = (g + del) & 0xffff;
+          }
+          if (g !== 0) mapa.set(z, g);
+        }
+      }
+    } else if (naj.fmt === 12) {
+      const o = naj.off;
+      for (let i = 0; i < b.readUInt32BE(o + 12); i++) {
+        const p = o + 16 + i * 12;
+        const s = b.readUInt32BE(p); const e = b.readUInt32BE(p + 4); const gs = b.readUInt32BE(p + 8);
+        for (let z = s; z <= e; z++) mapa.set(z, gs + (z - s));
+      }
+    }
+    const loca = (g: number) => dlugaLoca
+      ? b.readUInt32BE(tab.loca + g * 4) : b.readUInt16BE(tab.loca + g * 2) * 2;
+    const konturyGlifu = (g: number, gl = 0): number => {
+      if (g >= glifow || gl > 5) return 0;
+      const a = loca(g); const z = loca(g + 1);
+      if (z <= a) return 0;
+      const o = tab.glyf + a; const nc = b.readInt16BE(o);
+      if (nc >= 0) return nc;
+      let p = o + 10; let suma = 0; let flagi = 0;
+      do {
+        flagi = b.readUInt16BE(p);
+        suma += konturyGlifu(b.readUInt16BE(p + 2), gl + 1);
+        p += 4;
+        p += (flagi & 1) ? 4 : 2;
+        if (flagi & 8) p += 2; else if (flagi & 0x40) p += 4; else if (flagi & 0x80) p += 8;
+      } while (flagi & 0x20);
+      return suma;
+    };
+    return {
+      glifow,
+      interlinia,
+      kontury: (z: string) => {
+        const g = mapa.get(z.codePointAt(0) as number);
+        return g === undefined ? null : konturyGlifu(g);
+      },
+    };
+  };
+
+  const KROJE_NA_DYSKU = [
+    ['wyświetlaniowy · Bebas Neue 400', '@expo-google-fonts/bebas-neue/400Regular/BebasNeue_400Regular.ttf', INTERLINIA_KROJU.wyswietlaniowy],
+    ['tekst · DM Sans 400', '@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf', INTERLINIA_KROJU.tekst],
+    ['tekst · DM Sans 500', '@expo-google-fonts/dm-sans/500Medium/DMSans_500Medium.ttf', INTERLINIA_KROJU.tekst],
+    ['tekst · DM Sans 600', '@expo-google-fonts/dm-sans/600SemiBold/DMSans_600SemiBold.ttf', INTERLINIA_KROJU.tekst],
+  ] as const;
+  const POLSKIE_WIELKIE = [...'ĄĆĘŁŃÓŚŹŻ'];
+  const POLSKIE_MALE = [...'ąćęłńóśźż'];
+
+  for (const [nazwa, wzgledna, zadeklarowana] of KROJE_NA_DYSKU) {
+    const sciezka = join(root, 'node_modules', ...wzgledna.split('/'));
+    // ⛔ Brak pliku to NIE jest „pominięte": to jest krój, którego appka nie ma
+    // czym narysować. Czerwień z nazwą paczki jest tu jedyną uczciwą odpowiedzią.
+    if (!existsSync(sciezka)) {
+      check(`⛔⛔ (W2-8) plik kroju „${nazwa}" leży w node_modules`, false,
+        `brak ${wzgledna} — paczka nie jest zainstalowana, appka nie ma czym rysować`);
+      continue;
+    }
+    const k = czytajKrój(sciezka);
+    const brakujace = [...POLSKIE_WIELKIE, ...POLSKIE_MALE]
+      .filter((z) => { const kon = k.kontury(z); return kon === null || kon <= 0; });
+    check(`⛔⛔ (W2-8, §2.2) „${nazwa}" ma WŁASNY, NIEPUSTY glif dla wszystkich 18 polskich znaków`,
+      brakujace.length === 0,
+      `bez glifu albo z pustym glifem: ${brakujace.join(' ')} (glifów w kroju: ${k.glifow}) — `
+      + 'nagłówek „ŚRODA" bez „Ś" jest gorszy niż nagłówek w Archivo');
+    check(`⭐ (W2-9) „${nazwa}": interlinia z pliku zgadza się z `
+      + `\`INTERLINIA_KROJU\` (${zadeklarowana})`,
+      Math.abs(k.interlinia - zadeklarowana) < 0.002,
+      `w pliku ${k.interlinia.toFixed(4)}, zadeklarowano ${zadeklarowana} — `
+      + 'deklaracja, której nikt nie sprawdza, starzeje się jak komentarz (O84)');
+  }
+
+  // ⛔ ZNALEZISKO PASA W2, ZAPISANE JAKO ASERCJA, A NIE JAKO PRZYPIS.
+  // Bebas Neue NIE MA znaku `→` (U+2192), a ten znak pada w produkcie
+  // (m.in. „Nowa porcja w Twoim Bloku →"). Dopóki strzałka stoi wyłącznie
+  // w tekście ciągłym, rysuje ją DM Sans i wszystko jest w porządku.
+  // ⭐ Ta asercja pilnuje, że tak zostanie: gdyby ktoś wstawił strzałkę
+  // do stopnia nagłówkowego, zobaczyłby kwadrat zamiast strzałki.
+  {
+    const sciezkaBebas = join(root, 'node_modules', '@expo-google-fonts', 'bebas-neue',
+      '400Regular', 'BebasNeue_400Regular.ttf');
+    const sciezkaDm = join(root, 'node_modules', '@expo-google-fonts', 'dm-sans',
+      '400Regular', 'DMSans_400Regular.ttf');
+    if (existsSync(sciezkaBebas) && existsSync(sciezkaDm)) {
+      const bebas = czytajKrój(sciezkaBebas);
+      const dm = czytajKrój(sciezkaDm);
+      check('⚠️ (W2-8) ZNALEZISKO W2: krój wyświetlaniowy NIE MA znaku „→" — i to jest udokumentowane, nie ukryte',
+        bebas.kontury('→') === null,
+        'Bebas Neue dostał glif „→" — wtedy ten wpis w nocie pasa W2 jest nieaktualny');
+      check('⭐ (W2-8) …ale krój tekstu ciągłego MA go, więc strzałka w zdaniu rysuje się poprawnie',
+        (dm.kontury('→') ?? 0) > 0,
+        'DM Sans nie ma „→" — strzałka w tekście zawodnika narysuje się jako kwadrat');
+    }
+  }
+
+  // ── W2-10 ⛔ ŻADNA ZAPADKA PIĘCIU EKRANÓW NIE STOI PONAD ZGIĘCIEM ───
+  // ⛔ REGUŁA, KTÓREJ TO PILNUJE (§3.2 polecenia W2): „Żaden ekran nie może
+  // przekroczyć linii zgięcia. Jeżeli przekroczy — ZATRZYMAJ SIĘ I NAPISZ,
+  // nie podnoś zapadki ponad zgięcie."
+  //
+  // ⭐⭐ ZAKRES RZECZYWISTY, NIE SKRÓT (O101). Reguła mówi o PIĘCIU EKRANACH
+  // ZAKŁADEK i o niczym więcej. ⛔ Predykat „każda liczba `wysokosc*Dp` w tym
+  // pliku mieści się nad zgięciem" byłby SZERSZY NIŻ REGUŁA i zapaliłby się
+  // na `ZAPADKA_TYDZIEN` (1 466 dp) — a to jest zapadka ZAKŁADKI Kalendarza,
+  // o której ten sam plik 60 wierszy niżej asercją stwierdza, że nad zgięciem
+  // się NIE MIEŚCI, i tak ma być. Strażnik szerszy niż jego reguła jest
+  // defektem strażnika, nie odkryciem — dlatego wycinek jest zakotwiczony
+  // na `ZAPADKA_DZIS` … `ZAPADKI_POZOSTALE`.
+  {
+    const ja = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const od = ja.indexOf(`const ZAPADKA${'_DZIS'} = {`);
+    const doo = ja.indexOf('\n];', ja.indexOf(`const ZAPADKI${'_POZOSTALE'} = [`));
+    const wycinek = (od >= 0 && doo > od) ? ja.slice(od, doo) : '';
+    check('⛔ (W2-10) STRAŻNIK STRAŻNIKA — wycinek z zapadkami pięciu ekranów NIE JEST pusty',
+      wycinek.length > 500, `długość wycinka: ${wycinek.length} — kotwica przestała pasować`);
+    const zapadki = [...wycinek.matchAll(new RegExp(`${POLE_ZAPADKI}:\\s*(\\d+)`, 'g'))].map((m) => Number(m[1]));
+    check('⛔ (W2-10) STRAŻNIK STRAŻNIKA — w wycinku stoi DOKŁADNIE PIĘĆ zapadek wysokości',
+      zapadki.length === 5, `znalazłem ${zapadki.length}: [${zapadki.join(', ')}]`);
+    check('⛔⛔ (W2-10, §3.2) ANI JEDNA zapadka PIĘCIU EKRANÓW nie została podniesiona ponad zgięcie',
+      zapadki.length === 5 && zapadki.every((z) => z <= WIDOCZNE_NAD_ZGIECIEM_DP),
+      `ponad ${WIDOCZNE_NAD_ZGIECIEM_DP} dp: [${zapadki.filter((z) => z > WIDOCZNE_NAD_ZGIECIEM_DP).join(', ')}]`);
+  }
+
+  // ── W2-11 ⛔⛔ ZAPADKA NA ROZJAZD MODELU Z KROJEM ───────────────────
+  // ⭐⭐ TO JEST NAJWAŻNIEJSZE ZNALEZISKO PASA W2 I STOI TU JAKO ZAPADKA,
+  // A NIE JAKO PRZYPIS.
+  //
+  // `lib/wysokoscEkranu.ts` szacuje wysokość wiersza tekstu STAŁĄ, gdy styl
+  // nie podaje `lineHeight`. Ta stała opisuje krój — a krój właśnie się zmienił:
+  //     Archivo 1,088 · Inter 1,210   →   Bebas 1,200 · DM Sans 1,302
+  // ⛔ Dla starej pary stała 1,25 była GÓRNYM szacunkiem (błąd w górę, czyli
+  // w stronę bezpieczną przy linii zgięcia). Dla nowej pary jest NIŻSZA niż
+  // interlinia kroju tekstu — czyli po raz pierwszy myli się OPTYMISTYCZNIE.
+  //
+  // ⛔ PAS W2 TEJ STAŁEJ NIE RUSZYŁ: `lib/wysokoscEkranu.ts` nie jest jego
+  // plikiem, a jej zmiana pociąga zapadkę w `lib/drogaDodania.selftest.ts`
+  // (pas K1). Skutek policzony co do dp i oddany jako kontrakt w nocie
+  // `claude/PRZEKAZANIE_PAS_W2_21_08_2026.md`.
+  //
+  // ⭐ CZEGO PILNUJE TA ZAPADKA: żeby rozjazd nie urósł ani nie zniknął PO CICHU.
+  // Zmiana stałej w silniku ALBO zmiana kroju zapala ją na czerwono i każe
+  // przepisać obie liczby z datą i powodem — dokładnie tak jak każdą inną
+  // zapadkę w tym pliku. ⛔ Zapadka nie twierdzi, że stan jest dobry.
+  // Twierdzi, że jest ZNANY.
+  {
+    // ⭐ SONDA — odzyskuje stałą interlinii z SILNIKA, nie z jego źródła.
+    // Jeden `Text` bez `lineHeight`, o rozmiarze, przy którym jedno „x" na pewno
+    // mieści się w jednym wierszu: wysokość podzielona przez rozmiar pisma JEST
+    // tą stałą. ⛔ Czytanie liczby z tekstu pliku dałoby to samo tylko dopóty,
+    // dopóki nikt nie policzy jej ze zmiennej.
+    const ROZMIAR_SONDY = 100;
+    const SONDA = `
+import { View, Text, StyleSheet } from 'react-native';
+export default function Sonda() {
+  return (<View style={styles.k}><Text style={styles.t}>x</Text></View>);
+}
+const styles = StyleSheet.create({ k: {}, t: { fontSize: ${ROZMIAR_SONDY} } });
+`;
+    const sonda = zmierzEkranZTekstu('sonda-interlinii.tsx', SONDA, KAT_EKRANOW);
+    const interliniaModelu = Math.round((sonda.wysokoscRazemDp / ROZMIAR_SONDY) * 1000) / 1000;
+
+    const ZAPADKA_ROZJAZDU = {
+      /** Stała, którą liczy `lib/wysokoscEkranu.ts`, gdy styl nie podaje `lineHeight`. */
+      interliniaModelu: 1.25,
+      /** Największa interlinia WCZYTANEGO kroju — DM Sans, sprawdzona z pliku `.ttf` (W2-9). */
+      interliniaKroju: 1.302,
+      ustawiona: '21.08.2026',
+      powod: 'pas W2 — kroje zmienione na Bebas Neue + DM Sans; stała modelu (1,25) '
+        + 'przestała być górnym szacunkiem, bo DM Sans ma interlinię 1,302. '
+        + 'Pas W2 nie ruszył `lib/wysokoscEkranu.ts` (nie jego plik) i oddał to '
+        + 'jako kontrakt: przy stałej 1,31 pięć ekranów mierzy się na 803,7 · 638,0 · '
+        + '763,1 · 798,0 · 782,1 dp, czyli WSZYSTKIE nadal nad zgięciem, ale „Dziś" '
+        + 'z zapasem 4,3 dp zamiast 17,5',
+    };
+
+    check('⛔ (W2-11) STRAŻNIK STRAŻNIKA — sonda interlinii mierzy JEDEN wiersz, nie dwa',
+      sonda.pozycje.length === 1 && sonda.wysokoscRazemDp > ROZMIAR_SONDY,
+      `pozycji ${sonda.pozycje.length}, dp ${sonda.wysokoscRazemDp} — sonda nie mierzy tego, co miała`);
+    check('⛔⛔ (W2-11) ZAPADKA: stała interlinii w MODELE nie zmieniła się po cichu',
+      interliniaModelu === ZAPADKA_ROZJAZDU.interliniaModelu,
+      `sonda oddała ${interliniaModelu}, zapadka ${ZAPADKA_ROZJAZDU.interliniaModelu} `
+      + `(${ZAPADKA_ROZJAZDU.ustawiona}). Jeżeli to Ty ją przestawiłeś — przepisz obie liczby `
+      + 'w tej zapadce z datą i powodem, i przelicz zapadki pięciu ekranów.');
+    check('⛔⛔ (W2-11) ZAPADKA: interlinia KROJU tekstu nie zmieniła się po cichu',
+      INTERLINIA_KROJU.tekst === ZAPADKA_ROZJAZDU.interliniaKroju,
+      `umowa mówi ${INTERLINIA_KROJU.tekst}, zapadka ${ZAPADKA_ROZJAZDU.interliniaKroju}`);
+    check('⚠️ (W2-11) ROZJAZD JEST ZNANY I NAZWANY — model liczy NIŻSZĄ interlinię niż krój tekstu',
+      ZAPADKA_ROZJAZDU.interliniaModelu < ZAPADKA_ROZJAZDU.interliniaKroju,
+      'rozjazd zniknął — to dobra wiadomość, ale zapadkę trzeba wtedy zdjąć z datą i powodem, '
+      + 'a nie zostawić zieloną o nieistniejącym stanie');
+    check('⭐ (W2-11) zapadka rozjazdu ma datę i powód — bez nich jest liczbą bez właściciela',
+      /^\d{2}\.\d{2}\.\d{4}$/.test(ZAPADKA_ROZJAZDU.ustawiona) && ZAPADKA_ROZJAZDU.powod.length > 20,
+      `${ZAPADKA_ROZJAZDU.ustawiona} / ${ZAPADKA_ROZJAZDU.powod.length} znaków powodu`);
+
+    console.log(`\n   ⚠️ ROZJAZD MODELU Z KROJEM (kontrakt W2): model liczy ${interliniaModelu}, `
+      + `krój tekstu ma ${INTERLINIA_KROJU.tekst}, krój nagłówków ${INTERLINIA_KROJU.wyswietlaniowy}.`);
+    console.log('   ⛔ Skutek policzony: pięć ekranów zakładek przy stałej 1,31 → '
+      + '803,7 · 638,0 · 763,1 · 798,0 · 782,1 dp. Wszystkie nadal nad zgięciem.');
+    console.log('   ⭐ Pełny rachunek i jednolinijkowy kontrakt: claude/PRZEKAZANIE_PAS_W2_21_08_2026.md');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // 16.1 ⭐⭐ BATERIA MUTACJI PASA W2 — na PRAWDZIWYCH plikach, w pamięci
+  // ═══════════════════════════════════════════════════════════════════
+  // ⭐ WZORZEC: mutujemy TEKST wczytany do pamięci, nie plik na dysku.
+  // Nie ma stanu na dysku, więc nie ma czego przywracać — przerwanie
+  // procesu nie zostawia zatrutego pliku produktu.
+  // ⭐ KOLEJNOŚĆ NIENEGOCJOWALNA: asercja odwrotna NAJPIERW.
+  type PrawdaW2 = { umowa: string; layout: string; appjson: string; ekran: string; zapadki: string };
+  const PRAWDA_W2: PrawdaW2 = {
+    umowa: UMOWA_Z_KOMENTARZAMI,
+    layout: readFileSync(join(root, 'app', '_layout.tsx'), 'utf8'),
+    appjson: APP_JSON,
+    ekran: readFileSync(join(KAT_EKRANOW, 'dzis.tsx'), 'utf8'),
+    zapadki: readFileSync(fileURLToPath(import.meta.url), 'utf8'),
+  };
+
+  const BATERIA_W2: { nazwa: string; sprawdz: (s: PrawdaW2) => boolean }[] = [
+    {
+      nazwa: 'W2-1 ⛔ żaden plik ekranu nie podaje nazwy kroju wprost',
+      sprawdz: (s) => deklaracjeKroju(bezKomentarzy(s.ekran)).length === 0,
+    },
+    {
+      nazwa: 'W2-3 ⛔ `useFonts` bierze rodziny z `KROJE`, nie z napisu',
+      sprawdz: (s) => {
+        const l = bezKomentarzy(s.layout);
+        return deklaracjeKroju(l).length === 0
+          && [...l.matchAll(/\[KROJE\.([A-Za-z]+)\]\s*:/g)].length === 4;
+      },
+    },
+    {
+      nazwa: 'W2-5 ⛔ krój wyświetlaniowy nie wchodzi do tekstu ciągłego',
+      sprawdz: (s) => {
+        const u = bezKomentarzy(s.umowa);
+        return ['body', 'bodyMedium', 'bodySemiBold'].every((n) => {
+          const i = u.indexOf(`\n  ${n}: {`);
+          if (i < 0) return false;
+          const k = u.indexOf('},', i);
+          return k > i && !/KROJE\.wyswietlaniowy/.test(u.slice(i, k));
+        });
+      },
+    },
+    {
+      nazwa: 'W2-6 ⛔ jest jawny stan „wczytuje" i w nim produkt NIE jest rysowany',
+      sprawdz: (s) => /stanKrojow === 'wczytuje'\)\s*\{\s*return null;/.test(bezKomentarzy(s.layout)),
+    },
+    {
+      nazwa: 'W2-7 ⛔ tło ekranu startowego i ikony = tło aplikacji',
+      sprawdz: (s) => {
+        const t = [...s.appjson.matchAll(/"backgroundColor"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+        return t.length === 3 && t.every((x) => x.toLowerCase() === colors.background.toLowerCase());
+      },
+    },
+    {
+      nazwa: 'W2-9 ⛔ zadeklarowana interlinia zgadza się z plikiem kroju',
+      sprawdz: (s) => {
+        const m = /tekst:\s*([0-9.]+)/.exec(bezKomentarzy(s.umowa));
+        const sciezka = join(root, 'node_modules', '@expo-google-fonts', 'dm-sans',
+          '400Regular', 'DMSans_400Regular.ttf');
+        if (!m || !existsSync(sciezka)) return false;
+        return Math.abs(czytajKrój(sciezka).interlinia - Number(m[1])) < 0.002;
+      },
+    },
+    {
+      nazwa: 'W2-10 ⛔ żadna zapadka pięciu ekranów nie stoi ponad zgięciem',
+      sprawdz: (s) => {
+        const od = s.zapadki.indexOf(`const ZAPADKA${'_DZIS'} = {`);
+        const doo = s.zapadki.indexOf('\n];', s.zapadki.indexOf(`const ZAPADKI${'_POZOSTALE'} = [`));
+        if (od < 0 || doo <= od) return false;
+        const z = [...s.zapadki.slice(od, doo).matchAll(new RegExp(`${POLE_ZAPADKI}:\\s*(\\d+)`, 'g'))]
+          .map((m) => Number(m[1]));
+        return z.length === 5 && z.every((w) => w <= WIDOCZNE_NAD_ZGIECIEM_DP);
+      },
+    },
+  ];
+
+  // ── 16.1a ⭐⭐ ASERCJA ODWROTNA — NAJPIERW ──────────────────────────
+  // ⛔ Bez niej „każda mutacja coś zapala" jest prawdą także dla baterii,
+  // która zapala się ZAWSZE. Na prawdziwych plikach ma być ZERO zapaleń.
+  {
+    const zapalone = BATERIA_W2.filter((p) => !p.sprawdz(PRAWDA_W2)).map((p) => p.nazwa);
+    check('⭐⭐ (W2-B0) ASERCJA ODWROTNA: na PRAWDZIWYCH plikach bateria W2 ma ZERO zapaleń',
+      zapalone.length === 0,
+      `zapalone bez żadnej mutacji: ${zapalone.join(' · ')}`);
+  }
+
+  const MUTACJE_W2: { nazwa: string; coPsuje: string; zastosuj: (s: PrawdaW2) => PrawdaW2 }[] = [
+    {
+      nazwa: 'nazwa kroju wraca do pliku ekranu',
+      coPsuje: 'umowa o kroju przestaje stać w jednym miejscu — ekran dyktuje własny krój',
+      zastosuj: (s) => ({ ...s, ekran: s.ekran.replace('...typography.display, fontSize: 26', "fontFamily: 'Inter-Regular', fontSize: 26") }),
+    },
+    {
+      nazwa: 'krój wczytywany BEZ obsługi stanu „jeszcze nie ma"',
+      coPsuje: 'produkt rysuje się w kroju systemowym i podmienia go w locie (§2.1)',
+      zastosuj: (s) => ({ ...s, layout: s.layout.replace(/if \(stanKrojow === 'wczytuje'\) \{\s*\n\s*return null;\s*\n\s*\}/, '') }),
+    },
+    {
+      nazwa: 'tło ekranu startowego rozjeżdża się z tłem aplikacji',
+      coPsuje: 'przy każdym uruchomieniu widać przeskok z ciemnego na jasne (§4.1, §4.3)',
+      zastosuj: (s) => ({ ...s, appjson: s.appjson.replace('"backgroundColor": "#f5f2ec"', '"backgroundColor": "#0E0D0B"') }),
+    },
+    {
+      nazwa: 'krój wyświetlaniowy wchodzi do tekstu ciągłego',
+      coPsuje: 'zdanie dla zawodnika rysuje się wersalikami krojem wyświetlaniowym (§2.3)',
+      zastosuj: (s) => ({ ...s, umowa: s.umowa.replace('fontFamily: KROJE.tekstRegular', 'fontFamily: KROJE.wyswietlaniowy') }),
+    },
+    {
+      nazwa: 'zapadka wysokości podniesiona ponad linię zgięcia',
+      coPsuje: 'zgoda na ekran, którego nie widać bez przewijania (§3.2)',
+      zastosuj: (s) => ({ ...s, zapadki: s.zapadki.replace(`${POLE_ZAPADKI}: 791`, `${POLE_ZAPADKI}: 891`) }),
+    },
+    {
+      nazwa: 'rodzina wpisana w `_layout.tsx` napisem zamiast z `KROJE`',
+      coPsuje: 'przemianowanie rodziny w umowie przestaje docierać do tego, co appka wczytuje',
+      zastosuj: (s) => ({ ...s, layout: s.layout.replace('[KROJE.tekstMedium]:', "'DMSans-Medium':") }),
+    },
+    {
+      nazwa: 'zadeklarowana interlinia kroju rozjeżdża się z plikiem TTF',
+      coPsuje: 'miara wysokości liczy z liczby, której w pliku kroju nie ma (O84)',
+      zastosuj: (s) => ({ ...s, umowa: s.umowa.replace(/tekst:\s*1\.302/, 'tekst: 1.21') }),
+    },
+  ];
+
+  console.log('\n16.1b ⭐⭐ BATERIA MUTACJI W2 — siedem mutacji na prawdziwych plikach');
+  let niemeW2 = 0;
+  for (const m of MUTACJE_W2) {
+    const zm = m.zastosuj(PRAWDA_W2);
+    const zmienil = (Object.keys(PRAWDA_W2) as (keyof PrawdaW2)[]).some((k) => zm[k] !== PRAWDA_W2[k]);
+    const zapalone = BATERIA_W2.filter((p) => !p.sprawdz(zm)).map((p) => p.nazwa);
+    console.log(`\n   ${m.nazwa}\n   co psuje: ${m.coPsuje}`);
+    console.log(`   zapalone predykaty: ${zapalone.length} / ${BATERIA_W2.length}`);
+    zapalone.forEach((n) => console.log(`      ↳ ${n}`));
+    check(`⭐ (W2-B) mutacja „${m.nazwa}" NAPRAWDĘ zmienia źródło (inaczej bateria bada nic)`,
+      zmienil, 'wzorzec podmiany nie trafił — mutacja jest atrapą');
+    check(`⭐ (W2-B) mutacja „${m.nazwa}" ZAPALA strażnika imiennie`,
+      zapalone.length > 0, 'mutacja przeszła niezauważona — strażnika na tę regułę NIE MA');
+    if (zapalone.length === 0) niemeW2++;
+  }
+  check('⭐⭐ (W2-B) ANI JEDNA z siedmiu mutacji nie przeszła niezauważona',
+    niemeW2 === 0, `nieme mutacje: ${niemeW2}`);
+
+  // ── 16.1c ⛔ …I PLIKI NA DYSKU SĄ PO BATERII NIETKNIĘTE ─────────────
+  check('⛔ (W2-B) po całej baterii pięć plików źródłowych jest CO DO ZNAKU takich samych',
+    readFileSync(join(root, 'constants', 'theme.ts'), 'utf8') === PRAWDA_W2.umowa
+    && readFileSync(join(root, 'app', '_layout.tsx'), 'utf8') === PRAWDA_W2.layout
+    && readFileSync(join(root, 'app.json'), 'utf8') === PRAWDA_W2.appjson
+    && readFileSync(join(KAT_EKRANOW, 'dzis.tsx'), 'utf8') === PRAWDA_W2.ekran
+    && readFileSync(fileURLToPath(import.meta.url), 'utf8') === PRAWDA_W2.zapadki,
+    'bateria zostawiła po sobie zmieniony plik — mutowaliśmy dysk, nie pamięć');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
